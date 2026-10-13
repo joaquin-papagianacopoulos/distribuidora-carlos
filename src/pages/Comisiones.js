@@ -7,6 +7,7 @@ import {
   armarDashboard, puedeCerrar, firmaDashboard, periodoPorDefecto, validarPeriodo,
   setAsignacionBorrador, CONFIG_COMISIONES, puedeVerComisiones, contarPendientesServidor,
   confirmarAsignacionBorrador, asignacionLineaValida, pedidoIdComision, buscarCliente,
+  ayudaAnulacion,
 } from '../domain/comisiones';
 import { permisoValido } from '../domain/permisos';
 import { vendedoresParaSelector } from '../domain/vendedores';
@@ -202,7 +203,10 @@ const Historial = ({ cierres, onPdf, onAnular, procesando }) => {
   const [anulando, setAnulando] = useState(null);
   const [motivo, setMotivo] = useState('');
   const [pin, setPin] = useState('');
-  const cerrarForm = () => { setAnulando(null); setPin(''); };
+  // C2 (AC-COM-12): error del servidor mostrado debajo del formulario, que
+  // queda abierto. Se limpia al editar el motivo o el PIN, o con "Volver".
+  const [errorAnular, setErrorAnular] = useState(null);
+  const cerrarForm = () => { setAnulando(null); setPin(''); setErrorAnular(null); };
   const lista = [...(cierres || [])].sort((a, b) => Number(b.cerradoAt || 0) - Number(a.cerradoAt || 0));
   return (
     <div className="card" data-testid="historial">
@@ -235,33 +239,49 @@ const Historial = ({ cierres, onPdf, onAnular, procesando }) => {
               <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => onPdf(c)}>PDF</button>
             )}
             {c.estado === 'vigente' && !c.anulacionPendiente && anulando !== c.id && (
-              <button type="button" className="btn btn-danger btn-sm" style={{ width: 'auto' }} onClick={() => { setAnulando(c.id); setMotivo(''); setPin(''); }}>Anular</button>
+              <button type="button" className="btn btn-danger btn-sm" style={{ width: 'auto' }} onClick={() => { setAnulando(c.id); setMotivo(''); setPin(''); setErrorAnular(null); }}>Anular</button>
             )}
           </div>
-          {anulando === c.id && (
-            <div style={{ marginTop: 6 }}>
-              <label className="input-label" htmlFor={`motivo-${c.id}`}>Motivo de la anulación (obligatorio)</label>
-              <textarea id={`motivo-${c.id}`} className="input" maxLength={300} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
-              <CampoPin id={`pin-anular-${c.id}`} value={pin} onChange={setPin} />
-              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={cerrarForm}>Volver</button>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm"
-                  style={{ width: 'auto' }}
-                  disabled={procesando || motivo.trim().length < 3 || !pin.trim()}
-                  onClick={async () => {
-                    const pinUsado = pin;
-                    setPin('');
-                    const ok = await onAnular(c, motivo, pinUsado);
-                    if (ok) cerrarForm();
-                  }}
-                >
-                  Confirmar anulación
-                </button>
+          {anulando === c.id && (() => {
+            const estadoBoton = ayudaAnulacion({ motivo, pin, procesando });
+            return (
+              <div style={{ marginTop: 6 }}>
+                <label className="input-label" htmlFor={`motivo-${c.id}`}>Motivo de la anulación (obligatorio)</label>
+                <textarea id={`motivo-${c.id}`} className="input" maxLength={300} value={motivo} onChange={(e) => { setMotivo(e.target.value); setErrorAnular(null); }} />
+                <CampoPin id={`pin-anular-${c.id}`} value={pin} onChange={(v) => { setPin(v); setErrorAnular(null); }} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={cerrarForm}>Volver</button>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    style={{ width: 'auto' }}
+                    disabled={!estadoBoton.habilitado}
+                    aria-describedby={estadoBoton.ayuda ? `ayuda-anular-${c.id}` : undefined}
+                    onClick={async () => {
+                      const pinUsado = pin;
+                      setPin('');
+                      setErrorAnular(null);
+                      const r = await onAnular(c, motivo, pinUsado);
+                      if (r?.ok) cerrarForm();
+                      else setErrorAnular(r?.mensaje || 'No se pudo anular el cierre.');
+                    }}
+                  >
+                    Confirmar anulación
+                  </button>
+                </div>
+                {estadoBoton.ayuda && (
+                  <div id={`ayuda-anular-${c.id}`} data-testid={`ayuda-anular-${c.id}`} style={{ marginTop: 4, fontSize: 12, color: 'var(--text3)' }}>
+                    {estadoBoton.ayuda}
+                  </div>
+                )}
+                {errorAnular && (
+                  <div role="alert" data-testid={`error-anular-${c.id}`} style={{ marginTop: 4, fontSize: 13, color: 'var(--danger)' }}>
+                    {errorAnular}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       ))}
     </div>
@@ -359,7 +379,14 @@ const Comisiones = () => {
       const r = await anularCierre(cierre, motivo, pinAnular);
       setMensaje({ tipo: r.ok ? 'ok' : 'error', texto: r.ok ? 'Cierre anulado: sus pedidos vuelven a estar disponibles.' : r.mensaje });
       await cargar();
-      return r.ok;
+      // C2: { ok, mensaje } para que el Historial muestre el error inline.
+      return { ok: !!r.ok, mensaje: r.ok ? null : r.mensaje };
+    } catch (err) {
+      // BUG-COM-01: si el servicio lanza (p. ej. un error de IndexedDB), el
+      // error se muestra inline en el formulario en vez de perderse.
+      const texto = `No se pudo anular el cierre: ${err?.message || String(err)}`;
+      setMensaje({ tipo: 'error', texto });
+      return { ok: false, mensaje: texto };
     } finally {
       setProcesando(false);
     }

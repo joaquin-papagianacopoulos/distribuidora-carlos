@@ -302,3 +302,69 @@ describe('AC-BUL-9 Armado: unidad por defecto', () => {
     expect(JSON.stringify(pedidoFinal.items)).not.toContain('_key');
   });
 });
+
+// C3 / C4 (RUN 20261012-2106)
+describe('S-BUL-06 S-BUL-08 Armado', () => {
+  const tipear = async (input, valor) => {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, valor);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  test('AC-BUL-7 S-BUL-06 Armado: tipear 2000000 no cambia la cantidad; "1.000.000" se toma como 1000000', async () => {
+    window.alert = jest.fn();
+    setApp();
+    await abrirArmado();
+    const input = [...container.querySelectorAll('input[inputmode="numeric"]')].find(i => i.value === '5');
+    await tipear(input, '2000000');
+    expect(cantidades()).toContain('5');
+    expect(cantidades()).not.toContain('2000000');
+    await tipear(input, '1.000.000');
+    expect(cantidades()).toContain('1000000');
+  });
+
+  test('AC-BUL-7 S-BUL-06 Armado: restaurar un tachado cuya suma supera el tope no fusiona; al guardar avisa y no guarda', async () => {
+    window.alert = jest.fn();
+    setApp({
+      pedidos: [pedido({
+        items: [{ productoId: 'p1', nombre: 'Coca 500', precio: 10, cantidad: 600000 }],
+        armadoLog: { confirmados: [], removidos: [{ productoId: 'p1', nombre: 'Coca 500', cantidad: 500000, precio: 10 }] },
+      })],
+    });
+    await abrirArmado();
+    const ticks = () => [...container.querySelectorAll('button')].filter(b => b.textContent === '\u2713');
+    expect(ticks()).toHaveLength(2);
+    // El tachado es el que muestra "Sacado ×500000".
+    const cardTachado = [...container.querySelectorAll('div')].filter(d => d.textContent.includes('Sacado') && d.querySelector('button')).pop();
+    await click(cardTachado.querySelector('button'));
+    // No se fusionó: quedan dos renglones activos (600000 y 500000).
+    expect(cantidades()).toEqual(expect.arrayContaining(['600000', '500000']));
+    await click(boton('Guardar cambios'));
+    expect(guardarPedidoOnlineFirst).not.toHaveBeenCalled();
+    expect(window.alert).toHaveBeenCalledWith('Cantidad inválida en: Coca 500 (máximo 1.000.000)');
+  });
+
+  test('AC-BUL-7 Armado: restaurar un tachado dentro del tope sigue fusionando como antes', async () => {
+    setApp({
+      pedidos: [pedido({
+        items: [{ productoId: 'p1', nombre: 'Coca 500', precio: 10, cantidad: 6 }],
+        armadoLog: { confirmados: [], removidos: [{ productoId: 'p1', nombre: 'Coca 500', cantidad: 5, precio: 10 }] },
+      })],
+    });
+    await abrirArmado();
+    const cardTachado = [...container.querySelectorAll('div')].filter(d => d.textContent.includes('Sacado') && d.querySelector('button')).pop();
+    await click(cardTachado.querySelector('button'));
+    expect(cantidades()).toEqual(['11']);
+    await click(boton('Guardar cambios'));
+    const [pedidoFinal] = guardarPedidoOnlineFirst.mock.calls[0];
+    expect(pedidoFinal.items).toEqual([expect.objectContaining({ productoId: 'p1', cantidad: 11 })]);
+  });
+
+  test('AC-BUL-1 S-BUL-08 Armado: sin match por id no hay botón aunque exista un homónimo con bulto', async () => {
+    setApp({ productos: [{ id: 'pX', nombre: 'Coca 500', precio: 10, bultoX: 12 }] });
+    await abrirArmado();
+    expect(mases()).toHaveLength(0);
+  });
+});

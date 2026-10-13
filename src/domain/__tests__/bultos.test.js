@@ -8,6 +8,7 @@ import {
   desgloseBultos,
   etiquetaBotonBulto,
   puedeUsarBulto,
+  productoParaBulto,
 } from '../bultos';
 import { MAX_CANTIDAD } from '../stock';
 
@@ -162,5 +163,30 @@ describe('REQ-BUL dominio de bultos: bordes adicionales (QA)', () => {
     expect(desgloseBultos(11, 12)).toBeNull();
     expect(desgloseBultos(undefined, 12)).toBeNull();
     expect(desgloseBultos(-36, 12)).toBeNull();
+  });
+});
+
+// C4 (RUN 20261012-2106) — S-BUL-08
+describe('AC-BUL-1 S-BUL-08 productoParaBulto', () => {
+  const coca = { id: 1, nombre: 'Coca', bultoX: 12 };
+  const homonimo = { id: 2, nombre: 'Coca', bultoX: 6 };
+  const porId = new Map([['1', coca], ['2', homonimo]]);
+
+  it('AC-BUL-1 S-BUL-08 productoParaBulto resuelve solo por id; un homónimo con otro id da null', () => {
+    expect(productoParaBulto({ productoId: 1, nombre: 'Coca' }, porId)).toBe(coca);
+    expect(productoParaBulto({ productoId: '2', nombre: 'Coca' }, porId)).toBe(homonimo);
+    // Mismo nombre, id sin match: nunca cae al homónimo.
+    expect(productoParaBulto({ productoId: 99, nombre: 'Coca' }, porId)).toBeNull();
+    expect(productoParaBulto({ nombre: 'Coca' }, porId)).toBeNull();
+  });
+
+  it('AC-BUL-1 S-BUL-08 entradas hostiles => null', () => {
+    expect(productoParaBulto(null, porId)).toBeNull();
+    expect(productoParaBulto('x', porId)).toBeNull();
+    expect(productoParaBulto({ productoId: 1 }, null)).toBeNull();
+    expect(productoParaBulto({ productoId: 1 }, { 1: coca })).toBeNull();
+    expect(productoParaBulto({ productoId: null }, porId)).toBeNull();
+    expect(productoParaBulto({ productoId: '' }, new Map([['', coca]]))).toBeNull();
+    expect(productoParaBulto({ productoId: undefined }, new Map([['undefined', coca]]))).toBeNull();
   });
 });

@@ -467,3 +467,123 @@ describe('AC-COM-17 confirmar asignación', () => {
     expect(q('aviso-b')).not.toBeNull();
   });
 });
+
+// C2 (RUN 20261012-2106): el botón "Confirmar anulación" explica por qué está
+// deshabilitado y el error del servidor aparece debajo del formulario.
+describe('AC-COM-12 UX del formulario de anulación', () => {
+  const abrir = async () => {
+    setApp(ADMIN);
+    await render();
+    await click(q('cierre-c-vig').querySelector('button.btn-danger'));
+  };
+  const textarea = () => q('cierre-c-vig').querySelector('textarea');
+  const pinInput = () => q('cierre-c-vig').querySelector('input[aria-label="PIN de admin"]');
+
+  it('AC-COM-12 con el botón deshabilitado se ve "Escribí el motivo (mínimo 3 letras)"', async () => {
+    await abrir();
+    const b = boton('Confirmar anulación');
+    expect(b.disabled).toBe(true);
+    expect(q('ayuda-anular-c-vig').textContent).toBe('Escribí el motivo (mínimo 3 letras)');
+    expect(b.getAttribute('aria-describedby')).toBe('ayuda-anular-c-vig');
+    await cambiar(textarea(), '  ab  ');
+    expect(boton('Confirmar anulación').disabled).toBe(true);
+    expect(q('ayuda-anular-c-vig').textContent).toBe('Escribí el motivo (mínimo 3 letras)');
+  });
+
+  it('AC-COM-12 con motivo y sin PIN se ve "Ingresá tu PIN de admin"; con los dos, la ayuda desaparece', async () => {
+    await abrir();
+    await cambiar(textarea(), 'Error de carga');
+    expect(boton('Confirmar anulación').disabled).toBe(true);
+    expect(q('ayuda-anular-c-vig').textContent).toBe('Ingresá tu PIN de admin');
+    await cambiar(pinInput(), '4321');
+    expect(boton('Confirmar anulación').disabled).toBe(false);
+    expect(q('ayuda-anular-c-vig')).toBeNull();
+    expect(boton('Confirmar anulación').getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('AC-COM-12 el botón sigue llamándose "Confirmar anulación"', async () => {
+    await abrir();
+    const nombres = [...q('cierre-c-vig').querySelectorAll('button')].map(b => b.textContent.trim());
+    expect(nombres).toContain('Confirmar anulación');
+  });
+
+  it('AC-COM-12 el error del servidor se muestra inline debajo del formulario, que queda abierto', async () => {
+    anularCierre.mockImplementation(async () => ({ ok: false, mensaje: 'PIN de admin incorrecto.' }));
+    await abrir();
+    await cambiar(textarea(), 'Error de carga');
+    await cambiar(pinInput(), '9999');
+    await click(boton('Confirmar anulación'));
+    const err = q('error-anular-c-vig');
+    expect(err).not.toBeNull();
+    expect(err.textContent).toBe('PIN de admin incorrecto.');
+    expect(err.getAttribute('role')).toBe('alert');
+    expect(textarea()).not.toBeNull();
+    expect(textarea().value).toBe('Error de carga');
+    // El PIN se borró antes de llamar; la ayuda vuelve a pedirlo.
+    expect(pinInput().value).toBe('');
+    expect(q('ayuda-anular-c-vig').textContent).toBe('Ingresá tu PIN de admin');
+    // El mensaje global de arriba se mantiene (compatibilidad).
+    expect(container.textContent.split('PIN de admin incorrecto.').length - 1).toBe(2);
+  });
+
+  it('AC-COM-12 el error inline se limpia al editar el motivo, el PIN o al tocar "Volver"', async () => {
+    anularCierre.mockImplementation(async () => ({ ok: false, mensaje: 'Sin respuesta del servidor' }));
+    await abrir();
+    await cambiar(textarea(), 'Error de carga');
+    await cambiar(pinInput(), '1');
+    await click(boton('Confirmar anulación'));
+    expect(q('error-anular-c-vig')).not.toBeNull();
+    await cambiar(textarea(), 'Error de carga 2');
+    expect(q('error-anular-c-vig')).toBeNull();
+    await cambiar(pinInput(), '1');
+    await click(boton('Confirmar anulación'));
+    expect(q('error-anular-c-vig')).not.toBeNull();
+    await cambiar(pinInput(), '2');
+    expect(q('error-anular-c-vig')).toBeNull();
+    await click(boton('Confirmar anulación'));
+    expect(q('error-anular-c-vig')).not.toBeNull();
+    await click(boton('Volver'));
+    await click(q('cierre-c-vig').querySelector('button.btn-danger'));
+    expect(q('error-anular-c-vig')).toBeNull();
+  });
+
+  it('AC-COM-12 si el servidor no manda mensaje, el inline usa uno genérico; al anular bien se cierra', async () => {
+    anularCierre.mockImplementationOnce(async () => ({ ok: false })).mockImplementationOnce(async () => ({ ok: true }));
+    await abrir();
+    await cambiar(textarea(), 'Error de carga');
+    await cambiar(pinInput(), '1');
+    await click(boton('Confirmar anulación'));
+    expect(q('error-anular-c-vig').textContent).toBe('No se pudo anular el cierre.');
+    await cambiar(pinInput(), '1');
+    await click(boton('Confirmar anulación'));
+    expect(textarea()).toBeNull();
+    expect(container.textContent).toMatch(/Cierre anulado/);
+  });
+});
+
+describe('AC-VEN-3 selector "Vendedor asignado" en Comisiones', () => {
+  const VEND_CON_BAJAS = [...VENDEDORES, { id: 7, nombre: 'Ex', permiso: 2, activo: false }, { id: 8, nombre: 'Viejo', permiso: 2, activo: false }];
+  const opciones = (sel) => [...sel.querySelectorAll('option')].map(o => o.value).filter(Boolean);
+
+  it('AC-VEN-3 el selector "Vendedor asignado" no ofrece dados de baja', async () => {
+    cargarDatosComisiones.mockImplementation(async () => datos({ vendedores: VEND_CON_BAJAS }));
+    setApp(ADMIN);
+    await render();
+    await cambiar(q('asignacion-R4').querySelector('select'), 'otro');
+    const sel = q('asignacion-R4').querySelector('select[aria-label="Vendedor asignado"]');
+    expect(opciones(sel)).toEqual(['Jorge', 'Carlos', 'Lucía']);
+  });
+
+  it('AC-VEN-3 conserva al ya asignado aunque esté dado de baja (sin ofrecer a los otros dados de baja)', async () => {
+    cargarDatosComisiones.mockImplementation(async () => datos({
+      vendedores: VEND_CON_BAJAS,
+      borrador: { id: claveBorrador(PERIODO), asignaciones: { R4: { modo: 'otro', vendedor: 'Viejo' } } },
+    }));
+    setApp(ADMIN);
+    await render();
+    const sel = q('asignacion-R4').querySelector('select[aria-label="Vendedor asignado"]');
+    expect(sel.value).toBe('Viejo');
+    expect(opciones(sel)).toContain('Viejo');
+    expect(opciones(sel)).not.toContain('Ex');
+  });
+});

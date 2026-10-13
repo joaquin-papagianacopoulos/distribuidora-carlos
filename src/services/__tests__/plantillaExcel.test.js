@@ -23,11 +23,18 @@ describe('AC-PLA-1 / AC-PLA-2 libro .xlsx', () => {
     expect(inst.find(f => f[0] === 'Proveedor')[3]).toBe('Arcor');
   });
 
-  it('AC-PLA-2 plantilla de clientes: los 17 encabezados en orden', () => {
+  // MOD (RUN 20261012-2106): antes eran los 17 encabezados de CAMPOS_CLIENTE.
+  // AC-PLA-2 (dueño, 2026-10-12) saca Comisión: quedan 16, mismo orden.
+  it('AC-PLA-2 plantilla de clientes: los 16 encabezados en orden (sin Comisión)', () => {
     const wb = escribirYLeer(libroPlantilla(XLSX, armarPlantilla('clientes', { vendedores: VENDEDORES })));
     expect(wb.SheetNames).toEqual(['Clientes', 'Instrucciones']);
-    expect(filasDe(wb, 'Clientes')[0]).toEqual(CAMPOS_CLIENTE.map(c => c.label));
-    expect(filasDe(wb, 'Instrucciones').find(f => f[0] === 'Vendedor')[3]).toBe('Admin');
+    const enc = filasDe(wb, 'Clientes')[0];
+    expect(enc).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
+    expect(enc).toHaveLength(16);
+    expect(enc).not.toContain('Comisión');
+    const inst = filasDe(wb, 'Instrucciones');
+    expect(inst.find(f => f[0] === 'Vendedor')[3]).toBe('Admin');
+    expect(inst.some(f => f[0] === 'Comisión')).toBe(false);
   });
 
   it('AC-PLA-6 AC-SEC-3 ninguna celda exportada queda como fórmula', () => {
@@ -112,22 +119,42 @@ describe('AC-PLA-7 round-trip: plantilla -> completar -> importar', () => {
     expect(rows[0]).toEqual(COLUMNAS_PLANTILLA.productos.map(c => c.label));
   });
 
-  it('AC-PLA-7 clientes: los 17 campos llegan normalizados', () => {
+  // MOD (RUN 20261012-2106): antes eran 17 campos y comision: 5. La plantilla
+  // ya no tiene Comisión (AC-PLA-2), asi que el dato 'Comisión' de abajo no
+  // tiene columna donde caer y el alta queda con comision null (AC-PLA-4).
+  it('AC-PLA-7 clientes: los 16 campos de la plantilla llegan normalizados', () => {
     const rows = completar('clientes', [{
       'Código cliente': 'C1', 'Razón social': 'Cliente RT', 'Domicilio de entrega': 'Calle 1', 'Ciudad': 'Rosario',
       'Código postal': 's2000', 'Provincia': 'Santa Fe', 'Zona': 'Centro', 'País': 'Argentina', 'Tipo de IVA': 'Monotributo',
       'CUIT': '20123456786', 'Celular': '3415551234', 'Vendedor': 'admin', 'Cobrador': 'Pedro', 'Comisión': '5',
       'Fecha de alta': '2026-10-01', 'Tipo de cliente': 'Mayorista', 'Rubro': 'Almacén',
     }], { vendedores: VENDEDORES });
+    expect(rows[0]).toHaveLength(16);
     const plan = planificarImportacion(rows, 'clientes', { existentes: [], vendedores: VENDEDORES });
     expect(plan.ok).toBe(true);
     expect(plan.ignoradas).toEqual([]);
+    expect(plan.excluidas).toEqual([]);
     expect(plan.entradas[0].accion).toBe('crear');
     expect(plan.entradas[0].valor).toEqual({
       codigo: 'C1', nombre: 'Cliente RT', direccion: 'Calle 1', ciudad: 'Rosario', codigoPostal: 'S2000', provincia: 'Santa Fe',
       zona: 'Centro', pais: 'Argentina', tipoIva: 'Monotributo', cuit: '20-12345678-6', telefono: '3415551234', vendedor: 'Admin',
-      cobrador: 'Pedro', comision: 5, fechaAlta: '2026-10-01', tipoCliente: 'Mayorista', rubro: 'Almacén',
+      cobrador: 'Pedro', comision: null, fechaAlta: '2026-10-01', tipoCliente: 'Mayorista', rubro: 'Almacén',
     });
+    expect(rows[0]).toEqual(COLUMNAS_PLANTILLA.clientes.map(c => c.label));
+  });
+
+  it('AC-PLA-4 AC-PLA-7 un XLSX viejo con columna Comisión: se ignora y el resumen lo avisa', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      CAMPOS_CLIENTE.map(c => c.label),
+      CAMPOS_CLIENTE.map(c => ({ codigo: 'C2', nombre: 'Viejo', direccion: 'Dir', comision: '8' }[c.key] ?? '')),
+    ]), 'Clientes');
+    const leido = escribirYLeer(wb);
+    const plan = planificarImportacion(filasDe(leido, 'Clientes'), 'clientes', { existentes: [] });
+    expect(plan.ok).toBe(true);
+    expect(plan.excluidas).toEqual(['Comisión']);
+    expect(plan.entradas[0].valor.comision).toBeNull();
+    expect(plan.resumen.columnasExcluidas).toEqual(['Comisión']);
   });
 
   it('AC-PLA-6 una celda "=cmd" escrita en el Excel se importa neutralizada', () => {

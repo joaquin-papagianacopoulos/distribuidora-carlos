@@ -104,6 +104,46 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
+  // S-BUL-01 (mitigacion parcial, RUN 20261012-2106 iteracion 2): con red, la
+  // sesion abierta se revalida contra la fila del servidor al restaurarla y
+  // despues de cada pull de vendedores. Si difiere, manda el servidor; si no
+  // existe o esta dada de baja, se cierra la sesion. Sin red no cambia nada
+  // (offline-first). El servicio se importa recien aca: offline no se carga.
+  const vendedorActualRef = useRef(null);
+  useEffect(() => { vendedorActualRef.current = vendedorActual; }, [vendedorActual]);
+  const revalidandoRef = useRef(false);
+  const revalidarSesionActual = useCallback(async (v) => {
+    if (!v || !navigator.onLine || revalidandoRef.current) return;
+    revalidandoRef.current = true;
+    try {
+      const { revalidarSesion } = await import('../services/vendedoresService');
+      const r = await revalidarSesion(v, { online: navigator.onLine });
+      // Si mientras tanto cambio la sesion (otro usuario), no se toca.
+      const actual = vendedorActualRef.current;
+      if (actual && actual.id !== v.id) return;
+      if (r.accion === 'cerrar') {
+        setVendedorActual(null);
+        setUsuarioSesion(null);
+        limpiarSesion();
+        startupSyncVendorRef.current = null;
+        localStorage.removeItem('vendedorActual');
+      } else if (r.accion === 'actualizar' && r.sesion) {
+        // El registro local ya quedo corregido (persistirSesion): primero se
+        // recarga, para que el merge no vuelva a mezclar el dato viejo.
+        await recargar();
+        const next = { ...r.sesion, permiso: Number(r.sesion.permiso || 2) };
+        vendedorActualRef.current = next;
+        setVendedorActual(next);
+        setUsuarioSesion(next);
+        localStorage.setItem('vendedorActual', JSON.stringify(datosPersistibles(next)));
+      }
+    } catch (e) {
+      console.warn('No se pudo revalidar la sesion (se mantiene):', e?.message || String(e));
+    } finally {
+      revalidandoRef.current = false;
+    }
+  }, [recargar]);
+
   const runSync = useCallback(async ({ full = false, reason = 'auto' } = {}) => {
     if (isSyncing.current) return;
     if (!navigator.onLine) return;
@@ -137,6 +177,8 @@ export const AppProvider = ({ children }) => {
         console.log('3. downloadMaestros...');
         await downloadMaestros();
         lastMaestrosSyncRef.current = Date.now();
+        // S-BUL-01: vendedores recien bajados => revalidar la sesion.
+        await revalidarSesionActual(vendedorActual);
       }
 
       step = 'syncPedidosPendientes';
@@ -235,7 +277,7 @@ export const AppProvider = ({ children }) => {
       isSyncing.current = false;
       setSyncing(false);
     }
-  }, [recargar, vendedorActual, zonaActiva]);
+  }, [recargar, vendedorActual, zonaActiva, revalidarSesionActual]);
 
   useEffect(() => {
     const init = async () => {
@@ -263,7 +305,10 @@ export const AppProvider = ({ children }) => {
           const vv = { ...found, permiso: Number(found?.permiso || 2) };
           setVendedorActual(vv);
           setUsuarioSesion(vv);
+          vendedorActualRef.current = vv;
           localStorage.setItem('vendedorActual', JSON.stringify(datosPersistibles(vv)));
+          // S-BUL-01: con red, se revalida en segundo plano (no frena el arranque).
+          if (navigator.onLine) revalidarSesionActual(vv);
         } else if (!found || !estaActivo(found)) {
           localStorage.removeItem('vendedorActual');
         }
@@ -273,7 +318,7 @@ export const AppProvider = ({ children }) => {
       setLoading(false);
     };
     init();
-  }, [recargar]);
+  }, [recargar, revalidarSesionActual]);
 
   // Auto-sync eficiente: completo al iniciar, liviano al volver online/visible y por intervalo.
   useEffect(() => {

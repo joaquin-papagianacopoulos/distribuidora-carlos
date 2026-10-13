@@ -162,6 +162,17 @@ describe('REQ-BUL Facturación (edición)', () => {
     expect(container.textContent).toMatch(/No ten.+s permisos/);
     expect(mases()).toHaveLength(0);
   });
+
+  // T-03 (RUN 20261012-2106, regla dura 7): textos exactos, sin mojibake.
+  test.each([
+    ['vendedor (2)', { id: 2, nombre: 'Vend', permiso: 2 }],
+    ['armador (3)', { id: 3, nombre: 'Arm', permiso: 3 }],
+  ])('AC-SEC-4 Facturación sin permisos muestra "Facturación" y "No tenés permisos para facturar" (%s)', async (_l, v) => {
+    setApp({ vendedorActual: v });
+    await render();
+    expect(container.querySelector('h1').textContent).toBe('Facturación');
+    expect(container.textContent).toContain('No tenés permisos para facturar');
+  });
 });
 
 describe('REQ-BUL Facturación: borrador de texto (QA)', () => {
@@ -335,5 +346,80 @@ describe('AC-BUL-9 Facturación: unidad por defecto', () => {
     expect(agua.cantidad).toBe(12);
     expect(pedidoFinal.items.find(i => i.productoId === 'p4').cantidad).toBe(1);
     expect(JSON.stringify(pedidoFinal)).not.toContain('_cantidadPorDefecto');
+  });
+});
+
+// C3 / C4 (RUN 20261012-2106)
+describe('S-BUL-06 S-BUL-08 Facturación (edición)', () => {
+  const tipear = async (input, valor) => {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, valor);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const inputCon = (v) => [...container.querySelectorAll('input[inputmode="numeric"]')].find(i => i.value === v);
+
+  test('AC-BUL-7 AC-STK-8 S-BUL-06 Facturación: una cantidad tipeada mayor que MAX_CANTIDAD no se guarda ni genera movimiento', async () => {
+    setApp();
+    await abrirEdicion();
+    await tipear(inputCon('5'), '2000000');
+    // El total sigue con la cantidad anterior (no se tomó).
+    expect(container.textContent).toContain('$60');
+    await click(boton('Guardar cambios'));
+    expect(guardarPedidoOnlineFirst).toHaveBeenCalledTimes(1);
+    const [pedidoFinal] = guardarPedidoOnlineFirst.mock.calls[0];
+    // Sin diferencia de cantidad => sin movimiento de stock nuevo (AC-STK-4).
+    expect(pedidoFinal.items.find(i => i.productoId === 'p1').cantidad).toBe(5);
+    expect(pedidoFinal.total).toBe(60);
+  });
+
+  test('AC-BUL-7 AC-STK-8 S-BUL-06 Facturación: el blur con una cantidad fuera de tope vuelve a la última válida', async () => {
+    setApp();
+    await abrirEdicion();
+    const input = inputCon('5');
+    await tipear(input, '2000000');
+    await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+    expect(inputCon('5')).toBeDefined();
+    expect(inputCon('2000000')).toBeUndefined();
+  });
+
+  test('AC-BUL-7 AC-STK-8 S-BUL-06 Facturación: si con "+" se pasa del tope, no guarda y avisa', async () => {
+    window.alert = jest.fn();
+    setApp({ pedidos: [pedidoFacturado({ items: [{ productoId: 'p1', nombre: 'Coca 500', precio: 10, precioOriginal: 10, cantidad: 1000000 }], total: 10000000 })] });
+    await abrirEdicion();
+    const mas = [...container.querySelectorAll('button.qty-btn')].find(b => b.textContent === '+');
+    await click(mas);
+    await click(boton('Guardar cambios'));
+    expect(guardarPedidoOnlineFirst).not.toHaveBeenCalled();
+    expect(window.alert).toHaveBeenCalledWith('Cantidad inválida en: Coca 500 (máximo 1.000.000)');
+    expect(container.textContent).toContain('Editando pedido');
+  });
+
+  test('AC-STK-8 R10 Facturación: un legacy decimal sin cambios no bloquea guardar otra edición', async () => {
+    window.alert = jest.fn();
+    setApp({ pedidos: [pedidoFacturado({ items: [
+      { productoId: 'p1', nombre: 'Coca 500', precio: 10, precioOriginal: 10, cantidad: 2.5 },
+      { productoId: 'p2', nombre: 'Alfajor', precio: 5, precioOriginal: 5, cantidad: 2 },
+    ], total: 35 })] });
+    await abrirEdicion();
+    await tipear(inputCon('2'), '3');
+    await click(boton('Guardar cambios'));
+    expect(window.alert).not.toHaveBeenCalled();
+    const [pedidoFinal] = guardarPedidoOnlineFirst.mock.calls[0];
+    expect(pedidoFinal.items.find(i => i.productoId === 'p1').cantidad).toBe(2.5);
+    expect(pedidoFinal.items.find(i => i.productoId === 'p2').cantidad).toBe(3);
+  });
+
+  test("AC-BUL-1 S-BUL-08 un renglón sin match por id no muestra '+ Bulto' aunque exista un homónimo con bultoX; el precio de lista sigue apareciendo", async () => {
+    setApp({ productos: [
+      { id: 'pX', nombre: 'Coca 500', precio: 15, bultoX: 12 },
+      { id: 'p2', nombre: 'Alfajor', precio: 5, bultoX: 1 },
+    ] });
+    await abrirEdicion();
+    expect(mases()).toHaveLength(0);
+    expect(desglose()).toBeNull();
+    // getProductoActual (con fallback por nombre) se mantiene para el precio de lista.
+    expect(container.textContent).toContain('Nueva lista: $15');
   });
 });

@@ -133,7 +133,9 @@ describe('Permisos', () => {
   it('AC-SEC-4 un vendedor (permiso 2) no puede entrar a Configuración', async () => {
     mockApp.vendedorActual = { id: 2, nombre: 'Vend', permiso: 2 };
     await render();
-    expect(container.textContent).toMatch(/No ten.*s permisos para acceder/);
+    // T-02 (RUN 20261012-2106, regla dura 7): texto exacto, sin mojibake.
+    expect(container.textContent).toContain('No tenés permisos para acceder a Configuración');
+    expect(container.querySelector('h1').textContent).toBe('Configuración');
     expect(container.querySelector('[data-testid="cliente-form"]')).toBeNull();
     expect(boton('proveedores')).toBeUndefined();
   });

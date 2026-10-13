@@ -22,6 +22,22 @@
 -- PASO 1 de 002_seguridad_recomendada.sql (pin_hash + public.verificar_pin).
 -- Si verificar_pin no existe, el script aborta al principio sin tocar nada.
 --
+-- Modificada en RUN 20261012-2106 antes de aplicarse (S-COM-21). Confirmado
+-- por el orquestador: esta 003 todavía NO se aplicó en Supabase, por eso se
+-- edita en el lugar (si ya se hubiera aplicado, el cambio iría en una 005 con
+-- los mismos "create or replace"). Cambio: cerrar_comisiones y
+-- anular_cierre_comisiones toman UN único pg_advisory_xact_lock global
+-- ('comisiones_global') en vez del lock por id de cierre + un lock por pedido
+-- (hasta 5000 locks por transacción podían agotar la tabla de locks compartida).
+--
+-- S-VEN-03 (RUN 20261012-2106, iteración 2): cerrar_comisiones y
+-- anular_cierre_comisiones exigen además que el admin esté ACTIVO, con
+-- public.vendedor_habilitado(id). La columna "activo" la crea la 004, que se
+-- aplica DESPUÉS de esta 003; por eso el chequeo es dinámico: si la columna
+-- todavía no existe, todos cuentan como activos (comportamiento anterior) y,
+-- apenas se aplica la 004, rige sin volver a correr esta 003. Se eligió esto
+-- en vez de redefinir las dos RPC enteras en la 004 (duplicar ~300 líneas).
+--
 -- Autorización (S-COM-01): las RPC reciben el id remoto del admin + su PIN y lo
 -- validan en el servidor con public.verificar_pin (bcrypt + bloqueo por
 -- intentos). cerrado_por / anulado_por los fija el SERVIDOR con el nombre del
@@ -53,6 +69,26 @@ begin
     raise exception 'Falta public.verificar_pin(text, text): aplicar antes 002_seguridad_recomendada.sql PASO 1 (PIN hasheado) y despues volver a correr esta 003.';
   end if;
 end $$;
+
+-- =====================================================================
+-- 0b. S-VEN-03: ¿el vendedor está activo? Chequeo dinámico de la columna
+--     "activo" (la crea la 004). Sin la columna => true (como antes).
+--     Solo la usan las RPC security definer: no se da execute a anon.
+-- =====================================================================
+create or replace function public.vendedor_habilitado(p_id text) returns boolean
+language plpgsql stable set search_path = public, pg_temp as $$
+declare
+  v_activo boolean;
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'vendedores' and column_name = 'activo') then
+    return true;
+  end if;
+  execute 'select activo from public.vendedores where id::text = $1' into v_activo using p_id;
+  return coalesce(v_activo, false);
+end $$;
+revoke all on function public.vendedor_habilitado(text) from public;
+revoke all on function public.vendedor_habilitado(text) from anon, authenticated;
 
 -- =====================================================================
 -- 1. Marca de entregado en pedidos (AC-COM-1)
@@ -235,7 +271,7 @@ begin
   end if;
   select left(trim(ve.nombre), 80) into v_por
     from public.vendedores ve
-   where ve.id::text = v_admin_id and ve.permiso = 1;
+   where ve.id::text = v_admin_id and ve.permiso = 1 and public.vendedor_habilitado(ve.id::text);
   -- return (no raise): así el intento fallido queda registrado en
   -- vendedores_pin_intentos y cuenta para el bloqueo por fuerza bruta.
   v_pin_ok := coalesce(public.verificar_pin(v_admin_id, p_admin_pin), false);
@@ -243,11 +279,19 @@ begin
     return jsonb_build_object('ok', false, 'motivo', 'no_autorizado');
   end if;
 
-  -- 2) Idempotencia DESPUÉS de autorizar (S-COM-10), serializada por id
-  --    (S-COM-09): dos reintentos con el mismo UUID no compiten entre sí.
-  --    Solo es "ya_existia" si lo cerró el mismo admin, comparando por ID
-  --    (S-COM-16), no por nombre.
-  perform pg_advisory_xact_lock(hashtext('comisiones_cierre:' || v_id));
+  -- 2) S-COM-21 (RUN 20261012-2106): UN solo lock global, DESPUÉS de
+  --    autorizar y ANTES de la idempotencia. Serializa todos los cierres y
+  --    anulaciones: dos reintentos con el mismo UUID no compiten (S-COM-09) y
+  --    dos cierres con el mismo pedido se ejecutan de a uno (S-COM-15): el
+  --    segundo valida contra lo que ya grabó el primero (READ COMMITTED: cada
+  --    sentencia de abajo ve lo commiteado al tomar el lock) y su ajuste deja
+  --    de coincidir => 'ajuste_invalido'. Alcanza con serializar: los cierres
+  --    son raros (mensuales) y los hace un admin. Orden de locks: siempre el
+  --    global primero y los de fila después (anular hace lo mismo), así que
+  --    no hay ciclo posible (sin deadlocks).
+  --    Idempotencia DESPUÉS de autorizar (S-COM-10): solo es "ya_existia" si
+  --    lo cerró el mismo admin, comparando por ID (S-COM-16), no por nombre.
+  perform pg_advisory_xact_lock(hashtext('comisiones_global'));
   select coalesce(c.cerrado_por_id, '') into v_existente
     from public.comisiones_cierres c
    where c.id = v_id;
@@ -303,17 +347,8 @@ begin
     return jsonb_build_object('ok', false, 'motivo', 'renglones_duplicados');
   end if;
 
-  -- S-COM-15 (iteración 3): serializar por PEDIDO. Dos cierres concurrentes
-  -- con el mismo pedido (como pedido o como ajuste) se ejecutan de a uno: el
-  -- segundo valida contra lo que ya grabó el primero (READ COMMITTED: cada
-  -- sentencia de abajo ve lo commiteado al tomar el lock) y su ajuste deja de
-  -- coincidir => 'ajuste_invalido'. Los locks se toman en orden para no
-  -- generar deadlocks (anular_cierre_comisiones usa el mismo orden y prefijo).
-  for v_pid in
-    select distinct r->>'pedido_id' from jsonb_array_elements(p_renglones) r order by 1
-  loop
-    perform pg_advisory_xact_lock(hashtext('comisiones_pedido:' || v_pid));
-  end loop;
+  -- S-COM-15 (iteración 3): la serialización por pedido la da el lock global
+  -- del paso 2 (S-COM-21), ya tomado antes de todas las validaciones de abajo.
 
   -- S-COM-07: "lineas" (lo que usa el cliente para saber qué está cerrado y
   -- calcular ajustes) tiene que ser exactamente el mismo set que p_renglones
@@ -498,11 +533,15 @@ begin
   end if;
   select left(trim(ve.nombre), 80) into v_por
     from public.vendedores ve
-   where ve.id::text = v_admin_id and ve.permiso = 1;
+   where ve.id::text = v_admin_id and ve.permiso = 1 and public.vendedor_habilitado(ve.id::text);
   v_pin_ok := coalesce(public.verificar_pin(v_admin_id, p_admin_pin), false);
   if not v_pin_ok or v_por is null or length(v_por) = 0 then
     return jsonb_build_object('ok', false, 'motivo', 'no_autorizado');
   end if;
+  -- S-COM-21 (RUN 20261012-2106): el mismo lock global que cerrar_comisiones,
+  -- DESPUÉS de autorizar y ANTES del lock de fila (for update): siempre global
+  -- primero y fila después, el mismo orden en las dos RPC (sin deadlocks).
+  perform pg_advisory_xact_lock(hashtext('comisiones_global'));
   select c.estado into v_estado from public.comisiones_cierres c where c.id = p_id for update;
   if v_estado is null then
     return jsonb_build_object('ok', false, 'motivo', 'no_existe');
@@ -511,19 +550,14 @@ begin
     return jsonb_build_object('ok', true, 'ya_anulado', true);
   end if;
 
-  -- S-COM-15 (iteración 3), decisión: BLOQUEAR. Mismo lock por pedido que
-  -- cerrar_comisiones (mismo orden y prefijo). Si algún pedido que este cierre
+  -- S-COM-15 (iteración 3), decisión: BLOQUEAR. Bajo el lock global de arriba
+  -- (S-COM-21, el mismo de cerrar_comisiones). Si algún pedido que este cierre
   -- tiene como BASE ('pedido') tiene ajustes vigentes en OTROS cierres, no se
   -- anula: esos ajustes quedarían huérfanos (cobrando una diferencia sobre una
   -- base que ya no cuenta). El admin anula primero los cierres con ajustes
   -- (se devuelven sus ids) y después éste. Se eligió bloquear y no anular en
   -- cascada porque la cascada modificaría cierres vigentes cuyos totales y PDF
   -- ya incluyen esos ajustes.
-  for v_pid in
-    select distinct cp.pedido_id from public.comisiones_cierre_pedidos cp where cp.cierre_id = p_id order by 1
-  loop
-    perform pg_advisory_xact_lock(hashtext('comisiones_pedido:' || v_pid));
-  end loop;
   select array_agg(distinct aj.cierre_id) into v_dep
     from public.comisiones_cierre_pedidos base
     join public.comisiones_cierre_pedidos aj

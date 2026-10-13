@@ -82,9 +82,12 @@ describe('AC-SEC-4 S-COM-13 ingreso 100 % online', () => {
     expect(input.getAttribute('autocomplete')).toBe('off');
     await tipear(input, '4821');
     mockSb.rpcRespuestas = [{ data: true, error: null }];
+    // MOD (RUN 20261012-2106, C5 / S-COM-18): después del PIN se lee la fila
+    // del servidor y la sesión sale de ahí (antes se entraba con el registro local).
+    mockSb.selectRespuestas = [{ data: { id: 7, nombre: 'Jorge', zona: '', permiso: 1, tiene_pin: true, activo: true }, error: null }];
     await click(boton('Entrar'));
     expect(mockSb.rpc).toEqual([{ fn: 'verificar_pin', args: { p_vendedor_id: '7', p_pin: '4821' } }]);
-    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(ADMIN);
+    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(expect.objectContaining({ id: 1, remoteId: 7, nombre: 'Jorge', permiso: 1, tienePin: true }));
     expect(JSON.stringify({ ...localStorage })).not.toContain('4821');
   });
 
@@ -131,7 +134,9 @@ describe('AC-SEC-4 S-COM-13 ingreso 100 % online', () => {
     await render();
     mockSb.selectRespuestas = [{ data: { id: 8, tiene_pin: false, permiso: 2 }, error: null }];
     await click(opcion('Carlos'));
-    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(VEND);
+    // MOD (RUN 20261012-2106, C5): la sesión es la fila del servidor (antes: el
+    // registro local `VEND` tal cual). El servidor no mandó nombre: queda el local.
+    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(expect.objectContaining({ id: 2, remoteId: 8, nombre: 'Carlos', permiso: 2, tienePin: false }));
     mockApp.seleccionarVendedor.mockClear();
     mockSb.selectRespuestas = [{ data: { id: 8, tiene_pin: true, permiso: 2 }, error: null }];
     await click(opcion('Carlos'));
@@ -165,6 +170,23 @@ describe('AC-SEC-4 S-COM-13 ingreso 100 % online', () => {
     expect(syncVendedor).toHaveBeenCalledWith({ nombre: 'Nuevo', zona: '' });
   });
 
+  it.each([
+    ['dado de baja', ' carlos ', /dado de baja con ese nombre/],
+    ['activo', 'JORGE', /Ya existe un vendedor con ese nombre/],
+  ])('AC-VEN-2 S-VEN-01 auto-alta con el nombre de un vendedor %s: mensaje claro y no se crea', async (_n, nombre, msg) => {
+    setApp({ vendedores: [ADMIN, { ...VEND, activo: false }] });
+    await render();
+    await click(boton('+ Agregar vendedor'));
+    await tipear(container.querySelector('input[placeholder="Ej: Carlos Rodriguez"]'), nombre);
+    await click(boton('Guardar'));
+    expect(container.querySelector('[data-testid="alta-vendedor-error"]').textContent).toMatch(msg);
+    expect(addVendedor).not.toHaveBeenCalled();
+    expect(syncVendedor).not.toHaveBeenCalled();
+    // al corregir el nombre, el aviso se va
+    await tipear(container.querySelector('input[placeholder="Ej: Carlos Rodriguez"]'), 'Carla');
+    expect(container.querySelector('[data-testid="alta-vendedor-error"]')).toBeNull();
+  });
+
   it('AC-VEN-3 un vendedor dado de baja no aparece en la pantalla de ingreso', async () => {
     setApp({ vendedores: [ADMIN, { ...VEND, activo: false }] });
     await render();
@@ -179,5 +201,74 @@ describe('AC-SEC-4 S-COM-13 ingreso 100 % online', () => {
     await click(opcion('Carlos'));
     expect(mockApp.seleccionarVendedor).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="ingreso-error"]').textContent).toMatch(/dado de baja/);
+  });
+});
+
+// C5 (RUN 20261012-2106) — S-COM-18: el login usa la fila del servidor.
+describe('AC-SEC-4 S-COM-18 la sesión sale del servidor, no del registro local', () => {
+  it('AC-SEC-4 S-COM-18 ataque A: local permiso 1, servidor 2 => seleccionarVendedor con permiso 2', async () => {
+    const forjado = { id: 2, remoteId: 8, nombre: 'Carlos', permiso: 1, tienePin: true };
+    setApp({ vendedores: [forjado] });
+    await render();
+    await click(opcion('Carlos'));
+    await tipear(container.querySelector('input[type="password"]'), '1111');
+    mockSb.rpcRespuestas = [{ data: true, error: null }];
+    mockSb.selectRespuestas = [{ data: { id: 8, nombre: 'Carlos', zona: 'Sur', permiso: 2, tiene_pin: true, activo: true }, error: null }];
+    await click(boton('Entrar'));
+    expect(mockApp.seleccionarVendedor).toHaveBeenCalledTimes(1);
+    const sesion = mockApp.seleccionarVendedor.mock.calls[0][0];
+    expect(sesion).toMatchObject({ id: 2, remoteId: 8, nombre: 'Carlos', zona: 'Sur', permiso: 2 });
+    expect(sesion).not.toHaveProperty('pin');
+    // Se persiste la verdad del servidor en el registro local (para que el
+    // efecto de useAppContext no vuelva a subir el permiso).
+    const { updateVendedor } = require('../../db');
+    expect(updateVendedor).toHaveBeenCalledWith(expect.objectContaining({ id: 2, permiso: 2 }));
+  });
+
+  it('AC-SEC-4 S-COM-18 ataque B: remoteId cambiado => la sesión tiene nombre y permiso del dueño del PIN', async () => {
+    // El atacante puso en "Jorge" (admin) el remoteId 8, que es el de Carlos, y sabe el PIN de Carlos.
+    const adulterado = { id: 1, remoteId: 8, nombre: 'Jorge', permiso: 1, tienePin: true };
+    setApp({ vendedores: [adulterado] });
+    await render();
+    await click(opcion('Jorge'));
+    await tipear(container.querySelector('input[type="password"]'), '2222');
+    mockSb.rpcRespuestas = [{ data: true, error: null }];
+    mockSb.selectRespuestas = [{ data: { id: 8, nombre: 'Carlos', zona: '', permiso: 2, tiene_pin: true, activo: true }, error: null }];
+    await click(boton('Entrar'));
+    expect(mockSb.rpc).toEqual([{ fn: 'verificar_pin', args: { p_vendedor_id: '8', p_pin: '2222' } }]);
+    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Carlos', permiso: 2, remoteId: 8 }));
+  });
+
+  it('AC-SEC-4 S-COM-18 si no se puede leer la fila después del PIN, no entra (fail-closed)', async () => {
+    setApp();
+    await render();
+    await click(opcion('Jorge'));
+    await tipear(container.querySelector('input[type="password"]'), '4821');
+    mockSb.rpcRespuestas = [{ data: true, error: null }];
+    mockSb.selectRespuestas = [{ data: null, error: { code: '500', message: 'boom' } }];
+    await click(boton('Entrar'));
+    expect(mockApp.seleccionarVendedor).not.toHaveBeenCalled();
+    expect(container.textContent).toMatch(/No se pudo confirmar tu usuario/);
+  });
+
+  it('AC-SEC-4 S-COM-18 un solo-local con permiso 1 entra con permiso 2', async () => {
+    const soloLocal = { id: 5, nombre: 'Local', permiso: 1, tienePin: false };
+    setApp({ vendedores: [soloLocal] });
+    await render();
+    await click(opcion('Local'));
+    expect(mockApp.seleccionarVendedor).toHaveBeenCalledWith(expect.objectContaining({ id: 5, nombre: 'Local', permiso: 2 }));
+    expect(mockSb.rpc).toEqual([]);
+  });
+
+  it('AC-VEN-2 S-COM-18 PIN correcto pero la fila dice dado de baja: no entra', async () => {
+    setApp();
+    await render();
+    await click(opcion('Jorge'));
+    await tipear(container.querySelector('input[type="password"]'), '4821');
+    mockSb.rpcRespuestas = [{ data: true, error: null }];
+    mockSb.selectRespuestas = [{ data: { id: 7, nombre: 'Jorge', zona: '', permiso: 1, tiene_pin: true, activo: false }, error: null }];
+    await click(boton('Entrar'));
+    expect(mockApp.seleccionarVendedor).not.toHaveBeenCalled();
+    expect(container.textContent).toMatch(/dado de baja/);
   });
 });

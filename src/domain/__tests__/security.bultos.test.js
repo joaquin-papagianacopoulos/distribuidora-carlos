@@ -4,6 +4,7 @@
 // desglose no pueda transportar texto controlado por el atacante.
 import {
   normalizarBultoX, normalizarCantidad, sumarBulto, restarBulto, desgloseBultos, etiquetaBotonBulto, puedeUsarBulto,
+  cantidadTipeada, sumarCantidades, validarCantidadesItems, mensajeCantidadesInvalidas,
 } from '../bultos';
 import {
   cambiosDeCantidad, fusionarCambiosArmado, acotarCambiosArmado,
@@ -199,5 +200,75 @@ describe('SEC-BUL armadoLog.cambios acotado (S-BUL-05, AC-BUL-7)', () => {
     expect(acotarCambiosArmado('basura')).toEqual([]);
     expect(acotarCambiosArmado(undefined)).toEqual([]);
     expect(acotarCambiosArmado(inflado(3), { productosVigentes: ['p1'] }).map(c => c.productoId)).toEqual(['p1']);
+  });
+});
+
+// C3 (RUN 20261012-2106) — S-BUL-06: tope MAX_CANTIDAD en cantidades tipeadas.
+describe('AC-BUL-6 AC-SEC-2 S-BUL-06 cantidadTipeada', () => {
+  test.each([
+    ['0', null], ['-3', null], ['2,5', null], ['2.5', null], ['1.000', 1000], ['1.000.000', 1000000], ['1000001', null],
+    ['abc', null], [null, null], [undefined, null], ['', null], ['   ', null], ['12', 12], [' 12 ', 12], ['1 000', 1000],
+    ['1', 1], ['1000000', 1000000], ['12abc', null], ['0x10', null], ['1e3', null], ['1.00', null], ['10.000,5', null],
+    ['99999999999999999999', null], [7, 7], [0, null], [-1, null], [1.5, null], [NaN, null], [Infinity, null],
+    [MAX_CANTIDAD, MAX_CANTIDAD], [MAX_CANTIDAD + 1, null], [{}, null], [[12], null], [true, null], [{ valueOf: () => 5 }, null],
+  ])('AC-BUL-6 S-BUL-06 cantidadTipeada(%p) => %p', (entrada, esperado) => {
+    expect(cantidadTipeada(entrada)).toBe(esperado);
+  });
+});
+
+describe('AC-BUL-7 AC-SEC-2 S-BUL-06 sumarCantidades', () => {
+  test.each([
+    [1, 2, 3], [0, 5, 5], [MAX_CANTIDAD - 1, 1, MAX_CANTIDAD], [MAX_CANTIDAD, 1, null], [MAX_CANTIDAD, 0, MAX_CANTIDAD],
+    [600000, 500000, null], [1.5, 1, null], [-1, 2, null], ['1', 2, null], [null, 1, null], [1, undefined, null],
+    [NaN, 1, null], [Infinity, 1, null], [{}, 1, null],
+  ])('AC-BUL-7 S-BUL-06 sumarCantidades(%p, %p) => %p', (a, b, esperado) => {
+    expect(sumarCantidades(a, b)).toBe(esperado);
+  });
+});
+
+describe('AC-BUL-6 AC-BUL-7 AC-STK-8 S-BUL-06 validarCantidadesItems', () => {
+  it('AC-STK-8 S-BUL-06 sin previos: cualquier cantidad no entera, <= 0 o > MAX_CANTIDAD falla', () => {
+    const r = validarCantidadesItems([
+      { productoId: 1, nombre: 'Ok', cantidad: 5 },
+      { productoId: 2, nombre: 'Grande', cantidad: MAX_CANTIDAD + 1 },
+      { productoId: 3, nombre: 'Decimal', cantidad: 1.5 },
+      { productoId: 4, nombre: 'Cero', cantidad: 0 },
+      { productoId: 5, nombre: 'Texto', cantidad: '3' },
+      { productoId: 6, nombre: 'Tope', cantidad: MAX_CANTIDAD },
+      null,
+      { nombre: 'Sin id', cantidad: -1 },
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.errores).toEqual([
+      { productoId: 2, nombre: 'Grande', cantidad: MAX_CANTIDAD + 1 },
+      { productoId: 3, nombre: 'Decimal', cantidad: 1.5 },
+      { productoId: 4, nombre: 'Cero', cantidad: 0 },
+      { productoId: 5, nombre: 'Texto', cantidad: '3' },
+      { productoId: null, nombre: '', cantidad: null },
+      { productoId: null, nombre: 'Sin id', cantidad: -1 },
+    ]);
+  });
+
+  it('AC-STK-8 R10 con previos: un legacy decimal sin cambios pasa; si cambió, se valida', () => {
+    const previos = [{ productoId: 1, nombre: 'Legacy', cantidad: 2.5 }, { productoId: '2', nombre: 'B', cantidad: 3 }];
+    expect(validarCantidadesItems([{ productoId: 1, nombre: 'Legacy', cantidad: 2.5 }, { productoId: 2, cantidad: 4 }], { previos }))
+      .toEqual({ ok: true, errores: [] });
+    const r = validarCantidadesItems([{ productoId: 1, nombre: 'Legacy', cantidad: 3.5 }], { previos });
+    expect(r.ok).toBe(false);
+    expect(r.errores[0]).toMatchObject({ productoId: 1, cantidad: 3.5 });
+    // Un item nuevo (no estaba en previos) se valida aunque haya previos.
+    expect(validarCantidadesItems([{ productoId: 9, cantidad: MAX_CANTIDAD + 1 }], { previos }).ok).toBe(false);
+  });
+
+  it('AC-SEC-2 entradas hostiles no lanzan', () => {
+    expect(validarCantidadesItems()).toEqual({ ok: true, errores: [] });
+    expect(validarCantidadesItems(null, { previos: 'x' })).toEqual({ ok: true, errores: [] });
+    expect(validarCantidadesItems([], { previos: [null, { cantidad: 1 }, { productoId: null }] })).toEqual({ ok: true, errores: [] });
+    expect(validarCantidadesItems([{ productoId: 1, cantidad: NaN }], { previos: [{ productoId: 1, cantidad: NaN }] }).ok).toBe(true);
+  });
+
+  it('AC-BUL-6 mensajeCantidadesInvalidas lista los productos y el máximo', () => {
+    expect(mensajeCantidadesInvalidas([{ nombre: 'Coca' }, { productoId: 7 }, {}])).toBe('Cantidad inválida en: Coca, 7, ? (máximo 1.000.000)');
+    expect(mensajeCantidadesInvalidas(null)).toBe('Cantidad inválida en:  (máximo 1.000.000)');
   });
 });

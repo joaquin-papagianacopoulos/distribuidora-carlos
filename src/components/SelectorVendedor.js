@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { addVendedor, markVendedorSynced } from '../db';
-import { syncVendedor } from '../sync/syncService';
-import { downloadVendedores } from '../sync/syncService';
-import { iniciarIngreso, verificarPinIngreso } from '../services/vendedoresService';
-import { tienePin, filtrarActivos, MSG_SIN_CONEXION } from '../domain/vendedores';
+import { syncVendedor, downloadVendedores } from '../sync/syncService';
+import { iniciarIngreso, ingresarConPin } from '../services/vendedoresService';
+import { tienePin, filtrarActivos, validarNombreNuevoVendedor, MSG_SIN_CONEXION } from '../domain/vendedores';
 
 const SelectorVendedor = () => {
   const { vendedores, seleccionarVendedor, recargar, online } = useApp();
@@ -12,6 +11,7 @@ const SelectorVendedor = () => {
   const [nuevaZona, setNuevaZona] = useState('');
   const [mostrarForm, setMostrarForm] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [altaError, setAltaError] = useState(null);
 
   const [pinVendedor, setPinVendedor] = useState(null);
   const [pin, setPin] = useState('');
@@ -51,6 +51,11 @@ const SelectorVendedor = () => {
 
   const handleAgregar = async () => {
     if (!nuevoNombre.trim()) return;
+    // S-VEN-01: no se puede crear un vendedor con el nombre de otro (activo o
+    // dado de baja): pedidos y comisiones se atribuyen por nombre.
+    const chk = validarNombreNuevoVendedor(nuevoNombre, vendedores);
+    if (!chk.ok) { setAltaError(chk.mensaje); return; }
+    setAltaError(null);
     setGuardando(true);
     try {
       const localId = await addVendedor({
@@ -99,7 +104,13 @@ const SelectorVendedor = () => {
     setIngresando(true);
     try {
       const r = await iniciarIngreso(v, { online });
-      if (r.accion === 'entrar') { seleccionarVendedor(v); return; }
+      // C5 / S-COM-18: la sesión se abre con el registro que devuelve el
+      // servicio (datos del servidor), nunca con el `v` local.
+      if (r.accion === 'entrar') {
+        if (r.vendedor) seleccionarVendedor(r.vendedor);
+        else setIngresoError('No se pudo ingresar.');
+        return;
+      }
       if (r.accion === 'pedir_pin') {
         setPinVendedor(v);
         setPin('');
@@ -123,12 +134,14 @@ const SelectorVendedor = () => {
     setVerificandoPin(true);
     setPinError(null);
     try {
-      const r = await verificarPinIngreso(pinVendedor, pinTipeado, { online });
-      if (!r.ok) {
-        setPinError(r.mensaje);
+      // C5 / S-COM-18: verifica el PIN y lee la fila del servidor por el mismo
+      // remoteId; la sesión sale de esa fila (nombre y permiso reales).
+      const r = await ingresarConPin(pinVendedor, pinTipeado, { online });
+      if (!r.ok || !r.vendedor) {
+        setPinError(r.mensaje || 'No se pudo ingresar.');
         return;
       }
-      seleccionarVendedor(pinVendedor);
+      seleccionarVendedor(r.vendedor);
       setPinVendedor(null);
     } finally {
       setVerificandoPin(false);
@@ -188,10 +201,15 @@ const SelectorVendedor = () => {
               <input
                 className="input"
                 value={nuevoNombre}
-                onChange={e => setNuevoNombre(e.target.value)}
+                onChange={e => { setNuevoNombre(e.target.value); setAltaError(null); }}
                 placeholder="Ej: Carlos Rodriguez"
                 autoFocus
               />
+              {altaError && (
+                <div role="alert" data-testid="alta-vendedor-error" style={{ marginTop: 6, fontSize: 12, color: 'var(--danger)' }}>
+                  {altaError}
+                </div>
+              )}
             </div>
             <div className="input-group">
               <label className="input-label">Zona (opcional)</label>

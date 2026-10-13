@@ -16,7 +16,7 @@ import {
   isPedidoAReparto, makePedidoAReparto, normalizePedidoFecha,
   getDeudaPendienteParaPedido,
 } from '../utils/pedidos';
-import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones } from '../domain/bultos';
+import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, sumarCantidades, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
 import { cambiosDeCantidad, fusionarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
 
@@ -430,10 +430,12 @@ const Armado = () => {
       }
 
       const otraActiva = prev.find(i => i.productoId === target.productoId && !i.eliminado && i._key !== key);
-      if (otraActiva) {
+      // C3 / S-BUL-06: si la suma superaría MAX_CANTIDAD no se fusiona (queda
+      // restaurado aparte; al guardar se avisa).
+      if (otraActiva && sumarCantidades(otraActiva.cantidad, target.cantidad) !== null) {
         const sinTarget = prev.filter(i => i._key !== key);
         return sortItemsArmado(sinTarget.map(i =>
-          i._key === otraActiva._key ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + target.cantidad, picked: true }) : i
+          i._key === otraActiva._key ? quitarMarcasRenglon({ ...i, cantidad: sumarCantidades(i.cantidad, target.cantidad), picked: true }) : i
         ));
       }
       return sortItemsArmado(prev.map(i => i._key === key ? { ...i, eliminado: false, picked: true } : i));
@@ -451,7 +453,8 @@ const Armado = () => {
   const aplicarBultoArmado = (key, op) => {
     setItemsArmado(prev => prev.map(i => {
       if (i._key !== key || i.eliminado) return i;
-      const bx = productosById.get(String(i.productoId))?.bultoX;
+      // C4 / S-BUL-08: misma resolución por id que Facturación (una sola fuente).
+      const bx = productoParaBulto(i, productosById)?.bultoX;
       const cantidad = op === 'sumar'
         ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
         : restarBulto(i.cantidad, bx, { minimo: CANTIDAD_MINIMA_RENGLON });
@@ -460,10 +463,11 @@ const Armado = () => {
   };
 
   const setCantidadArmadoTexto = (key, texto) => {
-    const n = parseInt(String(texto ?? '').replace(/[^\d]/g, ''), 10);
+    // C3 / S-BUL-06: entero en [1, MAX_CANTIDAD]; si no, queda la cantidad anterior.
+    const n = cantidadTipeada(String(texto ?? '').replace(/[^\d]/g, ''));
     // AC-BUL-9: escribir la cantidad a mano (aunque sea 1) quita la marca.
     setItemsArmado(prev => prev.map(i =>
-      i._key === key ? quitarMarcasRenglon({ ...i, cantidad: (!isNaN(n) && n > 0) ? n : i.cantidad }) : i
+      i._key === key ? quitarMarcasRenglon({ ...i, cantidad: n !== null ? n : i.cantidad }) : i
     ));
   };
 
@@ -484,12 +488,22 @@ const Armado = () => {
       // Los activos (no tachados) son los que quedan en el pedido. Si dos filas
       // terminan siendo del mismo producto (por ejemplo se restauro uno tachado
       // sin fusionar), se suman en una sola linea.
+      // C3 / S-BUL-06: la suma usa sumarCantidades; si supera MAX_CANTIDAD (o
+      // alguna parte es inválida) no se guarda y se avisa.
       const activosPorId = new Map();
+      const sinFusionar = [];
       for (const i of itemsArmado) {
         if (i.eliminado) continue;
         const prev = activosPorId.get(i.productoId);
-        if (prev) prev.cantidad += Number(i.cantidad);
-        else activosPorId.set(i.productoId, { ...i, cantidad: Number(i.cantidad) });
+        if (prev) {
+          const suma = sumarCantidades(prev.cantidad, Number(i.cantidad));
+          if (suma === null) sinFusionar.push({ productoId: i.productoId, nombre: i.nombre, cantidad: prev.cantidad + Number(i.cantidad) });
+          else prev.cantidad = suma;
+        } else activosPorId.set(i.productoId, { ...i, cantidad: Number(i.cantidad) });
+      }
+      if (sinFusionar.length) {
+        alert(mensajeCantidadesInvalidas(sinFusionar));
+        return;
       }
       // AC-BUL-9: igual que _key/picked/eliminado, la marca transitoria no se guarda.
       const itemsFinal = quitarMarcasRenglones([...activosPorId.values()].map(({ picked, eliminado, _key, ...i }) => ({ ...i })));
@@ -643,14 +657,14 @@ const Armado = () => {
               {'⚠️'} Marcados como faltantes ({itemsTachados.length})
             </div>
             {itemsTachados.map(item => (
-              <ItemArmadoCard key={item._key} item={item} producto={productosById.get(String(item.productoId))} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
+              <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
             ))}
             <div style={{ height: 6 }} />
           </>
         )}
 
         {itemsActivos.map(item => (
-          <ItemArmadoCard key={item._key} item={item} producto={productosById.get(String(item.productoId))} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
+          <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
         ))}
 
         <div className="total-row">

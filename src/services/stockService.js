@@ -7,7 +7,7 @@ import {
   addIngresoConMovimientos, getProveedores, putProveedoresRemotos, clearProveedoresPendingSync, deleteProveedor,
 } from '../db';
 import {
-  calcularStock, movimientosParaPedido, verificarStock, decidirFacturacion, movimientoAjuste,
+  calcularStock, revisarMovimientosPedido, mensajeMovimientosInvalidos, verificarStock, decidirFacturacion, movimientoAjuste,
   validarIngreso, refsPedido, STOCK_POLICY,
   movimientoToRemote, movimientoFromRemote, ingresoToRemote, ingresoFromRemote,
 } from '../domain/stock';
@@ -21,14 +21,15 @@ export const getStockMap = async () => calcularStock(await getMovimientosStock()
  */
 export const previsualizarStockPedido = async (pedido, productos = [], policy = STOCK_POLICY) => {
   const movs = await getMovimientosStock();
-  const nuevos = movimientosParaPedido(pedido, movs);
+  // S-BUL-09: los renglones con cantidad invalida no generan movimiento.
+  const { movimientos: nuevos, invalidos } = revisarMovimientosPedido(pedido, movs);
   const stockMap = calcularStock(movs);
   // Solo se controla stock de productos que ya tienen movimientos (inventario
   // cargado). Si no, mientras no se cargue el stock inicial, cada factura
   // pediria confirmacion (revisor, no bloqueante 5). Igual criterio que NuevoPedido.
   const controlados = nuevos.filter(m => stockMap.has(String(m.productoId)));
   const faltantes = verificarStock(controlados, stockMap, productos);
-  return { nuevos, faltantes, decision: decidirFacturacion(faltantes, policy) };
+  return { nuevos, faltantes, decision: decidirFacturacion(faltantes, policy), invalidos, avisoInvalidos: mensajeMovimientosInvalidos(invalidos) };
 };
 
 /**
@@ -50,7 +51,9 @@ export const aplicarStockPedido = async (pedido, { usuario = '', iniciar = false
   const refs = new Set(refsPedido(pedido));
   const delPedido = movs.filter(m => refs.has(m.ref));
   if (!iniciar && delPedido.length === 0) return [];
-  const nuevos = movimientosParaPedido(pedido, delPedido, { usuario });
+  const { movimientos: nuevos, invalidos } = revisarMovimientosPedido(pedido, delPedido, { usuario });
+  // S-BUL-09: se omiten (no traban el sync) y se reportan.
+  if (invalidos.length) console.warn(mensajeMovimientosInvalidos(invalidos));
   if (nuevos.length) await addMovimientosStock(nuevos);
   return nuevos;
 };

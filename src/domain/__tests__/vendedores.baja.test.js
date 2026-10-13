@@ -4,6 +4,7 @@ import {
   argsAdminBajaVendedor, interpretarBajaVendedor, vendedorDesdeRemoto,
   interpretarEstadoRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO,
   MSG_FALTA_MIGRACION_004, MSG_BLOQUEADO,
+  chequeoUltimoAdmin, interpretarGuardarVendedor, MENSAJES_GUARDAR,
 } from '../vendedores';
 
 const ADMIN = { id: 1, remoteId: 7, nombre: 'Jorge', permiso: 1, tienePin: true };
@@ -140,5 +141,60 @@ describe('AC-VEN-1 AC-VEN-5 RPC admin_baja_vendedor', () => {
     expect(interpretarBajaVendedor({ error: { message: 'TypeError: Failed to fetch' } })).toMatchObject({ motivo: 'sin_conexion' });
     expect(interpretarBajaVendedor({ error: { code: 'P0001', message: 'Demasiados intentos. Proba de nuevo en 15 minutos.' } })).toMatchObject({ motivo: 'bloqueado', mensaje: MSG_BLOQUEADO });
     expect(interpretarBajaVendedor({ error: { code: '42501', message: 'permission denied' } })).toMatchObject({ motivo: 'error', mensaje: expect.stringMatching(/permission denied/) });
+  });
+});
+
+// C5b (RUN 20261012-2106) — AC-VEN-4: "admin activo" = activo Y con PIN.
+describe('AC-VEN-4 C5b admin activo con PIN', () => {
+  const SIN_PIN = { id: 5, remoteId: 11, nombre: 'Sin PIN', permiso: 1, tienePin: false };
+
+  it('AC-VEN-4 un admin activo sin PIN no cuenta como "otro admin"', () => {
+    expect(puedeDarDeBaja({ admin: ADMIN, vendedor: ADMIN2, vendedores: [ADMIN, ADMIN2] }).ok).toBe(true);
+    // Si en la lista el único otro admin no tiene PIN, a ADMIN2 no se lo puede dar de baja.
+    expect(puedeDarDeBaja({ admin: ADMIN, vendedor: ADMIN2, vendedores: [ADMIN2, SIN_PIN] }))
+      .toEqual({ ok: false, motivo: 'ultimo_admin', mensaje: 'No se puede dar de baja al último admin activo con PIN.' });
+    // Un admin dado de baja tampoco cuenta.
+    expect(puedeDarDeBaja({ admin: ADMIN, vendedor: ADMIN2, vendedores: [{ ...ADMIN, activo: false }, ADMIN2] }).motivo).toBe('ultimo_admin');
+    // Dar de baja a un admin sin PIN cuando queda otro con PIN, sí.
+    expect(puedeDarDeBaja({ admin: ADMIN, vendedor: SIN_PIN, vendedores: [ADMIN, SIN_PIN] }).ok).toBe(true);
+  });
+
+  it('AC-VEN-4 chequeoUltimoAdmin: degradar o borrar el PIN del último admin con PIN se frena; con otro admin con PIN pasa', () => {
+    const frena = { ok: false, motivo: 'ultimo_admin', mensaje: 'No se puede quitar el último admin activo con PIN.' };
+    const pasa = { ok: true, motivo: null, mensaje: null };
+    // Degradar
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 2, borrarPin: false, tienePin: true }, vendedores: [ADMIN, SIN_PIN, VEND] })).toEqual(frena);
+    // Borrar el PIN (aunque siga como admin)
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 1, borrarPin: true, tienePin: false }, vendedores: [ADMIN] })).toEqual(frena);
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 1, tienePin: false }, vendedores: [ADMIN] })).toEqual(frena);
+    // Con otro admin activo con PIN pasa
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 2 }, vendedores: [ADMIN, ADMIN2] })).toEqual(pasa);
+    // Cambios que no degradan ni sacan PIN
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 1, borrarPin: false, tienePin: true }, vendedores: [ADMIN] })).toEqual(pasa);
+    // El editado no era admin activo con PIN: no aplica
+    expect(chequeoUltimoAdmin({ previo: VEND, datos: { permiso: 3 }, vendedores: [VEND] })).toEqual(pasa);
+    expect(chequeoUltimoAdmin({ previo: SIN_PIN, datos: { permiso: 2 }, vendedores: [SIN_PIN] })).toEqual(pasa);
+    expect(chequeoUltimoAdmin({ previo: { ...ADMIN, activo: false }, datos: { permiso: 2 }, vendedores: [] })).toEqual(pasa);
+    // Entradas hostiles
+    expect(chequeoUltimoAdmin()).toEqual(pasa);
+    expect(chequeoUltimoAdmin({ previo: null, datos: { permiso: 2 } })).toEqual(pasa);
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: null })).toEqual(pasa);
+    expect(chequeoUltimoAdmin({ previo: ADMIN, datos: { permiso: 'x' }, vendedores: 'nada' })).toEqual(frena);
+  });
+
+  it('AC-VEN-4 interpretarGuardarVendedor mapea admin_sin_pin / ultimo_admin / vendedor_inexistente / vendedor_inactivo', () => {
+    const err = (m) => interpretarGuardarVendedor({ data: null, error: { code: 'P0001', message: m } });
+    expect(err('admin_sin_pin')).toEqual({ ok: false, motivo: 'admin_sin_pin', mensaje: 'Un admin tiene que tener PIN (4 a 8 dígitos).' });
+    expect(err('ultimo_admin')).toEqual({ ok: false, motivo: 'ultimo_admin', mensaje: 'No se puede quitar el último admin activo con PIN.' });
+    expect(err('vendedor_inexistente')).toEqual({ ok: false, motivo: 'vendedor_inexistente', mensaje: 'Ese vendedor ya no existe en el servidor. Sincronizá vendedores.' });
+    expect(err('vendedor_inactivo')).toEqual({ ok: false, motivo: 'vendedor_inactivo', mensaje: 'Ese vendedor está dado de baja.' });
+    // data null sigue siendo "PIN de admin incorrecto." (no_autorizado)
+    expect(interpretarGuardarVendedor({ data: null, error: null })).toMatchObject({ ok: false, motivo: 'no_autorizado', mensaje: 'PIN de admin incorrecto.' });
+    expect(MENSAJES_GUARDAR).toHaveProperty('ultimo_admin');
+  });
+
+  it('AC-VEN-4 el servidor que responde ultimo_admin en la baja usa el mismo texto con PIN', () => {
+    expect(interpretarBajaVendedor({ data: { ok: false, motivo: 'ultimo_admin' }, error: null }))
+      .toEqual({ ok: false, motivo: 'ultimo_admin', mensaje: 'No se puede dar de baja al último admin activo con PIN.' });
   });
 });

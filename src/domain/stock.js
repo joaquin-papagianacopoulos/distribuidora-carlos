@@ -63,17 +63,27 @@ export const efectoDeseado = (pedido) => {
  * AC-STK-2..5: movimientos a registrar para que el stock refleje el estado
  * actual del pedido. Idempotente: compara contra lo ya registrado para ese
  * pedido y solo emite la diferencia.
+ * S-BUL-09 (RUN 20261012-2106, iteracion 2): un delta no entero o con
+ * |delta| > MAX_CANTIDAD (pedido legacy o adulterado) NO se emite: el
+ * servidor lo rechazaria (integer, abs <= 1000000) y quedaria pendiente para
+ * siempre trabando el sync. Se devuelve aparte en `invalidos` para avisar.
+ * @returns {{ movimientos: object[], invalidos: Array<{ productoId: string, nombre: string, delta: number }> }}
  */
-export const movimientosParaPedido = (pedido, movimientosExistentes = [], { usuario = '', now = new Date(), genId = nuevoId } = {}) => {
+export const revisarMovimientosPedido = (pedido, movimientosExistentes = [], { usuario = '', now = new Date(), genId = nuevoId } = {}) => {
   const refs = new Set(refsPedido(pedido));
   const actual = calcularStock(movimientosExistentes.filter(mv => refs.has(mv.ref)));
   const deseado = efectoDeseado(pedido);
   const productos = new Set([...actual.keys(), ...deseado.keys()]);
   const nombres = new Map((pedido?.items || []).map(i => [keyProd(i.productoId), i.nombre]));
   const out = [];
+  const invalidos = [];
   for (const k of productos) {
     const delta = (deseado.get(k) || 0) - (actual.get(k) || 0);
     if (delta === 0) continue;
+    if (!Number.isInteger(delta) || Math.abs(delta) > MAX_CANTIDAD) {
+      invalidos.push({ productoId: k, nombre: String(nombres.get(k) ?? ''), delta });
+      continue;
+    }
     out.push({
       id: genId(),
       productoId: k,
@@ -85,7 +95,18 @@ export const movimientosParaPedido = (pedido, movimientosExistentes = [], { usua
       nota: texto(`${pedido?.clienteNombre || ''} ${nombres.get(k) ? `· ${nombres.get(k)}` : ''}`, 160),
     });
   }
-  return out;
+  return { movimientos: out, invalidos };
+};
+
+/** Igual que revisarMovimientosPedido, pero solo los movimientos validos (contrato historico: array). */
+export const movimientosParaPedido = (pedido, movimientosExistentes = [], opciones = {}) =>
+  revisarMovimientosPedido(pedido, movimientosExistentes, opciones).movimientos;
+
+/** Aviso para la pantalla/log de los renglones omitidos por S-BUL-09. */
+export const mensajeMovimientosInvalidos = (invalidos = []) => {
+  const lista = (Array.isArray(invalidos) ? invalidos : []).map(i => i?.nombre || i?.productoId).filter(Boolean);
+  if (!lista.length) return '';
+  return `No se movió el stock de: ${lista.join(', ')} (cantidad no entera o mayor a ${String(MAX_CANTIDAD).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}). Corregí la cantidad del pedido.`;
 };
 
 /**

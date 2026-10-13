@@ -118,6 +118,14 @@ describe('AC-PLA-1 / AC-PLA-2 botones de plantilla', () => {
     await click(container.querySelector('[data-testid="plantilla-clientes"]'));
     await esperar();
     expect(anchorClick.mock.instances[0].download).toBe('plantilla_clientes.xlsx');
+    // AC-PLA-2 (dueño, 2026-10-12): el libro descargado tiene 16 columnas, sin Comisión.
+    const blob = URL.createObjectURL.mock.calls[0][0];
+    const buf = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsArrayBuffer(blob); });
+    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    const enc = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })[0];
+    expect(enc).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
+    expect(enc).toHaveLength(16);
+    expect(enc).not.toContain('Comisión');
   });
 
   it('AC-PLA-2 en Proveedores y Vendedores no aparece el botón', async () => {
@@ -141,7 +149,10 @@ describe('AC-PLA-1 / AC-PLA-2 botones de plantilla', () => {
     await render();
     expect(botonesPlantilla()).toHaveLength(0);
     expect(container.querySelector('input[type="file"]')).toBeNull();
-    expect(container.textContent).toMatch(/No ten.*s permisos/);
+    // T-24 (RUN 20261012-2106): texto exacto, sin mojibake (regla dura 7).
+    expect(container.textContent).toContain('No tenés permisos para acceder a Configuración');
+    expect(container.textContent).not.toMatch(/Descargar plantilla Excel/);
+    expect(container.querySelector('[data-testid="input-import-clientes"]')).toBeNull();
   });
 });
 
@@ -179,6 +190,25 @@ describe('AC-PLA-3 importación de productos con la plantilla', () => {
     expect(container.querySelector('[data-testid="resultado-productos-resumen"]').textContent).toContain('Creados: 1');
   });
 
+  it('AC-PLA-3 AC-PROD-3 si falla ajustarStock el producto queda creado y el resumen dice "creado SIN stock inicial" (no "rechazado")', async () => {
+    addProductoLocal.mockResolvedValueOnce(70).mockResolvedValueOnce(71);
+    ajustarStock.mockRejectedValueOnce(new Error('IDB lleno')).mockResolvedValueOnce(null);
+    await render();
+    const csv = 'Código;Descripción;Precio venta 1;Stock\nS1;Uno;1;5\nS2;Dos;2;7\n';
+    await subir(container.querySelector('input[type="file"]'), { name: 'p.csv', size: csv.length, text: () => Promise.resolve(csv) });
+    expect(addProductoLocal).toHaveBeenCalledTimes(2);
+    expect(ajustarStock).toHaveBeenNthCalledWith(1, 70, 5, { usuario: 'Admin', inicial: true });
+    expect(ajustarStock).toHaveBeenNthCalledWith(2, 71, 7, { usuario: 'Admin', inicial: true });
+    // Nunca se escribe un numero de stock en el producto (regla dura 4).
+    expect(updateProducto).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="resultado-productos-resumen"]').textContent).toContain('Creados: 2 · Actualizados: 0 · Rechazados: 0');
+    expect(container.querySelector('[data-testid="resultado-productos-rechazos"]')).toBeNull();
+    expect(container.querySelector('[data-testid="resultado-productos"]').textContent)
+      .toContain('1 producto(s) creados SIN stock inicial: cargalo desde Stock (Ajuste).');
+    expect(container.querySelector('[data-testid="resultado-productos-stock-fallido"]').textContent)
+      .toContain('Fila 2: creado SIN stock inicial (Stock inicial no cargado: IDB lleno)');
+  });
+
   it('AC-PLA-6 S-07 un XLSX de más de 5 MB no se parsea', async () => {
     await render();
     const arrayBuffer = jest.fn();
@@ -192,6 +222,10 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
   const irAClientes = async () => { await render(); await click(boton('clientes')); };
   const inputClientes = () => container.querySelector('[data-testid="input-import-clientes"]');
 
+  // MOD (RUN 20261012-2106): antes esperaba comision: 5 en el alta y la fila 7
+  // (comisión 150) rechazada. Con AC-PLA-4 (dueño, 2026-10-12) la columna
+  // Comisión se ignora: el alta queda con comision null, la fila 7 se crea
+  // (la comisión ya no se valida) y el resumen avisa que se ignoró.
   it('AC-PLA-4 AC-PLA-5 CSV: crea, actualiza por código (extrasDirty como el form) y muestra resumen con rechazos', async () => {
     await irAClientes();
     const csv = [
@@ -204,23 +238,49 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
       '0045;Comision;Calle 5;;;;150',
     ].join('\n');
     await subir(inputClientes(), { name: 'clientes.csv', size: csv.length, text: () => Promise.resolve(csv) });
-    expect(addCliente).toHaveBeenCalledTimes(1);
+    expect(addCliente).toHaveBeenCalledTimes(2);
     expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({
-      codigo: '0042', nombre: 'Nuevo SA', cuit: '30-71234567-1', vendedor: 'Juan', comision: 5, extrasDirty: true, boletaContraBoleta: false,
+      codigo: '0042', nombre: 'Nuevo SA', cuit: '30-71234567-1', vendedor: 'Juan', comision: null, extrasDirty: true, boletaContraBoleta: false,
     }));
+    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: '0045', comision: null }));
     expect(updateCliente).toHaveBeenCalledWith(expect.objectContaining({ id: 10, nombre: 'Kiosco Pepe SRL', boletaContraBoleta: true, extrasDirty: true }));
     expect(mockApp.recargar).toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="resultado-clientes-resumen"]').textContent).toContain('Creados: 1 · Actualizados: 1 · Rechazados: 4');
+    expect(container.querySelector('[data-testid="resultado-clientes-resumen"]').textContent).toContain('Creados: 2 · Actualizados: 1 · Rechazados: 3');
     const rech = container.querySelector('[data-testid="resultado-clientes-rechazos"]').textContent;
     expect(rech).toContain('Fila 4: CUIT inválido');
     expect(rech).toContain('Fila 5: Vendedor "Viejo" no existe o está dado de baja');
     expect(rech).toContain('Fila 6: Código repetido en el archivo (ya está en la fila 2)');
-    expect(rech).toContain('Fila 7: La comisión debe ser un % entre 0 y 100');
+    expect(rech).not.toMatch(/comisi/i);
+    expect(container.querySelector('[data-testid="resultado-clientes-excluidas"]').textContent)
+      .toBe('La columna "Comisión" se ignoró: la comisión se carga solo desde la ficha del cliente.');
+  });
+
+  it('AC-PLA-4 importar con columna Comisión no pisa la comisión de la ficha de un existente y avisa en el resumen', async () => {
+    mockApp.clientes = [{ id: 10, codigo: '0010', nombre: 'Kiosco Pepe', direccion: 'Mitre 1', comision: 4, boletaContraBoleta: true }];
+    await irAClientes();
+    const csv = 'Código cliente;Razón social;Domicilio de entrega;Comisión\n0010;Kiosco Pepe;Mitre 2;9\n0077;Nuevo;Calle;12\n';
+    await subir(inputClientes(), { name: 'c.csv', size: csv.length, text: () => Promise.resolve(csv) });
+    expect(updateCliente).toHaveBeenCalledTimes(1);
+    expect(updateCliente.mock.calls[0][0]).toMatchObject({ id: 10, direccion: 'Mitre 2', comision: 4 });
+    expect(addCliente).toHaveBeenCalledTimes(1);
+    expect(addCliente.mock.calls[0][0]).toMatchObject({ codigo: '0077', comision: null });
+    const res = container.querySelector('[data-testid="resultado-clientes"]').textContent;
+    expect(res).toContain('1 creado, 1 actualizado');
+    expect(res).toContain('La columna "Comisión" se ignoró');
+  });
+
+  it('AC-PLA-4 sin columna Comisión no aparece el aviso', async () => {
+    await irAClientes();
+    await subir(inputClientes(), { name: 'c.csv', size: 5, text: () => Promise.resolve('Código cliente;Razón social;Domicilio de entrega\n0078;A;B\n') });
+    expect(addCliente).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="resultado-clientes-excluidas"]')).toBeNull();
+    expect(container.querySelector('[data-testid="resultado-clientes"]').textContent).not.toMatch(/Comisi/);
   });
 
   it('AC-PLA-4 XLSX con la plantilla de clientes', async () => {
     await irAClientes();
-    const L = CAMPOS_CLIENTE.map(c => c.label);
+    // MOD (RUN 20261012-2106): la plantilla de clientes ya no tiene Comisión (AC-PLA-2).
+    const L = CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label);
     const file = xlsxFile('plantilla_clientes.xlsx', [L, L.map(l => ({ 'Código cliente': 'X1', 'Razón social': 'Desde Excel', 'Domicilio de entrega': 'Dir', 'Provincia': 'cordoba' }[l] ?? ''))], 'Clientes');
     await subir(inputClientes(), file);
     expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'X1', provincia: 'Córdoba', extrasDirty: true }));

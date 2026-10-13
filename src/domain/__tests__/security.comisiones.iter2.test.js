@@ -93,7 +93,13 @@ describe('AC-SEC-4 S-COM-13 cliente del PASO 2 de la 002 (login 100 % online)', 
   it('AC-SEC-4 S-COM-13 el login no compara contra un PIN local: valida con rpc verificar_pin', () => {
     expect(SELECTOR).not.toMatch(/\.pin\b/);
     expect(SELECTOR).not.toMatch(/expected|pinClean\s*!==/);
-    expect(SELECTOR).toMatch(/verificarPinIngreso\(/);
+    // MOD (RUN 20261012-2106, C5 / S-COM-18): el selector usa ingresarConPin,
+    // que verifica con verificarPinIngreso (rpc verificar_pin) y recién después
+    // lee la fila del servidor. La garantía (el PIN lo valida el servidor) se mantiene.
+    expect(SELECTOR).toMatch(/ingresarConPin\(/);
+    const ingresar = VSERV.slice(VSERV.indexOf('export const ingresarConPin'));
+    expect(ingresar).toMatch(/await verificarPinIngreso\(vendedor, pin/);
+    expect(ingresar.indexOf('verificarPinIngreso(')).toBeLessThan(ingresar.indexOf('leerFilaVendedor('));
     expect(VSERV).toMatch(/supabase\.rpc\('verificar_pin', \{ p_vendedor_id: String\(rid\), p_pin:/);
   });
 
@@ -149,14 +155,24 @@ describe('AC-COM-16 S-COM-15 ajustes serializados por pedido', () => {
   const C = () => cuerpoFn(SQL_003, 'cerrar_comisiones');
   const A = () => cuerpoFn(SQL_003, 'anular_cierre_comisiones');
 
-  it('AC-COM-16 S-COM-15 cerrar_comisiones toma un lock por pedido, en orden, despues de autorizar y antes de validar', () => {
+  // MOD (RUN 20261012-2106, C7 / S-COM-21): antes fijaba un lock por pedido
+  // (hasta 5000 por transacción). Ahora es UN lock global; las aserciones de
+  // orden se conservan y se aplican al lock global, más "un solo lock" y "no
+  // quedan locks por pedido".
+  it('AC-COM-16 S-COM-21 cerrar_comisiones toma UN lock global después de autorizar y antes de idempotencia/validaciones/insert; no quedan locks por pedido', () => {
     const c = C();
-    const lock = c.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_pedido:' || v_pid))");
+    const lock = c.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_global'))");
     expect(lock).toBeGreaterThan(-1);
-    expect(c).toMatch(/for v_pid in select distinct r->>'pedido_id' from jsonb_array_elements\(p_renglones\) r order by 1 loop/);
+    expect(c.match(/pg_advisory_xact_lock/g)).toHaveLength(1);
+    expect(c).not.toContain('comisiones_pedido:');
+    expect(c).not.toContain('comisiones_cierre:');
+    expect(c).not.toMatch(/for v_pid in/);
+    expect(lock).toBeGreaterThan(c.indexOf('public.verificar_pin('));
     expect(lock).toBeGreaterThan(c.indexOf("'no_autorizado'"));
+    expect(lock).toBeLessThan(c.indexOf("'ya_existia', true"));
     expect(lock).toBeLessThan(c.indexOf("'pedido_invalido'"));
     expect(lock).toBeLessThan(c.indexOf("'ajuste_invalido'"));
+    expect(lock).toBeLessThan(c.indexOf("'montos_inconsistentes'"));
     expect(lock).toBeLessThan(c.indexOf('insert into public.comisiones_cierre_pedidos'));
   });
 
@@ -167,10 +183,18 @@ describe('AC-COM-16 S-COM-15 ajustes serializados por pedido', () => {
     expect(ins).not.toMatch(/\(r->>'ajuste_seq'\)::int/);
   });
 
-  it('AC-COM-12 S-COM-15 anular un cierre base con ajustes vigentes en otros cierres se BLOQUEA', () => {
+  // MOD (RUN 20261012-2106, C7 / S-COM-21): el lock por pedido pasa a ser el
+  // lock global, tomado después de autorizar y ANTES del for update.
+  it('AC-COM-12 S-COM-21 anular toma el lock global después de autorizar y antes del for update y de tiene_ajustes_vigentes (S-COM-15: se BLOQUEA)', () => {
     const a = A();
-    const lock = a.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_pedido:' || v_pid))");
+    const lock = a.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_global'))");
     const rechazo = a.indexOf("'tiene_ajustes_vigentes'");
+    expect(lock).toBeGreaterThan(-1);
+    expect(a.match(/pg_advisory_xact_lock/g)).toHaveLength(1);
+    expect(a).not.toContain('comisiones_pedido:');
+    expect(a).not.toMatch(/for v_pid in/);
+    expect(lock).toBeGreaterThan(a.indexOf('public.verificar_pin('));
+    expect(lock).toBeLessThan(a.indexOf('for update'));
     expect(lock).toBeGreaterThan(a.indexOf("'no_autorizado'"));
     expect(rechazo).toBeGreaterThan(lock);
     expect(rechazo).toBeLessThan(a.indexOf('update public.comisiones_cierres'));

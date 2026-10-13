@@ -5,6 +5,7 @@ import {
   argsAdminGuardarVendedor, interpretarGuardarVendedor, esErrorDeConexion,
   COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_LEGACY,
   MSG_SIN_CONEXION, MSG_BLOQUEADO, MSG_FALTA_MIGRACION, MSG_SIN_SINCRONIZAR,
+  vendedorDeSesion, interpretarFilaIngreso, MSG_NO_CONFIRMADO, MSG_DADO_DE_BAJA,
 } from '../vendedores';
 
 describe('AC-SEC-4 S-COM-13 el PIN no queda en el dispositivo', () => {
@@ -168,5 +169,53 @@ describe('AC-SEC-2 S-COM-13 alta/edicion de vendedores por admin_guardar_vendedo
     expect(interpretarGuardarVendedor({ error: { code: 'P0001', message: 'El PIN debe tener entre 4 y 8 digitos' } }))
       .toMatchObject({ ok: false, motivo: 'error', mensaje: expect.stringMatching(/4 y 8/) });
     expect(interpretarGuardarVendedor()).toMatchObject({ ok: false, motivo: 'no_autorizado' });
+  });
+});
+
+// C5 (RUN 20261012-2106) — S-COM-18: la sesión se arma con la fila del servidor.
+describe('AC-SEC-4 S-COM-18 vendedorDeSesion / interpretarFilaIngreso', () => {
+  const LOCAL = { id: 2, remoteId: 99, nombre: 'Forjado', zona: 'X', permiso: 1, tienePin: false, createdAt: 3, pin: '1234', pin_hash: 'h' };
+
+  it('AC-SEC-4 S-COM-18 vendedorDeSesion toma permiso/nombre/zona del servidor e ignora el permiso local', () => {
+    const s = vendedorDeSesion(LOCAL, { id: 8, nombre: ' Carlos ', zona: 'Sur', permiso: 2, tiene_pin: true, activo: true, pin_hash: 'zzz' });
+    expect(s).toEqual({ id: 2, createdAt: 3, nombre: 'Carlos', zona: 'Sur', permiso: 2, tienePin: true, remoteId: 8, activo: true });
+    expect(s).not.toHaveProperty('pin');
+    expect(s).not.toHaveProperty('pin_hash');
+  });
+
+  it('AC-SEC-4 S-COM-18 activo false o fila ausente => null; permiso inválido => 2', () => {
+    expect(vendedorDeSesion(LOCAL, { id: 8, nombre: 'C', permiso: 1, activo: false })).toBeNull();
+    expect(vendedorDeSesion(LOCAL, null)).toBeNull();
+    expect(vendedorDeSesion(LOCAL, undefined)).toBeNull();
+    expect(vendedorDeSesion(LOCAL, [1])).toBeNull();
+    expect(vendedorDeSesion(LOCAL, 'fila')).toBeNull();
+    expect(vendedorDeSesion(LOCAL, { id: 8, nombre: 'C', permiso: 'admin' }).permiso).toBe(2);
+    expect(vendedorDeSesion(LOCAL, { id: 8, nombre: 'C', permiso: 9 }).permiso).toBe(2);
+    expect(vendedorDeSesion(LOCAL, { id: 8, nombre: 'C', permiso: 3 }).permiso).toBe(3);
+  });
+
+  it('AC-SEC-4 S-COM-18 sin local, sin nombre/zona/tiene_pin/activo en la fila: valores neutros', () => {
+    expect(vendedorDeSesion(null, { id: 8, permiso: 2 })).toEqual({ nombre: '', zona: '', permiso: 2, tienePin: false, remoteId: 8 });
+    // Si el servidor no manda nombre, se conserva el local (no queda la sesión sin nombre).
+    expect(vendedorDeSesion({ id: 1, nombre: 'Local' }, { id: 8, permiso: 2, nombre: null, zona: null, activo: null })).toEqual({
+      id: 1, nombre: 'Local', zona: '', permiso: 2, tienePin: false, remoteId: 8,
+    });
+  });
+
+  it('AC-SEC-4 S-COM-18 decidirIngreso: el solo-local entra con permiso 2', () => {
+    expect(decidirIngreso({ id: 5, nombre: 'L', permiso: 1 }, { online: true })).toEqual({ accion: 'entrar', mensaje: null, permiso: 2 });
+    expect(decidirIngreso({ id: 5, nombre: 'L', permiso: 1, remoteId: '' }, { online: true })).toMatchObject({ permiso: 2 });
+  });
+
+  it('AC-SEC-4 S-COM-18 interpretarFilaIngreso: red, error, sin fila, inactivo, ok', () => {
+    expect(interpretarFilaIngreso({ data: null, error: { message: 'Failed to fetch' } })).toEqual({ ok: false, motivo: 'sin_conexion', mensaje: MSG_NO_CONFIRMADO });
+    expect(interpretarFilaIngreso({ data: null, error: { code: '42501', message: 'permission denied' } })).toEqual({ ok: false, motivo: 'error', mensaje: MSG_NO_CONFIRMADO });
+    expect(interpretarFilaIngreso({ data: null, error: null })).toMatchObject({ ok: false, motivo: 'no_existe' });
+    expect(interpretarFilaIngreso({ data: [], error: null })).toMatchObject({ ok: false, motivo: 'no_existe' });
+    expect(interpretarFilaIngreso({ data: { id: 1, activo: false }, error: null })).toEqual({ ok: false, motivo: 'inactivo', mensaje: MSG_DADO_DE_BAJA });
+    const fila = { id: 1, activo: true };
+    expect(interpretarFilaIngreso({ data: fila, error: null })).toEqual({ ok: true, motivo: 'ok', mensaje: null, fila });
+    expect(interpretarFilaIngreso()).toMatchObject({ ok: false, motivo: 'no_existe' });
+    expect(MSG_NO_CONFIRMADO).toBe('No se pudo confirmar tu usuario. Probá de nuevo.');
   });
 });

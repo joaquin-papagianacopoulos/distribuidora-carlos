@@ -129,9 +129,13 @@ describe('AC-COM-16 AC-SEC-5 auditoria de la migracion 003', () => {
     expect(c).toContain("'id_en_uso'");
   });
 
-  it('AC-COM-16 S-COM-09 lock por id antes del chequeo de idempotencia y rechazo de renglones duplicados', () => {
+  // MOD (RUN 20261012-2106, C7 / S-COM-21): la misma garantía de orden que
+  // antes (lock después de autorizar y antes de la idempotencia), con la clave
+  // nueva: el lock global reemplaza al lock por id de cierre.
+  it('AC-COM-16 S-COM-09 S-COM-21 el lock global va antes del chequeo de idempotencia y rechazo de renglones duplicados', () => {
     const c = cuerpoFn('cerrar_comisiones');
-    const lock = c.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_cierre:' || v_id))");
+    const lock = c.indexOf("perform pg_advisory_xact_lock(hashtext('comisiones_global'))");
+    expect(lock).toBeGreaterThan(-1);
     expect(lock).toBeGreaterThan(c.indexOf('public.verificar_pin('));
     expect(lock).toBeLessThan(c.indexOf("'ya_existia', true"));
     expect(c).toContain("'renglones_duplicados'");

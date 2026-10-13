@@ -125,6 +125,9 @@ grant execute on function public.verificar_pin(text, text) to anon, authenticate
 
 -- admin_guardar_vendedor: alta/edicion de vendedores con rol o PIN, autorizada
 -- por el PIN de un admin (permiso = 1 y con PIN). Devuelve el id.
+-- RUN 20261012-2106: La 004 la redefine (S-COM-20 + activo). Si se vuelve a
+-- correr la 002 PASO 1, volver a correr la 004. El cuerpo de aca no se toca
+-- porque la version nueva usa la columna activo, que no existe hasta la 004.
 create or replace function public.admin_guardar_vendedor(
   p_admin_id text, p_admin_pin text,
   p_vendedor_id text, p_nombre text, p_zona text, p_permiso int,

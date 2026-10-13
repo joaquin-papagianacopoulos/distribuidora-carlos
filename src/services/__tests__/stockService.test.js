@@ -179,13 +179,19 @@ describe('aplicarStockPedido — ciclo de vida del pedido', () => {
     expect(await stock(1)).toBe(10);
   });
 
-  it('AC-STK-2 cantidades decimales / inválidas: ignora <=0 y NaN', async () => {
+  // MOD (RUN 20261012-2106 iteracion 2, S-BUL-09): antes una cantidad decimal
+  // (1.5) generaba un movimiento de -1.5 que el servidor rechaza (integer) y
+  // quedaba pendiente para siempre. Ahora se omite y se reporta (console.warn).
+  it('AC-STK-2 S-BUL-09 cantidades decimales / inválidas: ignora <=0 y NaN; la decimal no mueve stock', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const nuevos = await facturar(pedido({ items: [
       { productoId: 1, cantidad: 1.5 }, { productoId: 2, cantidad: 0 }, { productoId: 2, cantidad: 'abc' }, { cantidad: 4 },
     ] }));
-    expect(nuevos).toHaveLength(1);
-    expect(await stock(1)).toBe(8.5);
+    expect(nuevos).toHaveLength(0);
+    expect(await stock(1)).toBe(10);
     expect(await stock(2)).toBe(10);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/No se movió el stock de: 1/));
+    warn.mockRestore();
   });
 
   it('AC-STK-2 pedido null/undefined no hace nada', async () => {

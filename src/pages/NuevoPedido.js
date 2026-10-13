@@ -7,7 +7,7 @@ import { crearPedidoOnlineFirst } from '../services/pedidoRepository';
 import { normalizePedidoFecha } from '../utils/pedidos';
 import { avisosItemPedido } from '../domain/productos';
 import { stockDe } from '../domain/stock';
-import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones } from '../domain/bultos';
+import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
 
 const Toast = ({ msg, type, onClose }) => {
@@ -47,19 +47,25 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
   const handleCantidadChange = (e) => {
     const val = e.target.value;
     setCantidadText(val);
-    const n = parseInt(val);
-    if (!isNaN(n) && n > 0) onSetCantidad(item.productoId, n);
+    // C3 / S-BUL-06: solo se toma un entero en [1, MAX_CANTIDAD]. Con otro
+    // texto (vacío, 0, decimal, > tope) la cantidad queda la anterior.
+    const n = cantidadTipeada(val);
+    if (n !== null) onSetCantidad(item.productoId, n);
     // Si el campo está vacío, NO eliminamos — esperamos que el usuario termine de escribir
   };
 
   const handleCantidadBlur = () => {
-    const n = parseInt(cantidadText);
-    if (!n || n <= 0) {
+    const n = cantidadTipeada(cantidadText);
+    if (n !== null) {
+      setCantidadText(String(n));
+    } else if (parseInt(cantidadText, 10) > 0) {
+      // C3: texto no vacío pero inválido (p. ej. > MAX_CANTIDAD): se vuelve a
+      // la última cantidad válida.
+      setCantidadText(String(item.cantidad));
+    } else {
       // Al salir del campo vacío, restablecer a 1 en lugar de eliminar
       setCantidadText('1');
       onSetCantidad(item.productoId, 1);
-    } else {
-      setCantidadText(String(n));
     }
   };
 
@@ -86,7 +92,7 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
     if (val == null) return;
     const n = parseFloat(String(val).replace(',', '.'));
     if (isNaN(n) || n < 0 || n > 100) {
-      alert('Porcentaje invÃ¡lido (0-100).');
+      alert('Porcentaje inválido (0-100).');
       return;
     }
     onSetDescuentoPct(item.productoId, n);
@@ -321,6 +327,10 @@ const NuevoPedido = () => {
   const guardar = async () => {
     if (!clienteNombre.trim()) { setToast({ msg: 'Ingresá el nombre del cliente', type: 'error' }); return; }
     if (items.length === 0) { setToast({ msg: 'Agregá al menos un producto', type: 'error' }); return; }
+    // C3 / S-BUL-06 (AC-SEC-2): defensa en profundidad antes de guardar
+    // (y antes de cualquier efecto, como dar de alta el cliente).
+    const vc = validarCantidadesItems(items);
+    if (!vc.ok) { alert(mensajeCantidadesInvalidas(vc.errores)); return; }
 
     // Si el cliente no existe en el maestro, guardarlo para que aparezca en sugerencias otro dia.
     const nombreFinal = clienteNombre.trim();

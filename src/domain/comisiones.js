@@ -706,6 +706,28 @@ export const validarAnulacion = (cierre, motivo, usuario, now = Date.now()) => {
   return { ok: true, errores, patch: { estado: 'anulado', anuladoAt: now, anuladoPor: por, motivoAnulacion: m } };
 };
 
+// C2 (AC-COM-12, RUN 20261012-2106): estado del botón "Confirmar anulación" y
+// texto de ayuda visible mientras está deshabilitado. Usa la MISMA
+// normalización (texto()) y los mismos MIN_MOTIVO / MAX_MOTIVO que
+// validarAnulacion, para que la UI y el dominio no se contradigan.
+// Solo strings y números cuentan como texto: un objeto o null es "vacío".
+const textoPlano = (v) => (typeof v === 'string' || typeof v === 'number' ? texto(v, 10000) : '');
+export const AYUDA_ANULACION = Object.freeze({
+  procesando: 'Anulando...',
+  motivoCorto: `Escribí el motivo (mínimo ${MIN_MOTIVO} letras)`,
+  motivoLargo: `El motivo no puede superar ${MAX_MOTIVO} caracteres`,
+  sinPin: 'Ingresá tu PIN de admin',
+});
+export const ayudaAnulacion = (entrada) => {
+  const { motivo, pin, procesando } = entrada && typeof entrada === 'object' ? entrada : {};
+  if (procesando) return { habilitado: false, ayuda: AYUDA_ANULACION.procesando };
+  const m = textoPlano(motivo);
+  if (m.length < MIN_MOTIVO) return { habilitado: false, ayuda: AYUDA_ANULACION.motivoCorto };
+  if (m.length > MAX_MOTIVO) return { habilitado: false, ayuda: AYUDA_ANULACION.motivoLargo };
+  if (!textoPlano(pin)) return { habilitado: false, ayuda: AYUDA_ANULACION.sinPin };
+  return { habilitado: true, ayuda: null };
+};
+
 // S-COM-15 (iteración 3): ids de OTROS cierres que ocupan (vigentes o
 // pendientes) y tienen ajustes de pedidos que este cierre tiene como base. Si
 // hay alguno, el cierre no se anula (el servidor también lo rechaza con

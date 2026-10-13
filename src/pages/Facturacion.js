@@ -12,7 +12,7 @@ import { registrarDeudaFacturado, quitarDeudaDePedido, actualizarMontoDeudaDePed
 import { borrarFaltantesDeProducto } from '../services/faltanteRepository';
 import { previsualizarStockPedido } from '../services/stockService';
 import { isPedidoVisible, normalizePedidoFecha, getArmadoLog, getDeudaPendienteParaPedido } from '../utils/pedidos';
-import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones } from '../domain/bultos';
+import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
 import { acotarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
@@ -98,9 +98,13 @@ const FacturacionItemRow = ({
 
   const handleCantidadChange = (e) => setCantidadText(e.target.value);
   const handleCantidadBlur = (e) => {
-    const n = parseInt(String(e.currentTarget.value ?? '').trim(), 10);
-    if (!n || n <= 0) setCantidadText('1');
-    else setCantidadText(String(n));
+    const valor = String(e.currentTarget.value ?? '').trim();
+    // C3 / S-BUL-06: entero en [1, MAX_CANTIDAD]; un texto no vacío inválido
+    // (p. ej. mayor al tope) vuelve a la última cantidad válida del renglón.
+    const n = cantidadTipeada(valor);
+    if (n !== null) setCantidadText(String(n));
+    else if (parseInt(valor, 10) > 0) setCantidadText(String(item.cantidad));
+    else setCantidadText('1');
   };
 
   const handlePrecioChange = (e) => setPrecioText(e.target.value);
@@ -259,10 +263,10 @@ const Facturacion = () => {
   if (!isAdmin) {
     return (
       <div className="page">
-        <h1 className="page-title">FacturaciÃ³n</h1>
+        <h1 className="page-title">Facturación</h1>
         <div className="empty-state">
           <div className="empty-icon">{'\u26D4'}</div>
-          <div className="empty-text">No tenÃ©s permisos para facturar</div>
+          <div className="empty-text">No tenés permisos para facturar</div>
         </div>
       </div>
     );
@@ -456,7 +460,8 @@ const Facturacion = () => {
     // conocida (itemsEditRef); los updaters quedan puros (sin efectos).
     const actual = itemsEditRef.current.find(i => i.productoId === productoId);
     if (!actual) return;
-    const bx = getProductoActual(actual)?.bultoX;
+    // C4 / S-BUL-08: el bulto sale SOLO del producto con el mismo id.
+    const bx = productoParaBulto(actual, productosIndex.byId)?.bultoX;
     const cantidad = op === 'sumar'
       ? sumarBultoRenglon(actual.cantidad, bx, { cantidadPorDefecto: actual[MARCA_CANTIDAD_POR_DEFECTO] === true })
       : restarBulto(actual.cantidad, bx, { minimo: CANTIDAD_MINIMA_RENGLON });
@@ -499,8 +504,9 @@ const Facturacion = () => {
     }
     draftRef.current = { ...draftRef.current, [productoId]: { ...(draftRef.current[productoId] || {}), cantidadText: raw } };
     setDraftByPid(prev => ({ ...prev, [productoId]: { ...(prev[productoId] || {}), cantidadText: raw } }));
-    const n = parseInt(raw, 10);
-    if (!isNaN(n) && n > 0) setCantidad(productoId, n);
+    // C3 / S-BUL-06: una cantidad mayor que MAX_CANTIDAD no se toma.
+    const n = cantidadTipeada(raw);
+    if (n !== null) setCantidad(productoId, n);
   };
 
   const draftPrecio = (productoId, text) => {
@@ -516,7 +522,7 @@ const Facturacion = () => {
     if (val == null) return;
     const n = parseFloat(String(val).replace(',', '.'));
     if (isNaN(n) || n < 0 || n > 100) {
-      alert('Porcentaje invÃ¡lido (0-100).');
+      alert('Porcentaje inválido (0-100).');
       return;
     }
     const base = Number(item.precioOriginal ?? item.precio ?? 0);
@@ -535,7 +541,7 @@ const Facturacion = () => {
     if (val == null) return;
     const n = parseFloat(String(val).replace(',', '.'));
     if (isNaN(n) || n < 0 || n > 100) {
-      alert('Porcentaje invalido (0-100).');
+      alert('Porcentaje inválido (0-100).');
       return;
     }
 
@@ -608,12 +614,22 @@ const Facturacion = () => {
         const d = draftsSnap[it.productoId];
         if (!d) return it;
         const next = { ...it };
-        const cn = parseInt(String(d.cantidadText ?? '').trim(), 10);
-        if (!isNaN(cn) && cn > 0) next.cantidad = cn;
+        // C3 / S-BUL-06: solo una cantidad tipeada válida pisa la del renglón.
+        const cn = cantidadTipeada(String(d.cantidadText ?? ''));
+        if (cn !== null) next.cantidad = cn;
         const pn = parseFloat(String(d.precioText ?? '').trim().replace(',', '.'));
         if (!isNaN(pn) && pn >= 0) next.precio = pn;
         return next;
       }));
+
+      // C3 / S-BUL-06 (AC-BUL-7, AC-STK-8): ninguna cantidad cambiada puede
+      // superar MAX_CANTIDAD ni ser no entera; si no, el movimiento de stock
+      // quedaría trabado en el servidor. Lo legacy sin cambios pasa (R10).
+      const vc = validarCantidadesItems(itemsFinal, { previos: pedidoEditando.items });
+      if (!vc.ok) {
+        alert(mensajeCantidadesInvalidas(vc.errores));
+        return;
+      }
 
       // Lo que se destacho sale de la lista de faltantes del pedido.
       const logOriginal = getArmadoLog(pedidoEditando);
@@ -677,7 +693,9 @@ const Facturacion = () => {
     // REQ-STK (AC-STK-6): antes de facturar se verifica que alcance el stock.
     // El descuento en si lo hace guardarPedidoOnlineFirst (idempotente).
     try {
-      const { faltantes: sinStock, decision } = await previsualizarStockPedido({ ...p, estado: 'facturado' }, productos || []);
+      const { faltantes: sinStock, decision, avisoInvalidos } = await previsualizarStockPedido({ ...p, estado: 'facturado' }, productos || []);
+      // S-BUL-09: renglones con cantidad invalida no mueven stock; se avisa.
+      if (avisoInvalidos) alert(avisoInvalidos);
       if (decision !== 'ok') {
         const detalle = sinStock.map(f => `• ${f.nombre}: hay ${f.disponible}, se necesitan ${f.requerido}`).join('\n');
         if (decision === 'bloquear') {
@@ -916,7 +934,7 @@ const Facturacion = () => {
                 precioListaActual={precioListaActual}
                 puedeAplicarPrecioLista={puedeAplicarPrecioLista}
                 onAplicarPrecioLista={aplicarPrecioLista}
-                producto={productoActual}
+                producto={productoParaBulto(item, productosIndex.byId)}
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
               />

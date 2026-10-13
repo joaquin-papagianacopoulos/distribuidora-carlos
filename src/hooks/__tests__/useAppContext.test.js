@@ -14,12 +14,24 @@ jest.mock('../../db', () => {
     getProductos: vacio, getClientes: vacio, getPedidos: vacio, getFaltantes: vacio, getDeudas: vacio,
     getProveedores: vacio, getMovimientosStock: vacio, getIngresos: vacio,
     getVendedores: async () => mockVendedores.lista.map(v => ({ ...v })),
+    // C5 (S-COM-18): el login persiste la fila del servidor en el registro local.
+    updateVendedor: async (v) => { mockVendedores.lista = mockVendedores.lista.map(x => (x.id === v.id ? { ...v } : x)); },
   };
   const mod = { __impl: impl };
   for (const k of Object.keys(impl)) mod[k] = jest.fn(impl[k]);
   return mod;
 });
 jest.mock('../../services/stockService', () => ({ syncStock: jest.fn() }));
+const mockSb = { rpcRespuestas: [], selectRespuestas: [] };
+jest.mock('../../lib/supabase', () => ({
+  supabase: {
+    rpc: () => Promise.resolve(mockSb.rpcRespuestas.shift() || { data: false, error: null }),
+    from: () => {
+      const api = { select: () => api, eq: () => api, maybeSingle: () => Promise.resolve(mockSb.selectRespuestas.shift() || { data: null, error: null }) };
+      return api;
+    },
+  },
+}));
 jest.mock('../../sync/syncService', () => ({
   syncPedidosPendientes: jest.fn(), downloadMaestros: jest.fn(), pullPedidosRecientes: jest.fn(),
   pullPedidosByFecha: jest.fn(), pullPedidosByClienteNombre: jest.fn(), syncFaltantes: jest.fn(),
@@ -29,6 +41,7 @@ jest.mock('../../sync/syncService', () => ({
 import * as db from '../../db';
 import { AppProvider, useApp } from '../useAppContext';
 import { getUsuarioSesion, getNombreUsuarioSesion, setUsuarioSesion } from '../../services/sesion';
+import { ingresarConPin } from '../../services/vendedoresService';
 
 let container;
 let root;
@@ -249,5 +262,26 @@ describe('AC-VEN-4 sesion de un vendedor dado de baja', () => {
     expect(ctx.actual.vendedorActual).toBeNull();
     expect(getUsuarioSesion()).toBeNull();
     expect(localStorage.getItem('vendedorActual')).toBeNull();
+  });
+});
+
+// C5 (RUN 20261012-2106) — S-COM-18: el login persiste la fila del servidor en
+// el registro local, así el efecto que mezcla `found` sobre vendedorActual no
+// vuelve a subir un permiso adulterado en IndexedDB.
+describe('AC-SEC-4 S-COM-18 login con datos del servidor + recarga', () => {
+  it('AC-SEC-4 S-COM-18 después de entrar con los datos del servidor, recargar no vuelve a subir el permiso', async () => {
+    // Registro local de Carlos adulterado a admin (y con "PIN" para pasar por verificar_pin).
+    mockVendedores.lista[1] = { id: 2, remoteId: 'u-vend', nombre: 'Carlos', permiso: 1, tienePin: true, zona: 'Norte' };
+    mockSb.rpcRespuestas = [{ data: true, error: null }];
+    mockSb.selectRespuestas = [{ data: { id: 'u-vend', nombre: 'Carlos', zona: 'Norte', permiso: 2, tiene_pin: true, activo: true }, error: null }];
+    await montar();
+    const r = await ingresarConPin(mockVendedores.lista[1], '1111', { online: true });
+    expect(r.ok).toBe(true);
+    // El registro local quedó con la verdad del servidor.
+    expect(mockVendedores.lista[1]).toMatchObject({ id: 2, permiso: 2 });
+    await act(async () => { ctx.actual.seleccionarVendedor(r.vendedor); });
+    await act(async () => { await ctx.actual.recargar(); });
+    await act(async () => { await new Promise(res => setTimeout(res, 0)); });
+    expect(ctx.actual.vendedorActual).toMatchObject({ id: 2, nombre: 'Carlos', permiso: 2 });
   });
 });

@@ -245,3 +245,50 @@ describe('AC-BUL-9 Nuevo Pedido: unidad por defecto', () => {
     expect(JSON.stringify(items)).not.toContain('_cantidadPorDefecto');
   });
 });
+
+// C3 (RUN 20261012-2106) — S-BUL-06
+describe('S-BUL-06 Nuevo Pedido: tope de cantidad tipeada', () => {
+  const tipear = async (input, valor) => {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, valor);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const blur = async (input) => { await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); }); };
+  const botonGuardar = () => [...container.querySelectorAll('button')].find(b => b.textContent.includes('Guardar Pedido'));
+
+  test('AC-BUL-6 S-BUL-06 Nuevo Pedido: una cantidad mayor que MAX_CANTIDAD no se toma; el blur restaura la última válida', async () => {
+    setApp();
+    sembrarBorrador(VENDEDOR, 5);
+    await render();
+    await tipear(cantidadInput(), '2000000');
+    // La cantidad del renglón (y del borrador) sigue en 5.
+    expect(JSON.parse(localStorage.getItem('nuevoPedidoDraft:2')).items[0].cantidad).toBe(5);
+    await blur(cantidadInput());
+    expect(cantidadInput().value).toBe('5');
+  });
+
+  test('AC-BUL-6 S-BUL-06 Nuevo Pedido: cantidades válidas siguen igual ("7" se toma; vacío al salir vuelve a 1)', async () => {
+    setApp();
+    sembrarBorrador(VENDEDOR, 5);
+    await render();
+    await tipear(cantidadInput(), '7');
+    expect(JSON.parse(localStorage.getItem('nuevoPedidoDraft:2')).items[0].cantidad).toBe(7);
+    await tipear(cantidadInput(), '');
+    await blur(cantidadInput());
+    expect(cantidadInput().value).toBe('1');
+  });
+
+  test('AC-BUL-6 AC-SEC-2 S-BUL-06 Nuevo Pedido: un renglón con cantidad fuera de tope no se guarda y avisa', async () => {
+    const { crearPedidoOnlineFirst } = require('../../services/pedidoRepository');
+    crearPedidoOnlineFirst.mockClear();
+    window.alert = jest.fn();
+    setApp();
+    sembrarBorrador(VENDEDOR, 2000000);
+    await render();
+    await click(botonGuardar());
+    expect(crearPedidoOnlineFirst).not.toHaveBeenCalled();
+    expect(window.alert).toHaveBeenCalledWith('Cantidad inválida en: Coca 500 (máximo 1.000.000)');
+  });
+});

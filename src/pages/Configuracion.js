@@ -14,8 +14,11 @@ import { ajustarStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
 import { nuevoId } from '../domain/validacion';
 import { stockDe } from '../domain/stock';
-import { planificarImportacion, resumirEntradas, textoResumen } from '../domain/plantillas';
+import { planificarImportacion, resumirEntradas, textoResumen, avisoColumnasExcluidas } from '../domain/plantillas';
 import { descargarPlantilla } from '../services/plantillaExcel';
+import { leerFilasArchivo } from '../services/lectorPlanillas';
+import { ACCEPT_IMPORT, rechazosVisibles } from '../domain/importacion';
+import { COLUMNAS_PLANTILLA } from '../domain/plantillas';
 import { syncProductos, buscarImagenesFaltantes } from '../sync/syncService';
 import { guardarVendedorAdmin, darDeBajaVendedorAdmin } from '../services/vendedoresService';
 import { filtrarActivos, vendedoresParaSelector, MSG_BAJA_SIN_CONEXION } from '../domain/vendedores';
@@ -26,75 +29,58 @@ import { detectarMarca } from '../utils/brands';
 const TABS = ['productos', 'clientes', 'proveedores', 'vendedores'];
 
 
-const parseCSVLine = (line) => {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; }
-    else if ((ch === ',' || ch === ';') && !inQuotes) { result.push(current.trim()); current = ''; }
-    else { current += ch; }
-  }
-  result.push(current.trim());
-  return result;
-};
-
-// S-07: xlsx 0.18.5 tiene CVEs de prototype pollution / ReDoS al PARSEAR
-// archivos. Mitigacion hasta actualizar a la version de cdn.sheetjs.com:
-// solo admin importa, y se rechazan archivos grandes.
-export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
-
-// Lee un CSV/XLSX y devuelve las filas crudas (primera hoja). Las lineas en
-// blanco se conservan para que el numero de fila del resumen coincida con el
-// del archivo (AC-PLA-5).
-const leerFilas = async (file) => {
-  if (file.size > MAX_IMPORT_BYTES) throw new Error('El archivo supera 5 MB.');
-  const name = String(file.name || '').toLowerCase();
-  if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-    const XLSX = await import('xlsx');
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
-    const hoja = wb.SheetNames?.[0];
-    if (!hoja) throw new Error('El archivo XLSX no tiene hojas.');
-    return XLSX.utils.sheet_to_json(wb.Sheets[hoja], { header: 1, raw: false, defval: '', blankrows: true });
-  }
-  const contenido = await file.text();
-  return String(contenido).split('\n').map(l => l.trim()).map(l => (l ? parseCSVLine(l) : []));
-};
+// REQ-PLA (iteracion 2): la lectura del archivo (CSV/XLSX, limites, Worker,
+// codificacion, delimitador, fechas) esta en services/lectorPlanillas.js.
+// En un CSV, una fila con celdas de mas se rechaza (BUG-PLA-02) y una fecha
+// con año de 2 digitos se lee D/M/AA; en un XLSX las fechas ya llegan ISO.
+const opcionesPlan = (origen) => (origen === 'csv'
+  ? { celdasDeMas: true, fechaCorta: 'dmy' }
+  : { celdasDeMas: false, fechaCorta: 'mdy' });
 
 // REQ-PLA / AC-PROD-5: la decision (crear / actualizar / rechazar) la toma el
 // dominio (planificarImportacion); aca solo se ejecuta el plan.
-const importarProductos = async (rows, { proveedores, usuario }) => {
-  const plan = planificarImportacion(rows, 'productos', { existentes: await getProductos(), proveedores });
+const importarProductos = async (rows, { proveedores, usuario, origen }) => {
+  const plan = planificarImportacion(rows, 'productos', { existentes: await getProductos(), proveedores, ...opcionesPlan(origen) });
   if (!plan.ok) return { tipo: 'error', msg: plan.error };
   // Archivos viejos (nombre/precio/...) suben solo columnas basicas; la
   // plantilla nueva marca extrasDirty como el formulario (AC-PROD-5 / AC-PLA-3).
   const extras = plan.modo === 'plantilla' ? { extrasDirty: true } : {};
   const entradas = [];
   for (const e of plan.entradas) {
+    let id;
     try {
       if (e.accion === 'crear') {
         const p = e.valor.producto;
-        const id = await addProductoLocal({ ...p, marca: detectarMarca(p.nombre), ...extras });
-        // AC-PROD-3: stock inicial por el mismo camino que el alta manual.
-        if (e.valor.stock) await ajustarStock(id, e.valor.stock, { usuario, inicial: true });
+        id = await addProductoLocal({ ...p, marca: detectarMarca(p.nombre), ...extras });
       } else if (e.accion === 'actualizar') {
         const p = e.valor.producto;
         await updateProducto({ ...e.existente, ...p, marca: detectarMarca(p.nombre) || e.existente.marca || '', ...extras });
       }
-      entradas.push(e);
     } catch (err) {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
+      continue;
     }
+    // C9 (AC-PLA-3 / AC-PROD-3): el producto ya quedo creado. Si falla el
+    // movimiento de stock inicial, la fila NO es un rechazo: se informa como
+    // "creado SIN stock inicial" para que el usuario lo cargue con un Ajuste
+    // (ledger). Nunca se escribe un numero de stock (regla dura 4).
+    if (e.accion === 'crear' && e.valor.stock) {
+      try {
+        await ajustarStock(id, e.valor.stock, { usuario, inicial: true });
+      } catch (err) {
+        entradas.push({ ...e, stockFallido: true, errores: [`Stock inicial no cargado: ${err?.message || String(err)}`] });
+        continue;
+      }
+    }
+    entradas.push(e);
   }
-  const resumen = resumirEntradas(entradas);
+  const resumen = resumirEntradas(entradas, { excluidas: plan.excluidas });
   return { tipo: 'success', msg: textoResumen(resumen), resumen };
 };
 
 // AC-PLA-4: mismas altas/ediciones que ClienteForm (extrasDirty => AC-CLI-5).
-const importarClientes = async (rows, { existentes, vendedores }) => {
-  const plan = planificarImportacion(rows, 'clientes', { existentes, vendedores });
+const importarClientes = async (rows, { existentes, vendedores, origen }) => {
+  const plan = planificarImportacion(rows, 'clientes', { existentes, vendedores, ...opcionesPlan(origen) });
   if (!plan.ok) return { tipo: 'error', msg: plan.error };
   const entradas = [];
   for (const e of plan.entradas) {
@@ -106,7 +92,8 @@ const importarClientes = async (rows, { existentes, vendedores }) => {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
     }
   }
-  const resumen = resumirEntradas(entradas);
+  // AC-PLA-4: si el archivo traia "Comisión", el resumen lo avisa.
+  const resumen = resumirEntradas(entradas, { excluidas: plan.excluidas });
   return { tipo: 'success', msg: textoResumen(resumen), resumen };
 };
 
@@ -128,11 +115,26 @@ const ResultadoImport = ({ r, testId }) => {
           {r.resumen.stockIgnorado > 0 && ` · Stock ignorado en ${r.resumen.stockIgnorado} producto(s) existente(s)`}
         </div>
       )}
-      {r.resumen?.rechazos?.length > 0 && (
-        <ul data-testid={`${testId}-rechazos`} style={{ margin: '6px 0 0', paddingLeft: 18, maxHeight: 200, overflowY: 'auto', color: 'var(--danger)' }}>
-          {r.resumen.rechazos.map(x => <li key={x.fila}>Fila {x.fila}: {x.motivo}</li>)}
+      {r.resumen?.stockFallido?.length > 0 && (
+        <ul data-testid={`${testId}-stock-fallido`} style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--danger)' }}>
+          {r.resumen.stockFallido.map(x => <li key={x.fila}>Fila {x.fila}: creado SIN stock inicial ({x.motivo})</li>)}
         </ul>
       )}
+      {r.resumen?.columnasExcluidas?.length > 0 && (
+        <div data-testid={`${testId}-excluidas`} style={{ marginTop: 6, color: 'var(--text2)' }}>
+          {avisoColumnasExcluidas(r.resumen.columnasExcluidas)}
+        </div>
+      )}
+      {r.resumen?.rechazos?.length > 0 && (() => {
+        // S-PLA-01: se listan los primeros rechazos, no miles de <li>.
+        const { visibles, ocultos } = rechazosVisibles(r.resumen.rechazos);
+        return (
+          <ul data-testid={`${testId}-rechazos`} style={{ margin: '6px 0 0', paddingLeft: 18, maxHeight: 200, overflowY: 'auto', color: 'var(--danger)' }}>
+            {visibles.map(x => <li key={x.fila}>Fila {x.fila}: {x.motivo}</li>)}
+            {ocultos > 0 && <li key="ocultos">... y {ocultos} rechazo(s) más.</li>}
+          </ul>
+        );
+      })()}
     </div>
   );
 };
@@ -164,10 +166,10 @@ const Configuracion = () => {
   if (!isAdmin) {
     return (
       <div className="page">
-        <h1 className="page-title">ConfiguraciÃ³n</h1>
+        <h1 className="page-title">Configuración</h1>
         <div className="empty-state">
           <div className="empty-icon">{'\u26D4'}</div>
-          <div className="empty-text">No tenÃ©s permisos para acceder a ConfiguraciÃ³n</div>
+          <div className="empty-text">No tenés permisos para acceder a Configuración</div>
         </div>
       </div>
     );
@@ -239,6 +241,7 @@ const Configuracion = () => {
         adminPin,
         form,
         previo: editItem,
+        vendedores,
         online: navigator.onLine,
       });
       if (!r.ok) {
@@ -381,8 +384,8 @@ const Configuracion = () => {
     setResultadoCSV(null);
     let r = null;
     try {
-      const rows = await leerFilas(file);
-      r = await importarProductos(rows, { proveedores, usuario: usuarioActual });
+      const { filas, origen } = await leerFilasArchivo(file);
+      r = await importarProductos(filas, { proveedores, usuario: usuarioActual, origen });
     } catch (err) {
       r = { tipo: 'error', msg: 'Error leyendo el archivo: ' + err.message };
     }
@@ -415,8 +418,8 @@ const Configuracion = () => {
     setResultadoClientes(null);
     let r;
     try {
-      const rows = await leerFilas(file);
-      r = await importarClientes(rows, { existentes: clientes, vendedores });
+      const { filas, origen } = await leerFilasArchivo(file);
+      r = await importarClientes(filas, { existentes: clientes, vendedores, origen });
       if (r.tipo === 'success') await recargar();
     } catch (err) {
       r = { tipo: 'error', msg: 'Error leyendo el archivo: ' + err.message };
@@ -505,7 +508,7 @@ const Configuracion = () => {
           <input
             ref={csvRef}
             type="file"
-            accept=".csv,.txt,.xlsx,.xls"
+            accept={ACCEPT_IMPORT}
             style={{ display: 'none' }}
             onChange={handleCSV}
           />
@@ -555,13 +558,13 @@ const Configuracion = () => {
             Importar / Actualizar clientes
           </div>
           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12, lineHeight: 1.5 }}>
-            Bajá la <strong style={{ color: 'var(--text2)' }}>plantilla Excel</strong> (los 17 campos del alta de clientes, con instrucciones), completala y subila como XLSX o CSV.
+            Bajá la <strong style={{ color: 'var(--text2)' }}>plantilla Excel</strong> (los {COLUMNAS_PLANTILLA.clientes.length} campos del alta de clientes, con instrucciones; la comisión se carga desde la ficha del cliente), completala y subila como XLSX o CSV.
             Si el código de cliente ya existe se actualiza ese cliente. Las filas con error se informan y no frenan al resto.
           </div>
           <input
             ref={clientesRef}
             type="file"
-            accept=".csv,.txt,.xlsx,.xls"
+            accept={ACCEPT_IMPORT}
             style={{ display: 'none' }}
             onChange={handleImportClientes}
             data-testid="input-import-clientes"

@@ -9,6 +9,7 @@ import { CAMPOS_PRODUCTO, validarProducto } from './productos';
 import { CAMPOS_CLIENTE, PROVINCIAS, TIPOS_IVA, validarCliente, clienteVacio } from './clientes';
 import { texto, csvSafe, claveUnica, esFechaISO } from './validacion';
 import { filtrarActivos } from './vendedores';
+import { fechaDesdeCelda, errorLimitesArchivo, problemasDeFila, largoEncabezado } from './importacion';
 
 export const ENTIDADES = ['productos', 'clientes'];
 
@@ -29,13 +30,14 @@ const INFO_PRODUCTO = {
   categoria: { obligatorio: 'No', formato: 'Texto, hasta 60 caracteres', ejemplo: 'Bebidas' },
   proveedorId: { obligatorio: 'No', formato: 'Nombre del proveedor como figura en Configuración → Proveedores (o su código). Si no existe, la fila se rechaza', ejemplo: 'Arcor' },
   costoFinal: { obligatorio: 'No', formato: 'Número ≥ 0 (acepta coma decimal: 1234,50)', ejemplo: '1000' },
-  descuento1: { obligatorio: 'No', formato: '% entre 0 y 100', ejemplo: '10' },
-  descuento2: { obligatorio: 'No', formato: '% entre 0 y 100', ejemplo: '5' },
-  ganancia: { obligatorio: 'No', formato: '% entre 0 y 1000', ejemplo: '35' },
+  // AC-PLA-3b: descuentos, ganancia, precio 2 y minimo venta no son obligatorios.
+  descuento1: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 100 (acepta "10%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '10' },
+  descuento2: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 100 (acepta "10%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '5' },
+  ganancia: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 1000 (acepta "35%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '35' },
   precio: { obligatorio: 'No', formato: 'Número ≥ 0. Si queda vacío se calcula: costo × (1 − desc1/100) × (1 − desc2/100) × (1 + ganancia/100)', ejemplo: '' },
-  precioVenta2: { obligatorio: 'No', formato: 'Número ≥ 0', ejemplo: '1300' },
+  precioVenta2: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '1300' },
   bultoX: { obligatorio: 'No', formato: 'Entero ≥ 1 (vacío = 1)', ejemplo: '12' },
-  minimoVenta: { obligatorio: 'No', formato: 'Entero ≥ 1 (vacío = 1)', ejemplo: '1' },
+  minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
   stock: { obligatorio: 'No', formato: 'Entero ≥ 0. Solo para productos NUEVOS (stock inicial). En productos que ya existen se ignora: usá Stock → Ingreso de mercadería', ejemplo: '24' },
 };
 
@@ -53,8 +55,7 @@ const INFO_CLIENTE = {
   telefono: { obligatorio: 'No', formato: 'Entre 8 y 15 dígitos', ejemplo: '3415551234' },
   vendedor: { obligatorio: 'No', formato: 'Nombre de un vendedor activo. Si no existe, la fila se rechaza', ejemplo: '' },
   cobrador: { obligatorio: 'No', formato: 'Texto', ejemplo: '' },
-  comision: { obligatorio: 'No', formato: '% entre 0 y 100', ejemplo: '5' },
-  fechaAlta: { obligatorio: 'No', formato: 'AAAA-MM-DD o DD/MM/AAAA (vacío = hoy)', ejemplo: '2026-10-12' },
+  fechaAlta: { obligatorio: 'No', formato: 'Fecha de Excel, AAAA-MM-DD o DD/MM/AAAA (vacío = hoy)', ejemplo: '2026-10-12' },
   tipoCliente: { obligatorio: 'No', formato: 'Texto', ejemplo: 'Mayorista' },
   rubro: { obligatorio: 'No', formato: 'Texto', ejemplo: 'Almacén' },
 };
@@ -66,11 +67,28 @@ const armarColumnas = (campos, info) => campos.map(c => ({
   ...(info[c.key] || { obligatorio: c.requerido ? 'Sí' : 'No', formato: 'Texto', ejemplo: '' }),
 }));
 
-// AC-PLA-1 / AC-PLA-2: mismas etiquetas y mismo orden que el formulario.
-export const COLUMNAS_PLANTILLA = Object.freeze({
-  productos: armarColumnas(CAMPOS_PRODUCTO, INFO_PRODUCTO),
-  clientes: armarColumnas(CAMPOS_CLIENTE, INFO_CLIENTE),
+// AC-PLA-2 / AC-PLA-4 (decision del dueño, 2026-10-12): la comision se carga
+// solo desde la ficha del cliente. No va en la plantilla y, si un archivo trae
+// la columna, se ignora (no crea ni pisa la comision) y se avisa en el resumen.
+export const CAMPOS_EXCLUIDOS_PLANTILLA = Object.freeze({
+  productos: Object.freeze([]),
+  clientes: Object.freeze(['comision']),
 });
+
+const camposPlantilla = (campos, entidad) => campos.filter(c => !CAMPOS_EXCLUIDOS_PLANTILLA[entidad].includes(c.key));
+
+// AC-PLA-1 / AC-PLA-2: mismas etiquetas y mismo orden que el formulario
+// (menos los campos excluidos).
+export const COLUMNAS_PLANTILLA = Object.freeze({
+  productos: armarColumnas(camposPlantilla(CAMPOS_PRODUCTO, 'productos'), INFO_PRODUCTO),
+  clientes: armarColumnas(camposPlantilla(CAMPOS_CLIENTE, 'clientes'), INFO_CLIENTE),
+});
+
+// Encabezados normalizados de los campos excluidos ("Comisión", "Comision %").
+const ENCABEZADOS_EXCLUIDOS = {
+  productos: new Set(),
+  clientes: new Set(CAMPOS_CLIENTE.filter(c => CAMPOS_EXCLUIDOS_PLANTILLA.clientes.includes(c.key)).map(c => normalizarEncabezado(c.label))),
+};
 
 export const NOMBRE_ARCHIVO_PLANTILLA = Object.freeze({
   productos: 'plantilla_productos.xlsx',
@@ -129,18 +147,23 @@ const SOLO_PLANTILLA_PRODUCTO = ['proveedorId', 'costoFinal', 'descuento1', 'des
 
 /**
  * Mapea los encabezados de un archivo a campos.
- * @returns {{ indices: Record<string, number>, ignoradas: string[], modo: 'plantilla'|'legacy' }}
+ * `excluidas`: encabezados de campos que la importacion ignora a proposito
+ * (AC-PLA-4: "Comisión" en clientes). No se mapean ni cuentan como ignoradas.
+ * @returns {{ indices: Record<string, number>, ignoradas: string[], excluidas: string[], modo: 'plantilla'|'legacy' }}
  */
 export const mapearEncabezados = (headers = [], entidad = 'productos') => {
   const cols = columnasDe(entidad);
   const exactos = new Map();
   for (const c of cols) exactos.set(normalizarEncabezado(c.label), c.key);
   for (const [alias, key] of Object.entries(ALIAS[entidad] || {})) if (!exactos.has(alias)) exactos.set(alias, key);
+  const excluidos = ENCABEZADOS_EXCLUIDOS[entidad];
 
   const indices = {};
   const libres = [];
+  const excluidas = [];
   (headers || []).forEach((h, i) => {
     const n = normalizarEncabezado(h);
+    if (n && excluidos.has(n)) { excluidas.push(String(h ?? '').trim()); return; }
     const key = n ? exactos.get(n) : undefined;
     if (key && indices[key] === undefined) indices[key] = i;
     else if (n) libres.push(i);
@@ -160,7 +183,7 @@ export const mapearEncabezados = (headers = [], entidad = 'productos') => {
     const esPlantilla = nombreHeader === 'descripcion' || SOLO_PLANTILLA_PRODUCTO.some(k => indices[k] !== undefined);
     modo = esPlantilla ? 'plantilla' : 'legacy';
   }
-  return { indices, ignoradas: libres.map(i => String(headers[i] ?? '').trim()), modo };
+  return { indices, ignoradas: libres.map(i => String(headers[i] ?? '').trim()), excluidas, modo };
 };
 
 // ---------------------------------------------------------------------------
@@ -173,18 +196,20 @@ const textoSeguro = (v, max) => csvSafe(texto(v, max));
 const sinPorcentaje = (v) => celda(v).replace(/%$/, '').trim();
 const strOr = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
+// AC-PLA-3b: en los campos opcionales de productos, "-" o "–" (o "—") es "sin dato".
+export const CAMPOS_OPCIONALES_PRODUCTO = Object.freeze(['descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'minimoVenta']);
+const SIN_DATO = new Set(['', '-', '–', '—']);
+export const celdaSinDato = (v) => SIN_DATO.has(celda(v).replace(/\s+/g, ''));
+
 const filaVacia = (r) => !Array.isArray(r) || !r.some(c => celda(c) !== '');
 
-// "12/10/2026" => "2026-10-12". ISO se respeta. Otra cosa se devuelve tal cual
-// (validarCliente la rechaza).
-export const normalizarFecha = (v) => {
-  const s = celda(v);
-  const m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
-  if (m) {
-    const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-    return esFechaISO(iso) ? iso : s;
-  }
-  return s;
+// "12/10/2026" => "2026-10-12". ISO se respeta. BUG-PLA-01: tambien una
+// celda de fecha de Excel (Date, numero de serie o "10/1/26" como la devuelve
+// xlsx con raw:false; ver fechaDesdeCelda y la opcion `corta`). Otra cosa se
+// devuelve tal cual (validarCliente la rechaza).
+export const normalizarFecha = (v, { corta = 'mdy' } = {}) => {
+  const iso = fechaDesdeCelda(v, { corta });
+  return iso && esFechaISO(iso) ? iso : celda(v);
 };
 
 // Busca un valor de una lista cerrada sin importar tildes/mayusculas.
@@ -211,13 +236,18 @@ export const resolverProveedor = (valor, proveedores = []) => {
   return { ok: false, error: `Proveedor "${texto(valor, 60)}" no existe` };
 };
 
-/** Vendedor por nombre, solo activos (REQ-VEN). Devuelve el nombre tal como esta cargado. */
+/**
+ * Vendedor por nombre, solo activos (REQ-VEN). Devuelve el nombre tal como esta cargado.
+ * S-PLA-03: si el nombre coincide con mas de un vendedor ACTIVO, la fila se
+ * rechaza (no se elige uno al azar). Un dado de baja homonimo no cuenta.
+ */
 export const resolverVendedor = (valor, vendedores = []) => {
   const k = claveUnica(valor);
   if (!k) return { ok: true, nombre: '' };
-  const v = filtrarActivos(vendedores).find(x => claveUnica(x.nombre) === k);
-  if (!v) return { ok: false, error: `Vendedor "${texto(valor, 60)}" no existe o está dado de baja` };
-  return { ok: true, nombre: String(v.nombre).trim() };
+  const coinciden = filtrarActivos(vendedores).filter(x => x && claveUnica(x.nombre) === k);
+  if (coinciden.length === 0) return { ok: false, error: `Vendedor "${texto(valor, 60)}" no existe o está dado de baja` };
+  if (coinciden.length > 1) return { ok: false, error: `Hay ${coinciden.length} vendedores activos llamados "${texto(valor, 60)}": corregí los nombres en Configuración → Vendedores` };
+  return { ok: true, nombre: String(coinciden[0].nombre).trim() };
 };
 
 const mensajes = (errores) => Object.values(errores || {}).filter(Boolean);
@@ -236,7 +266,10 @@ const PCT_PRODUCTO = ['descuento1', 'descuento2', 'ganancia'];
  */
 export const validarFilaProducto = (valores = {}, { existente = null, existentes = [], proveedores = [], modo = 'plantilla' } = {}) => {
   const errores = [];
-  const tiene = (k) => Object.prototype.hasOwnProperty.call(valores, k) && !vacia(valores[k]);
+  // AC-PLA-3b: en los opcionales, "-"/"–" cuenta como vacío (en altas queda el
+  // default; en existentes se conserva el valor). validarProducto no se afloja.
+  const tiene = (k) => Object.prototype.hasOwnProperty.call(valores, k) && !vacia(valores[k])
+    && !(CAMPOS_OPCIONALES_PRODUCTO.includes(k) && celdaSinDato(valores[k]));
 
   const form = {
     codigo: strOr(existente?.codigo),
@@ -258,6 +291,8 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   if (tiene('categoria')) form.categoria = textoSeguro(valores.categoria, 60);
   for (const k of ['costoFinal', 'precioVenta2', 'bultoX', 'minimoVenta']) if (tiene(k)) form[k] = celda(valores[k]);
   for (const k of PCT_PRODUCTO) if (tiene(k)) form[k] = sinPorcentaje(valores[k]);
+  // AC-PLA-3b: minimo venta 0 = sin minimo (1).
+  if (tiene('minimoVenta') && /^0+([.,]0*)?$/.test(celda(valores.minimoVenta))) form.minimoVenta = '1';
 
   let proveedoresValidos = proveedores;
   if (tiene('proveedorId')) {
@@ -304,30 +339,39 @@ const TEXTO_CLIENTE = { codigo: 30, nombre: 120, direccion: 160, ciudad: 80, zon
  * Valida/normaliza una fila de clientes con las reglas de ClienteForm.
  * @returns {{ ok: boolean, errores: string[], valor: object }}
  */
-export const validarFilaCliente = (valores = {}, { existente = null, existentes = [], vendedores = [], now = new Date() } = {}) => {
+export const validarFilaCliente = (valores = {}, { existente = null, existentes = [], vendedores = [], now = new Date(), fechaCorta = 'mdy' } = {}) => {
   const errores = [];
   const tiene = (k) => Object.prototype.hasOwnProperty.call(valores, k) && !vacia(valores[k]);
 
+  const excluidos = CAMPOS_EXCLUIDOS_PLANTILLA.clientes;
   const form = clienteVacio(now);
   if (existente) {
-    for (const c of CAMPOS_CLIENTE) if (existente[c.key] !== undefined && existente[c.key] !== null) form[c.key] = String(existente[c.key]);
+    for (const c of CAMPOS_CLIENTE) {
+      if (excluidos.includes(c.key)) continue;
+      if (existente[c.key] !== undefined && existente[c.key] !== null) form[c.key] = String(existente[c.key]);
+    }
   }
   for (const [k, max] of Object.entries(TEXTO_CLIENTE)) if (tiene(k)) form[k] = textoSeguro(valores[k], max);
   if (tiene('provincia')) form.provincia = canonico(valores.provincia, PROVINCIAS);
   if (tiene('tipoIva')) form.tipoIva = canonico(valores.tipoIva, TIPOS_IVA);
   if (tiene('cuit')) form.cuit = celda(valores.cuit);
   if (tiene('telefono')) form.telefono = celda(valores.telefono);
-  if (tiene('comision')) form.comision = sinPorcentaje(valores.comision);
-  if (tiene('fechaAlta')) form.fechaAlta = normalizarFecha(valores.fechaAlta);
+  if (tiene('fechaAlta')) form.fechaAlta = normalizarFecha(valores.fechaAlta, { corta: fechaCorta });
   if (tiene('vendedor')) {
     const v = resolverVendedor(valores.vendedor, vendedores);
     if (!v.ok) errores.push(v.error);
     else form.vendedor = v.nombre;
   }
 
+  // AC-PLA-4: la comision (excluida) nunca sale del archivo. Aunque `valores`
+  // la traiga, form.comision queda vacia. En un alta queda null (se carga desde
+  // la ficha); en una actualizacion la clave se saca del valor para que
+  // { ...existente, ...valor } conserve la comision de la ficha tal cual.
   const r = validarCliente(form, existentes, { editId: existente?.id ?? null, now });
   errores.push(...mensajes(r.errores));
-  return { ok: errores.length === 0, errores, valor: r.cliente };
+  const valor = { ...r.cliente };
+  if (existente) for (const k of excluidos) delete valor[k];
+  return { ok: errores.length === 0, errores, valor };
 };
 
 // ---------------------------------------------------------------------------
@@ -345,19 +389,27 @@ const claveNombre = (v) => texto(v, 160).toLowerCase();
 /**
  * @param {Array<Array<any>>} rows filas crudas (la primera no vacia = encabezados)
  * @param {'productos'|'clientes'} entidad
- * @param {{ existentes?: object[], proveedores?: object[], vendedores?: object[], now?: Date }} ctx
+ * @param {{ existentes?: object[], proveedores?: object[], vendedores?: object[], now?: Date,
+ *   celdasDeMas?: boolean, fechaCorta?: 'mdy'|'dmy' }} ctx
+ *   celdasDeMas: rechazar filas con celdas no vacias mas alla del encabezado
+ *   (CSV, BUG-PLA-02). fechaCorta: como leer fechas con año de 2 digitos
+ *   ('mdy' = celda de fecha de xlsx con raw:false; 'dmy' = CSV tipeado).
  * @returns {{ ok: boolean, error?: string, modo?: string, ignoradas?: string[],
  *   entradas: Array<{ fila: number, accion: 'crear'|'actualizar'|'rechazar'|'fusionada', valor?: any, existente?: any, errores: string[], stockIgnorado?: boolean }>,
  *   resumen: { creados: number, actualizados: number, rechazados: number, rechazos: Array<{fila:number, motivo:string}>, stockIgnorado: number } }}
  */
-export const planificarImportacion = (rows, entidad = 'productos', { existentes = [], proveedores = [], vendedores = [], now = new Date() } = {}) => {
+export const planificarImportacion = (rows, entidad = 'productos', { existentes = [], proveedores = [], vendedores = [], now = new Date(), celdasDeMas = false, fechaCorta = 'mdy' } = {}) => {
   columnasDe(entidad);
   const filas = (Array.isArray(rows) ? rows : []).map((r, i) => ({ r, n: i + 1 })).filter(x => !filaVacia(x.r));
-  const vacio = { creados: 0, actualizados: 0, rechazados: 0, rechazos: [], stockIgnorado: 0 };
+  const vacio = { creados: 0, actualizados: 0, rechazados: 0, rechazos: [], stockIgnorado: 0, stockFallido: [], columnasExcluidas: [] };
   if (filas.length < 2) return { ok: false, error: 'El archivo no tiene datos suficientes.', entradas: [], resumen: vacio };
 
+  // S-PLA-01: topes de filas y columnas antes de validar nada.
+  const limite = errorLimitesArchivo({ headers: filas[0].r, datos: filas.length - 1 });
+  if (limite) return { ok: false, error: limite, entradas: [], resumen: vacio };
   const headers = filas[0].r.map(h => celda(h));
-  const { indices, ignoradas, modo } = mapearEncabezados(headers, entidad);
+  const largoEnc = largoEncabezado(headers);
+  const { indices, ignoradas, excluidas, modo } = mapearEncabezados(headers, entidad);
   const detectados = headers.map(h => h.toLowerCase()).join(' | ');
   if (entidad === 'productos') {
     if (indices.nombre === undefined) return { ok: false, error: `No se encontró columna de nombre (Descripción). Encabezados detectados: ${detectados}`, entradas: [], resumen: vacio };
@@ -381,6 +433,9 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
   const entradas = [];
 
   for (const { r, n } of filas.slice(1)) {
+    // S-PLA-01 (celda demasiado larga) y BUG-PLA-02 (columnas corridas en un CSV).
+    const problemas = problemasDeFila(r, largoEnc, { celdasDeMas });
+    if (problemas.length) { entradas.push({ fila: n, accion: 'rechazar', errores: problemas }); continue; }
     const valores = extraerValores(r, indices);
     const codigoK = claveUnica(entidad === 'productos' ? textoSeguro(valores.codigo, 40) : textoSeguro(valores.codigo, 30));
     const nombreK = entidad === 'productos' ? claveNombre(textoSeguro(valores.nombre, 160)) : '';
@@ -406,7 +461,7 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
     const existente = (codigoK && porCodigo.get(codigoK)) || (nombreK ? porNombre.get(nombreK) : null) || null;
     const res = entidad === 'productos'
       ? validarFilaProducto(valores, { existente, existentes: base, proveedores, modo })
-      : validarFilaCliente(valores, { existente, existentes: base, vendedores, now });
+      : validarFilaCliente(valores, { existente, existentes: base, vendedores, now, fechaCorta });
 
     if (!res.ok) { entradas.push({ fila: n, accion: 'rechazar', errores: res.errores }); continue; }
     const idx = entradas.length;
@@ -426,15 +481,26 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
     if (nombreFinal) vistosNombre.set(nombreFinal, idx);
   }
 
-  return { ok: true, modo, ignoradas, entradas, resumen: resumirEntradas(entradas) };
+  return { ok: true, modo, ignoradas, excluidas, entradas, resumen: resumirEntradas(entradas, { excluidas }) };
 };
 
-/** Cuenta creados/actualizados/rechazados (una fila fusionada cuenta como actualizada). */
-export const resumirEntradas = (entradas = []) => {
-  const resumen = { creados: 0, actualizados: 0, rechazados: 0, rechazos: [], stockIgnorado: 0 };
-  for (const e of entradas) {
-    if (e.accion === 'crear') resumen.creados++;
-    else if (e.accion === 'actualizar' || e.accion === 'fusionada') resumen.actualizados++;
+/**
+ * Cuenta creados/actualizados/rechazados (una fila fusionada cuenta como actualizada).
+ * C9 (AC-PLA-3 / AC-PROD-3): una entrada `crear` con `stockFallido: true` es un
+ * producto que SI se creo pero cuyo movimiento de stock inicial fallo: cuenta
+ * como creado y se lista en `stockFallido` ({ fila, motivo }).
+ * AC-PLA-4: `excluidas` (p. ej. ["Comisión"]) se copia a `columnasExcluidas`.
+ */
+export const resumirEntradas = (entradas = [], { excluidas = [] } = {}) => {
+  const resumen = {
+    creados: 0, actualizados: 0, rechazados: 0, rechazos: [], stockIgnorado: 0,
+    stockFallido: [], columnasExcluidas: Array.isArray(excluidas) ? excluidas.filter(Boolean).map(String) : [],
+  };
+  for (const e of (Array.isArray(entradas) ? entradas : [])) {
+    if (e.accion === 'crear') {
+      resumen.creados++;
+      if (e.stockFallido) resumen.stockFallido.push({ fila: e.fila, motivo: (e.errores || []).join('; ') || 'No se pudo cargar el stock inicial' });
+    } else if (e.accion === 'actualizar' || e.accion === 'fusionada') resumen.actualizados++;
     else {
       resumen.rechazados++;
       resumen.rechazos.push({ fila: e.fila, motivo: (e.errores || []).join('; ') || 'Fila inválida' });
@@ -446,10 +512,27 @@ export const resumirEntradas = (entradas = []) => {
 
 const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
 
-/** Texto del resumen (AC-PLA-5). Conserva el formato viejo "N creados, M actualizados, K lineas ignoradas". */
-export const textoResumen = ({ creados = 0, actualizados = 0, rechazados = 0 } = {}) =>
-  `✓ ${plural(creados, 'creado', 'creados')}, ${plural(actualizados, 'actualizado', 'actualizados')}` +
-  `${rechazados > 0 ? `, ${plural(rechazados, 'línea ignorada', 'líneas ignoradas')}` : ''}.`;
+/** Aviso de AC-PLA-4 cuando el archivo trae columnas que se ignoran a proposito. */
+export const avisoColumnasExcluidas = (excluidas = []) => {
+  const cols = (Array.isArray(excluidas) ? excluidas : []).filter(Boolean);
+  if (!cols.length) return '';
+  return `La columna ${cols.map(c => `"${c}"`).join(', ')} se ignoró: la comisión se carga solo desde la ficha del cliente.`;
+};
+
+/**
+ * Texto del resumen (AC-PLA-5). Conserva el formato viejo "N creados, M actualizados, K lineas ignoradas".
+ * Agrega, si corresponde, el aviso de stock inicial fallido (C9) y el de columnas excluidas (AC-PLA-4).
+ */
+export const textoResumen = ({ creados = 0, actualizados = 0, rechazados = 0, stockFallido = [], columnasExcluidas = [] } = {}) => {
+  const base = `✓ ${plural(creados, 'creado', 'creados')}, ${plural(actualizados, 'actualizado', 'actualizados')}` +
+    `${rechazados > 0 ? `, ${plural(rechazados, 'línea ignorada', 'líneas ignoradas')}` : ''}.`;
+  const extras = [];
+  const fallidos = Array.isArray(stockFallido) ? stockFallido.length : 0;
+  if (fallidos > 0) extras.push(`${fallidos} producto(s) creados SIN stock inicial: cargalo desde Stock (Ajuste).`);
+  const aviso = avisoColumnasExcluidas(columnasExcluidas);
+  if (aviso) extras.push(aviso);
+  return [base, ...extras].join(' ');
+};
 
 // ---------------------------------------------------------------------------
 // Armado de la plantilla (AC-PLA-1/2/6): hoja 1 solo encabezados, hoja 2
