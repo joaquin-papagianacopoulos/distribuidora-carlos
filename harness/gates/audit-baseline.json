@@ -1,0 +1,8 @@
+{
+  "_nota": "Vulnerabilidades aceptadas conscientemente (runtime). Agregar acá SOLO con justificación en harness/reports/*/security-report.md.",
+  "critical": [],
+  "high": ["xlsx"],
+  "_justificacion": {
+    "xlsx": "S-07 (RUN 20261007-run1). 0.18.5 es la última en npm; la corregida se instala desde cdn.sheetjs.com (bloqueado en el entorno del harness). Mitigado: solo admin importa, tope 5 MB, sin exportación. Revisar y sacar al instalar xlsx desde el CDN. Revisión: 2026-11-07."
+  }
+}

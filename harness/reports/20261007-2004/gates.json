@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-07T23:24:35.944Z",
+  "pass": false,
+  "gates": {
+    "unit-tests": {
+      "pass": true,
+      "summary": "1 skipped, 478 passed, 479 total",
+      "detail": "1 skipped, 478 passed, 479 total",
+      "ms": 5431
+    },
+    "coverage-domain": {
+      "pass": true,
+      "linesPct": 100,
+      "detail": "líneas 100% (mín 90%)",
+      "ms": 0
+    },
+    "traceability": {
+      "pass": false,
+      "total": 59,
+      "cubiertos": 43,
+      "faltan": [
+        "AC-COM-1",
+        "AC-COM-2",
+        "AC-COM-3",
+        "AC-COM-4",
+        "AC-COM-5",
+        "AC-COM-6",
+        "AC-COM-7",
+        "AC-COM-8",
+        "AC-COM-9",
+        "AC-COM-10",
+        "AC-COM-11",
+        "AC-COM-12",
+        "AC-COM-13",
+        "AC-COM-14",
+        "AC-COM-15",
+        "AC-COM-16"
+      ],
+      "detail": "Sin test: AC-COM-1, AC-COM-2, AC-COM-3, AC-COM-4, AC-COM-5, AC-COM-6, AC-COM-7, AC-COM-8, AC-COM-9, AC-COM-10, AC-COM-11, AC-COM-12, AC-COM-13, AC-COM-14, AC-COM-15, AC-COM-16",
+      "ms": 8
+    },
+    "build": {
+      "pass": true,
+      "detail": "ok",
+      "ms": 7153
+    },
+    "secret-scan": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin secretos",
+      "ms": 14
+    },
+    "security-rules": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin hallazgos",
+      "ms": 12
+    },
+    "npm-audit": {
+      "pass": true,
+      "critical": [],
+      "high": [
+        "xlsx"
+      ],
+      "nuevosCrit": [],
+      "nuevosHigh": [],
+      "toolingOnly": 75,
+      "detail": "runtime critical: [] high: [xlsx] | tooling de build (no se publica): 75",
+      "ms": 2393
+    }
+  }
+}

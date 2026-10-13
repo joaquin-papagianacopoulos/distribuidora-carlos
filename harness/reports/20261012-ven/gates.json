@@ -1,0 +1,63 @@
+{
+  "at": "2026-10-12T23:45:55.238Z",
+  "pass": false,
+  "gates": {
+    "unit-tests": {
+      "pass": true,
+      "summary": "1 skipped, 2 todo, 939 passed, 942 total",
+      "detail": "1 skipped, 2 todo, 939 passed, 942 total",
+      "ms": 6959
+    },
+    "coverage-domain": {
+      "pass": true,
+      "linesPct": 100,
+      "detail": "líneas 100% (mín 90%)",
+      "ms": 0
+    },
+    "traceability": {
+      "pass": false,
+      "total": 74,
+      "cubiertos": 67,
+      "faltan": [
+        "AC-PLA-1",
+        "AC-PLA-2",
+        "AC-PLA-3",
+        "AC-PLA-4",
+        "AC-PLA-5",
+        "AC-PLA-6",
+        "AC-PLA-7"
+      ],
+      "detail": "Sin test: AC-PLA-1, AC-PLA-2, AC-PLA-3, AC-PLA-4, AC-PLA-5, AC-PLA-6, AC-PLA-7",
+      "ms": 9
+    },
+    "build": {
+      "pass": true,
+      "detail": "ok",
+      "ms": 7284
+    },
+    "secret-scan": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin secretos",
+      "ms": 18
+    },
+    "security-rules": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin hallazgos",
+      "ms": 14
+    },
+    "npm-audit": {
+      "pass": true,
+      "critical": [],
+      "high": [
+        "xlsx"
+      ],
+      "nuevosCrit": [],
+      "nuevosHigh": [],
+      "toolingOnly": 75,
+      "detail": "runtime critical: [] high: [xlsx] | tooling de build (no se publica): 75",
+      "ms": 42294
+    }
+  }
+}

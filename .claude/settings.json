@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx react-scripts test:*)",
+      "Bash(CI=true npx react-scripts test:*)",
+      "Bash(npx react-scripts build:*)",
+      "Bash(node harness/gates/run-gates.mjs:*)",
+      "Bash(npm audit:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(cat .env*)",
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)",
+      "Bash(npm publish:*)",
+      "Edit(./harness/gates/**)",
+      "Write(./harness/gates/**)"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+node_modules
+build
+.env
+coverage
+harness/runner/node_modules
+.env.*
+!.env.example
+_backup_antes_harness_*/
+*.pdf
+*.docx
