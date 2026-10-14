@@ -161,13 +161,18 @@ export const AppProvider = ({ children }) => {
     const maxPedidoLoops = full ? 50 : 3;
 
     let step = 'syncPedidosPendientes';
+    let avisoProductos = null;
     try {
       console.log(`Sync ${reason}: inicio${full ? ' completo' : ' liviano'}`);
 
       if (shouldSyncMaestros) {
         step = 'syncProductos';
         console.log('1. syncProductos...');
-        await syncProductos();
+        const rp = await syncProductos();
+        if (rp?.requierePinAdmin) {
+          avisoProductos = `Hay ${rp.pendientes} producto(s) sin subir: un admin los sube desde Configuración con su PIN.`;
+          setSyncNote(avisoProductos);
+        }
 
         step = 'syncClientes';
         console.log('2. syncClientes...');
@@ -197,7 +202,7 @@ export const AppProvider = ({ children }) => {
             await new Promise(res => setTimeout(res, 150));
             continue;
           }
-          setSyncNote(null);
+          setSyncNote(avisoProductos);
           break;
         }
       }

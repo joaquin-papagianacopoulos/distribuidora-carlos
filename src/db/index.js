@@ -2,9 +2,11 @@
 import { getLocalTodayStr, normalizePedidoFecha } from '../utils/pedidos';
 import { sinPinLocal, tieneCamposSecretos } from '../domain/vendedores';
 
+import { huellaProductoSync } from '../domain/productosRpc';
 const DB_NAME = 'distribuidoraDB';
 // v6 — S-COM-13: se quita el PIN en texto plano de los vendedores locales.
-const DB_VERSION = 6;
+// v7 — REQ-COMR: store comisionesRubro (% por vendedor y rubro). Solo se agrega.
+const DB_VERSION = 7;
 
 let db = null;
 
@@ -83,6 +85,19 @@ export const initDB = () => new Promise((resolve, reject) => {
     }
     if (!d.objectStoreNames.contains('comisionesBorradores')) {
       d.createObjectStore('comisionesBorradores', { keyPath: 'id' });
+    }
+
+    // v7 — REQ-COMR (AC-COMR-7): % de comisión por vendedor y rubro. Solo se
+    // AGREGA el store (clave UUID). No toca clientes: la comision vieja queda
+    // tal cual. El indice "clave" (vendedorId|rubroClave) NO es unico a
+    // proposito: la unicidad la impone el dominio y un duplicado de otro
+    // dispositivo se marca obsoleto, nunca se borra.
+    if (!d.objectStoreNames.contains('comisionesRubro')) {
+      const cr = d.createObjectStore('comisionesRubro', { keyPath: 'id' });
+      if (cr && typeof cr.createIndex === 'function') {
+        cr.createIndex('vendedorId', 'vendedorId', { unique: false });
+        cr.createIndex('clave', 'clave', { unique: false });
+      }
     }
 
     // v6 — S-COM-13 (login 100 % online). El PIN se verifica solo en el
@@ -291,6 +306,30 @@ export const clearProductosPendingSync = async (ids) => {
       req.onerror  = () => rej(req.error);
     });
   }
+};
+// S-VTA-01: igual que clearProductosPendingSync, pero solo limpia si el
+// producto NO cambio desde que se armo el lote (huella actual == huella enviada).
+// Si se edito durante la subida sigue pendiente. `extra` se mezcla al limpiar.
+export const clearProductosPendingSyncSiIgual = async (ids, huellas, extra = {}) => {
+  if (!ids || ids.length === 0) return [];
+  const limpiados = [];
+  const store = await tx('productos', 'readwrite');
+  for (const id of ids) {
+    const p = await new Promise((res, rej) => {
+      const req = store.get(id);
+      req.onsuccess = () => res(req.result);
+      req.onerror  = () => rej(req.error);
+    });
+    if (!p || !(p.pendingSync || p.extrasPendientes)) continue;
+    if (huellas && huellas.get(id) !== huellaProductoSync(p)) continue;
+    await new Promise((res, rej) => {
+      const req = store.put({ ...p, pendingSync: false, ...extra });
+      req.onsuccess = () => res();
+      req.onerror  = () => rej(req.error);
+    });
+    limpiados.push(id);
+  }
+  return limpiados;
 };
 // Toda edicion local de un cliente (Config, Orden de entrega) queda marcada
 // pendingSync:true, para que syncClientes suba SOLO lo que este dispositivo
@@ -757,3 +796,13 @@ export const getComisionBorrador = async (id) => {
   });
 };
 export const putComisionBorrador = (b) => putManyInto('comisionesBorradores', [{ ...b, updatedAt: Date.now() }]);
+
+// ---- % DE COMISION POR VENDEDOR Y RUBRO (REQ-COMR) ----
+// Registros con id UUID. Se guardan con pendingSync hasta que la RPC del
+// servidor (con el PIN del admin) los acepta; se limpian SOLO esos ids.
+export const getComisionesRubro = () => getAllFrom('comisionesRubro');
+export const putComisionesRubroLocal = (rows) =>
+  putManyInto('comisionesRubro', (rows || []).map(r => ({ ...r, pendingSync: true, updatedAt: Date.now() })));
+// Escritura "neutral" (respuesta del servidor / pull / marcas): guarda tal cual.
+export const putComisionesRubroRemotos = (rows) => putManyInto('comisionesRubro', rows);
+export const clearComisionesRubroPendingSync = (ids) => clearPendingIn('comisionesRubro', ids);

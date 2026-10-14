@@ -51,17 +51,20 @@ const errorDe = (key) => container.querySelector(`[data-error-for="${key}"]`);
 const etiquetas = () => [...container.querySelectorAll('label.input-label')]
   .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, '').trim());
 
+// MOD (RUN 20261014-1449, AC-COMR-1): antes 17 etiquetas con 'Comisión'; ahora
+// 16, porque el cliente ya no tiene comisión (REQ-COMR).
 const ETIQUETAS_SPEC = [
   'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal',
   'Provincia', 'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Celular', 'Vendedor', 'Cobrador',
-  'Comisión', 'Fecha de alta', 'Tipo de cliente', 'Rubro',
+  'Fecha de alta', 'Tipo de cliente', 'Rubro',
 ];
 
 describe('ClienteForm', () => {
-  it('AC-CLI-1 muestra exactamente los 17 campos con las etiquetas del SPEC, en orden', async () => {
+  it('AC-CLI-1 AC-COMR-1 muestra exactamente los 16 campos con las etiquetas del SPEC, en orden (sin Comisión)', async () => {
     await render({ onGuardar: jest.fn() });
     expect(etiquetas()).toEqual(ETIQUETAS_SPEC);
-    expect(etiquetas()).toHaveLength(17);
+    expect(etiquetas()).toHaveLength(16);
+    expect(campo('comision')).toBeNull();
     // Obligatorios marcados con *
     const req = [...container.querySelectorAll('label.input-label')].filter(l => l.textContent.endsWith(' *')).map(l => l.htmlFor);
     expect(req).toEqual(['campo-codigo', 'campo-nombre', 'campo-direccion']);
@@ -149,7 +152,6 @@ describe('ClienteForm', () => {
       cuit: '20123456786',
       telefono: '+54 9 11 4444-5555',
       vendedor: 'Carlos',
-      comision: '2,5',
     });
     await click(botonGuardar());
     expect(onGuardar).toHaveBeenCalledTimes(1);
@@ -165,10 +167,11 @@ describe('ClienteForm', () => {
       cuit: '20-12345678-6',
       telefono: '5491144445555',
       vendedor: 'Carlos',
-      comision: 2.5,
       fechaAlta: hoyISO(),
       boletaContraBoleta: false,
     });
+    // MOD (RUN 20261014-1449, AC-COMR-1): antes se llenaba y se esperaba comision: 2.5; el campo ya no existe.
+    expect(c).not.toHaveProperty('comision');
   });
 
   it('AC-CLI-4 código de cliente duplicado (sin importar mayúsculas/espacios) se rechaza', async () => {
@@ -206,13 +209,16 @@ describe('ClienteForm', () => {
     expect(campo('codigo').value).toBe('K-1');
   });
 
-  it('AC-SEC-2 comisión fuera de rango y celular corto muestran error', async () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes la comisión fuera de rango daba
+  // error; ahora el campo no existe (ni input ni error) y el resto sigue igual.
+  it('AC-SEC-2 AC-COMR-1 celular corto y CP inválido muestran error; no hay campo ni error de comisión', async () => {
     const onGuardar = jest.fn();
     await render({ onGuardar });
-    await llenar({ nombre: 'K', direccion: 'D', comision: '150', telefono: '1234', codigoPostal: '12' });
+    await llenar({ nombre: 'K', direccion: 'D', telefono: '1234', codigoPostal: '12' });
     await click(botonGuardar());
     expect(onGuardar).not.toHaveBeenCalled();
-    expect(errorDe('comision')).not.toBeNull();
+    expect(campo('comision')).toBeNull();
+    expect(errorDe('comision')).toBeNull();
     expect(errorDe('telefono')).not.toBeNull();
     expect(errorDe('codigoPostal')).not.toBeNull();
   });

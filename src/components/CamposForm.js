@@ -4,17 +4,22 @@ import React from 'react';
 
 const errorStyle = { color: 'var(--danger)', fontSize: 12, marginTop: 4 };
 
-const CamposForm = ({ campos, valores, errores = {}, onChange, opcionesDinamicas = {}, ayudas = {}, deshabilitados = {} }) => (
+// renderCampo (REQ-COMR, AC-COMR-3): { [key]: ({ id, value, onChange, error, disabled }) => node }
+// reemplaza el input de ese campo (p. ej. el selector de Rubro), conservando
+// el label htmlFor="campo-<key>", la ayuda y el error.
+const CamposForm = ({ campos, valores, errores = {}, onChange, opcionesDinamicas = {}, ayudas = {}, deshabilitados = {}, renderCampo = {} }) => (
   <>
     {campos.map(c => {
       const id = `campo-${c.key}`;
       const val = valores[c.key] ?? '';
       const set = (v) => onChange(c.key, v);
       const opciones = c.opciones
-        ? c.opciones.map(o => ({ value: o, label: o }))
+        ? c.opciones.map(o => (o && typeof o === 'object' ? o : { value: o, label: o }))
         : opcionesDinamicas[c.tipo] || opcionesDinamicas[c.key] || null;
       let input;
-      if (opciones) {
+      if (typeof renderCampo[c.key] === 'function') {
+        input = renderCampo[c.key]({ id, value: val, onChange: set, error: errores[c.key] || null, disabled: !!deshabilitados[c.key] });
+      } else if (opciones) {
         input = (
           <select id={id} name={c.key} className="input" value={val} onChange={e => set(e.target.value)} disabled={!!deshabilitados[c.key]}>
             <option value="">— Elegir —</option>

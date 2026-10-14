@@ -1,0 +1,9 @@
+▶ unit-tests ... PASS (7439 ms)
+▶ coverage-domain ... PASS (1 ms)
+▶ traceability ... PASS (14 ms)
+▶ build ... PASS (7611 ms)
+▶ secret-scan ... PASS (24 ms)
+▶ security-rules ... PASS (16 ms)
+▶ npm-audit ... PASS (8449 ms)
+
+✅ TODOS LOS GATES PASARON

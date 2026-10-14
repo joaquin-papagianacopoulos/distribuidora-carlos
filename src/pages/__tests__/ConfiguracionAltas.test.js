@@ -240,11 +240,13 @@ describe('Proveedores (REQ-PROV)', () => {
 
 // ---------------- Clientes ----------------
 describe('Clientes (REQ-CLI)', () => {
-  it('AC-CLI-1 "+ Agregar" en clientes abre el formulario de 17 campos', async () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes 17 campos; ahora 16 (sin Comisión).
+  it('AC-CLI-1 AC-COMR-1 "+ Agregar" en clientes abre el formulario de 16 campos', async () => {
     await render();
     await irATab('clientes');
     await click(boton('+ Agregar'));
-    expect(container.querySelectorAll('[data-testid="cliente-form"] label.input-label')).toHaveLength(17);
+    expect(container.querySelectorAll('[data-testid="cliente-form"] label.input-label')).toHaveLength(16);
+    expect(campo('comision')).toBeNull();
     expect(campo('codigo').value).toBe('0011');
   });
 

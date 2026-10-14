@@ -138,22 +138,26 @@ describe('AC-PLA-7 round-trip: plantilla -> completar -> importar', () => {
     expect(plan.entradas[0].valor).toEqual({
       codigo: 'C1', nombre: 'Cliente RT', direccion: 'Calle 1', ciudad: 'Rosario', codigoPostal: 'S2000', provincia: 'Santa Fe',
       zona: 'Centro', pais: 'Argentina', tipoIva: 'Monotributo', cuit: '20-12345678-6', telefono: '3415551234', vendedor: 'Admin',
-      cobrador: 'Pedro', comision: null, fechaAlta: '2026-10-01', tipoCliente: 'Mayorista', rubro: 'Almacén',
+      // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null; ahora la clave no existe.
+      cobrador: 'Pedro', fechaAlta: '2026-10-01', tipoCliente: 'Mayorista', rubro: 'Almacén',
     });
     expect(rows[0]).toEqual(COLUMNAS_PLANTILLA.clientes.map(c => c.label));
   });
 
   it('AC-PLA-4 AC-PLA-7 un XLSX viejo con columna Comisión: se ignora y el resumen lo avisa', () => {
     const wb = XLSX.utils.book_new();
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes las columnas salían de
+    // CAMPOS_CLIENTE (que tenía Comisión); ahora se arman explícitas.
+    const viejo = [...CAMPOS_CLIENTE.map(c => ({ key: c.key, label: c.label })), { key: 'comision', label: 'Comisión' }];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      CAMPOS_CLIENTE.map(c => c.label),
-      CAMPOS_CLIENTE.map(c => ({ codigo: 'C2', nombre: 'Viejo', direccion: 'Dir', comision: '8' }[c.key] ?? '')),
+      viejo.map(c => c.label),
+      viejo.map(c => ({ codigo: 'C2', nombre: 'Viejo', direccion: 'Dir', comision: '8' }[c.key] ?? '')),
     ]), 'Clientes');
     const leido = escribirYLeer(wb);
     const plan = planificarImportacion(filasDe(leido, 'Clientes'), 'clientes', { existentes: [] });
     expect(plan.ok).toBe(true);
     expect(plan.excluidas).toEqual(['Comisión']);
-    expect(plan.entradas[0].valor.comision).toBeNull();
+    expect(plan.entradas[0].valor).not.toHaveProperty('comision');
     expect(plan.resumen.columnasExcluidas).toEqual(['Comisión']);
   });
 

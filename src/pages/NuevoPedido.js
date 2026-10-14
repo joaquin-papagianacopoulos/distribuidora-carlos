@@ -9,6 +9,7 @@ import { avisosItemPedido } from '../domain/productos';
 import { stockDe } from '../domain/stock';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
+import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 
 const Toast = ({ msg, type, onClose }) => {
   useEffect(() => { const t = setTimeout(onClose, 2500); return () => clearTimeout(t); }, [onClose]);
@@ -98,6 +99,11 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
     onSetDescuentoPct(item.productoId, n);
   };
 
+  // REQ-VTA (AC-VTA-2/3): paso de +/− por bulto, aviso de no múltiplo y texto "3 Display (48 u.)".
+  const paso = pasoCantidad(producto);
+  const avisoVenta = avisoMultiplo(item.cantidad, producto);
+  const textoBultos = textoRenglonBultos(congelarBultosRenglon(item, producto));
+  const precioDelBulto = ventaPorEfectivo(producto) !== 'unidad' ? precioBulto(item.precio, producto?.bultoX) : null;
   const precioModificado = item.precioOriginal !== undefined && item.precio !== item.precioOriginal;
   const subtotal = item.cantidad * item.precio;
 
@@ -111,6 +117,14 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
             <div data-testid="aviso-stock" style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
               {'\u26A0\uFE0F'} {avisos.join(' · ')}
             </div>
+          )}
+          {avisoVenta && (
+            <div data-testid="aviso-multiplo" role="alert" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
+              {'⚠️'} {avisoVenta}
+            </div>
+          )}
+          {textoBultos && (
+            <div data-testid="texto-bultos" style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{textoBultos}</div>
           )}
           {precioModificado && (
             <div style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
@@ -164,8 +178,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
         {/* Cantidad */}
         <div className="qty-control">
           <button className="qty-btn" onMouseDown={() => {
-            const nueva = Math.max(1, item.cantidad - 1);
-            onCambiarCantidad(item.productoId, -1, 1);
+            const nueva = Math.max(paso, item.cantidad - paso);
+            onCambiarCantidad(item.productoId, -paso, paso);
             setCantidadText(String(nueva));
           }}>−</button>
           <input
@@ -178,8 +192,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
             inputMode="numeric"
           />
           <button className="qty-btn" onMouseDown={() => {
-            onCambiarCantidad(item.productoId, 1, null);
-            setCantidadText(String(item.cantidad + 1));
+            onCambiarCantidad(item.productoId, paso, null);
+            setCantidadText(String(item.cantidad + paso));
           }}>+</button>
         </div>
 
@@ -193,8 +207,10 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
       <BultoControl
         visible={puedeBulto}
         bultoX={producto?.bultoX}
+        nombre={normalizarBultoNombre(producto?.bultoNombre)}
+        precioBulto={precioDelBulto}
         cantidad={item.cantidad}
-        puedeRestar={Number(item.cantidad) > CANTIDAD_MINIMA_RENGLON}
+        puedeRestar={Number(item.cantidad) > Math.max(CANTIDAD_MINIMA_RENGLON, paso)}
         onSumar={() => onBulto && onBulto(item.productoId, 'sumar')}
         onRestar={() => onBulto && onBulto(item.productoId, 'restar')}
       />
@@ -260,7 +276,7 @@ const NuevoPedido = () => {
       const existe = prev.find(i => i.productoId === p.id);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + 1 }) : i);
+        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) }) : i);
         const idx = next.findIndex(i => i.productoId === p.id);
         if (idx <= 0) return next;
         const it = next[idx];
@@ -292,12 +308,14 @@ const NuevoPedido = () => {
   // Si el renglón tiene la unidad por defecto, el primer "+ Bulto" la reemplaza.
   // Updater funcional para que toques rápidos no usen un estado viejo.
   const aplicarBulto = (productoId, op) => {
-    const bx = productosById.get(String(productoId))?.bultoX;
+    const prod = productosById.get(String(productoId));
+    const bx = prod?.bultoX;
+    const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prod));
     setItems(prev => prev.map(i => {
       if (i.productoId !== productoId) return i;
       const cantidad = op === 'sumar'
         ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
-        : restarBulto(i.cantidad, bx, { minimo: CANTIDAD_MINIMA_RENGLON });
+        : restarBulto(i.cantidad, bx, { minimo });
       return cantidad === i.cantidad ? i : quitarMarcasRenglon({ ...i, cantidad });
     }));
   };
@@ -331,6 +349,12 @@ const NuevoPedido = () => {
     // (y antes de cualquier efecto, como dar de alta el cliente).
     const vc = validarCantidadesItems(items);
     if (!vc.ok) { alert(mensajeCantidadesInvalidas(vc.errores)); return; }
+    // AC-VTA-3: producto "solo bulto" con cantidad que no es múltiplo => no se guarda desde acá.
+    const vm = validarMultiplosItems(items, productosById, { permiso: permisoNorm, pantalla: 'pedido' });
+    if (vm.bloquea) {
+      alert(`Hay cantidades que no son múltiplo del bulto: ${vm.avisos.map(a => `${a.nombre} (${a.cantidad} u., bulto x ${a.bultoX})`).join(', ')}`);
+      return;
+    }
 
     // Si el cliente no existe en el maestro, guardarlo para que aparezca en sugerencias otro dia.
     const nombreFinal = clienteNombre.trim();
@@ -363,7 +387,8 @@ const NuevoPedido = () => {
       vendedorNombre: vendedorActual.nombre,
       zona: zonaPedido || '',
       // AC-BUL-9: la marca transitoria no se guarda ni se sincroniza.
-      items: quitarMarcasRenglones(items),
+      // AC-VTA-2: la cantidad sigue en unidades; se congelan bultos/bultoX/bultoNombre.
+      items: congelarBultosItems(quitarMarcasRenglones(items), productosById, { previos: [] }),
       total,
       observaciones,
       estado: 'pendiente',

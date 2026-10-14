@@ -141,10 +141,13 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     expect(mockSb.upserts).toHaveLength(1);
     const [row] = mockSb.upserts[0].rows;
     expect(mockSb.upserts[0].rows).toHaveLength(1);
+    // MOD (RUN 20261014-1449, AC-COMR-1): antes el payload llevaba comision: 2.5;
+    // ahora la clave no viaja (el upsert no pisa la columna en Supabase).
     expect(row).toMatchObject({
       id: 7, nombre: 'Kiosco', direccion: 'Mitre 1', codigo: 'C7', ciudad: 'Rosario', codigo_postal: 'S2000',
-      provincia: 'Santa Fe', tipo_iva: 'Monotributo', cuit: '20-12345678-6', comision: 2.5, fecha_alta: '2026-10-07',
+      provincia: 'Santa Fe', tipo_iva: 'Monotributo', cuit: '20-12345678-6', fecha_alta: '2026-10-07',
     });
+    expect(row).not.toHaveProperty('comision');
     expect(db.clearClientesPendingSync).toHaveBeenCalledWith([7]);
   });
 
@@ -330,6 +333,135 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     mockLocal.productos = [{ id: 5, nombre: 'Alfajor', codigo: 'A', precio: 100, unidad: 'unidad', categoria: '', pendingSync: true,
       proveedorId: null, costoFinal: 0, descuento1: 0, descuento2: 0, ganancia: 0, precioVenta2: 0, bultoX: 1, minimoVenta: 1 }];
     mockSb.remoto.productos = [{ id: 5, nombre: 'Alfajor', codigo: 'A', precio: 100, unidad: 'unidad', categoria: '' }];
+    await downloadMaestros();
+    expect(mockLocal.productos[0].pendingSync).toBe(false);
+  });
+});
+
+// REQ-COMR (RUN 20261014-1449): el upsert de clientes no pisa ni borra la
+// columna `comision` de Supabase (AC-COMR-1). Decisión del plan (1.3): la clave
+// no viaja en ninguna fila; el dato viejo local se conserva tras el pull.
+describe('AC-COMR-1 sync de clientes sin comision', () => {
+  const BASE = { direccion: 'Mitre 1', telefono: '1144445555', pendingSync: true };
+
+  it('AC-COMR-1 lote mixto (extrasDirty + básicos + uno con comision local): ninguna fila lleva la clave comision', async () => {
+    mockLocal.clientes = [
+      { ...BASE, id: 1, nombre: 'Con extras', codigo: 'A1', comision: 4, extrasDirty: true },
+      { ...BASE, id: 2, nombre: 'Básico con comision', comision: 7 },
+      { ...BASE, id: 3, nombre: 'Extras sin comision', codigo: 'A3', extrasDirty: true },
+      { ...BASE, id: 4, nombre: 'Extras pendientes', codigo: 'A4', comision: 1.5, pendingSync: false, extrasPendientes: true },
+    ];
+    await syncClientes();
+    expect(mockSb.upserts.length).toBeGreaterThan(0);
+    const filas = mockSb.upserts.flatMap(u => u.rows);
+    expect(filas.map(f => f.id).sort()).toEqual([1, 2, 3, 4]);
+    for (const f of filas) expect(f).not.toHaveProperty('comision');
+  });
+
+  it('AC-COMR-1 con fallback legacy (PGRST204) tampoco viaja comision', async () => {
+    mockLocal.clientes = [{ ...BASE, id: 1, nombre: 'Con extras', codigo: 'A1', comision: 4, extrasDirty: true }];
+    mockSb.respuestas = [{ error: ERR_COL }, { error: null }];
+    await syncClientes();
+    expect(mockSb.upserts).toHaveLength(2);
+    for (const u of mockSb.upserts) for (const f of u.rows) expect(f).not.toHaveProperty('comision');
+  });
+
+  it('AC-COMR-1 después del pull la comision local sigue igual aunque Supabase traiga otra (o null)', async () => {
+    mockLocal.clientes = [
+      { id: 1, nombre: 'A', direccion: 'X', comision: 4, pendingSync: false },
+      { id: 2, nombre: 'B', direccion: 'Y', comision: 2.5, pendingSync: false },
+    ];
+    mockSb.remoto.clientes = [
+      { id: 1, nombre: 'A', direccion: 'X', comision: 9 },
+      { id: 2, nombre: 'B', direccion: 'Y', comision: null },
+    ];
+    await downloadMaestros();
+    expect(mockLocal.clientes.find(c => c.id === 1).comision).toBe(4);
+    expect(mockLocal.clientes.find(c => c.id === 2).comision).toBe(2.5);
+  });
+});
+
+// REQ-VTA (AC-VTA-5): columnas de la migracion 006 escalonadas sobre las de la 001.
+describe('AC-VTA-5 syncProductos / downloadMaestros con las columnas de la 006', () => {
+  const DOS_CORAZONES = {
+    id: 21, nombre: 'Dos Corazones', codigo: 'DC1', precio: 900, unidad: 'unidad', categoria: 'Golosinas', marca: 'Dos Corazones',
+    costoFinal: 700, bultoX: 16, minimoVenta: 1, ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false,
+    pendingSync: true, extrasDirty: true,
+  };
+  const ERR_006 = { code: 'PGRST204', message: "Could not find the 'venta_por' column of 'productos' in the schema cache" };
+  const ERR_001 = { code: 'PGRST204', message: "Could not find the 'costo_final' column of 'productos' in the schema cache" };
+
+  it('AC-VTA-5 con las migraciones 001 y 006 sube todo en un solo upsert y no deja extras pendientes', async () => {
+    mockLocal.productos = [DOS_CORAZONES];
+    await syncProductos();
+    expect(mockSb.upserts).toHaveLength(1);
+    expect(mockSb.upserts[0].rows[0]).toMatchObject({
+      id: 21, marca: 'Dos Corazones', bulto_x: 16, costo_final: 700, venta_por: 'bulto', bulto_nombre: 'Display', visible_tienda: false,
+    });
+    expect(mockLocal.productos[0]).toMatchObject({ pendingSync: false, extrasPendientes: false, extrasDirty: false });
+  });
+
+  it('AC-VTA-5 sin la 006 baja al escalon 001: bulto_x y costo_final suben igual, sin las 3 columnas nuevas', async () => {
+    mockLocal.productos = [DOS_CORAZONES];
+    mockSb.respuestas = [{ error: ERR_006 }, { error: null }];
+    await syncProductos();
+    expect(mockSb.upserts).toHaveLength(2);
+    const r2 = mockSb.upserts[1].rows[0];
+    expect(r2).toMatchObject({ id: 21, bulto_x: 16, costo_final: 700, marca: 'Dos Corazones' });
+    for (const col of ['venta_por', 'bulto_nombre', 'visible_tienda']) expect(r2).not.toHaveProperty(col);
+    expect(db.clearProductosPendingSync).toHaveBeenCalledWith([21]);
+    expect(mockLocal.productos[0]).toMatchObject({ pendingSync: false, extrasPendientes: true });
+  });
+
+  it('AC-VTA-5 sin la 006 ni la 001 llega al basico (id, nombre, precio, marca) y no corta el sync', async () => {
+    mockLocal.productos = [DOS_CORAZONES];
+    mockSb.respuestas = [{ error: ERR_006 }, { error: ERR_001 }, { error: null }];
+    await syncProductos();
+    expect(mockSb.upserts).toHaveLength(3);
+    const r3 = mockSb.upserts[2].rows[0];
+    expect(r3).toMatchObject({ id: 21, precio: 900, marca: 'Dos Corazones' });
+    for (const col of ['venta_por', 'bulto_nombre', 'visible_tienda', 'costo_final', 'bulto_x']) expect(r3).not.toHaveProperty(col);
+    expect(mockLocal.productos[0]).toMatchObject({ pendingSync: false, extrasPendientes: true });
+  });
+
+  it('AC-VTA-5 un error que no es de columna faltante se propaga y no limpia pendingSync', async () => {
+    mockLocal.productos = [DOS_CORAZONES];
+    mockSb.respuestas = [{ error: { code: '23514', message: 'new row violates check constraint "productos_venta_bulto_chk"' } }];
+    await expect(syncProductos()).rejects.toMatchObject({ code: '23514' });
+    expect(mockSb.upserts).toHaveLength(1);
+    expect(db.clearProductosPendingSync).not.toHaveBeenCalled();
+    expect(mockLocal.productos[0].pendingSync).toBe(true);
+  });
+
+  it('AC-VTA-5 un producto sin extrasDirty (CSV) sigue subiendo solo lo basico, sin columnas de la 006', async () => {
+    mockLocal.productos = [{ ...DOS_CORAZONES, extrasDirty: false }];
+    await syncProductos();
+    expect(mockSb.upserts).toHaveLength(1);
+    for (const col of ['venta_por', 'bulto_nombre', 'visible_tienda']) expect(mockSb.upserts[0].rows[0]).not.toHaveProperty(col);
+  });
+
+  it('AC-VTA-5 downloadMaestros desde un Supabase sin la 006: conserva los valores locales y los defaults', async () => {
+    mockLocal.productos = [{ ...DOS_CORAZONES, pendingSync: false, extrasDirty: false }, { id: 22, nombre: 'Viejo', codigo: 'V', precio: 5 }];
+    mockSb.remoto.productos = [
+      { id: 21, nombre: 'Dos Corazones', codigo: 'DC1', precio: 900, unidad: 'unidad', categoria: 'Golosinas', marca: 'Dos Corazones', bulto_x: 16 },
+      { id: 22, nombre: 'Viejo', codigo: 'V', precio: 5 },
+    ];
+    await downloadMaestros();
+    expect(mockLocal.productos.find(p => p.id === 21)).toMatchObject({ ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false });
+    expect(mockLocal.productos.find(p => p.id === 22)).toMatchObject({ bultoNombre: 'Bulto', visibleTienda: true });
+  });
+
+  it('AC-VTA-5 downloadMaestros con la 006: baja venta_por, bulto_nombre y visible_tienda de otro dispositivo', async () => {
+    mockLocal.productos = [{ id: 21, nombre: 'Dos Corazones', codigo: 'DC1', precio: 900 }];
+    mockSb.remoto.productos = [{ id: 21, nombre: 'Dos Corazones', codigo: 'DC1', precio: 900, bulto_x: 16, venta_por: 'bulto', bulto_nombre: 'Display', visible_tienda: false, marca: 'Dos Corazones' }];
+    await downloadMaestros();
+    expect(mockLocal.productos[0]).toMatchObject({ ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false, marca: 'Dos Corazones', bultoX: 16 });
+  });
+
+  it('AC-VTA-5 un producto pendiente igual al remoto (con defaults en ambos lados) se limpia y no queda "diferente" para siempre', async () => {
+    mockLocal.productos = [{ id: 23, nombre: 'Viejo', codigo: 'V', precio: 5, unidad: 'unidad', categoria: '', marca: '', pendingSync: true,
+      proveedorId: null, costoFinal: 0, descuento1: 0, descuento2: 0, ganancia: 0, precioVenta2: 0, bultoX: 1, minimoVenta: 1 }];
+    mockSb.remoto.productos = [{ id: 23, nombre: 'Viejo', codigo: 'V', precio: 5, unidad: 'unidad', categoria: '', marca: '', bulto_nombre: null, visible_tienda: true, venta_por: null }];
     await downloadMaestros();
     expect(mockLocal.productos[0].pendingSync).toBe(false);
   });

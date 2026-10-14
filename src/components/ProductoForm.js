@@ -1,15 +1,20 @@
 // src/components/ProductoForm.js — REQ-PROD (AC-PROD-1..3)
 import React, { useMemo, useState } from 'react';
 import CamposForm from './CamposForm';
+import SelectorRubro from './SelectorRubro';
+import SelectorMarca from './SelectorMarca';
+import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta, validarProducto } from '../domain/productos';
 
 const str = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
-const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], stockActual = 0, onGuardar, onCancelar }) => {
+// rubros (REQ-COMR, AC-COMR-3/4): rubros existentes para el selector de Rubro.
+const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubros = [], marcas = [], stockActual = 0, onGuardar, onCancelar }) => {
   const [valores, setValores] = useState(() => ({
     codigo: str(inicial?.codigo),
     nombre: str(inicial?.nombre),
     categoria: str(inicial?.categoria),
+    marca: str(inicial?.marca),
     proveedorId: str(inicial?.proveedorId),
     costoFinal: str(inicial?.costoFinal),
     descuento1: str(inicial?.descuento1),
@@ -18,6 +23,10 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], stock
     precio: str(inicial?.precio),
     precioVenta2: str(inicial?.precioVenta2),
     bultoX: str(inicial?.bultoX, '1'),
+    // AC-VTA-1: productos viejos sin estos campos arrancan con los defaults derivados.
+    ventaPor: ventaPorEfectivo(inicial || {}),
+    bultoNombre: normalizarBultoNombre(inicial?.bultoNombre),
+    visibleTienda: inicial?.visibleTienda !== false,
     minimoVenta: str(inicial?.minimoVenta, '1'),
     stock: inicial ? String(stockActual) : '',
   }));
@@ -47,7 +56,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], stock
   };
 
   const guardar = async () => {
-    const r = validarProducto(valores, { existentes, proveedores, editId: inicial?.id ?? null });
+    const r = validarProducto(valores, { existentes, proveedores, editId: inicial?.id ?? null, rubros: Array.isArray(rubros) ? rubros : [], marcas: Array.isArray(marcas) ? marcas : [] });
     if (!r.ok) { setErrores(r.errores); return; }
     setGuardando(true);
     // Revisor (bloqueante 2): el stock solo se ajusta si el usuario TOCO el
@@ -69,7 +78,16 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], stock
         errores={errores}
         onChange={onChange}
         opcionesDinamicas={{ proveedor: proveedores.map(p => ({ value: p.id, label: `${p.codigo} — ${p.descripcion}` })) }}
+        renderCampo={{
+          categoria: (props) => <SelectorRubro {...props} rubros={rubros} />,
+          marca: (props) => <SelectorMarca {...props} marcas={marcas} />,
+          // AC-VTA-1: casilla "Mostrar en tienda" (el label del campo apunta a su id).
+          visibleTienda: ({ id, value, onChange: set, disabled }) => (
+            <input id={id} name="visibleTienda" type="checkbox" checked={value === true || value === 'true'} onChange={e => set(e.target.checked)} disabled={disabled} />
+          ),
+        }}
         ayudas={{
+          ventaPor: 'El precio es por unidad. "Bulto" exige Bulto x mayor que 1.',
           precio: `Costo neto ${fmt(costoNeto)} · sugerido ${fmt(precioVenta1)}${precioManual ? ' (precio cargado a mano)' : ''}`,
           stock: inicial
             ? `Stock actual: ${stockActual}. Si lo cambiás se registra un ajuste de inventario.`

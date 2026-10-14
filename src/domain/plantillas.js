@@ -9,6 +9,9 @@ import { CAMPOS_PRODUCTO, validarProducto } from './productos';
 import { CAMPOS_CLIENTE, PROVINCIAS, TIPOS_IVA, validarCliente, clienteVacio } from './clientes';
 import { texto, csvSafe, claveUnica, esFechaISO } from './validacion';
 import { filtrarActivos } from './vendedores';
+import { listarRubros, resolverRubro } from './rubros';
+import { listarMarcas, resolverMarca } from './marcas';
+import { normalizarVentaPor, parsearBooleano } from './unidadVenta';
 import { fechaDesdeCelda, errorLimitesArchivo, problemasDeFila, largoEncabezado } from './importacion';
 
 export const ENTIDADES = ['productos', 'clientes'];
@@ -27,7 +30,8 @@ const lista = (arr) => arr.join(', ');
 const INFO_PRODUCTO = {
   codigo: { obligatorio: 'Sí (en productos nuevos)', formato: 'Texto, hasta 40 caracteres. Único (no distingue mayúsculas). Si ya existe, se actualiza ese producto', ejemplo: 'CC500' },
   nombre: { obligatorio: 'Sí', formato: 'Texto, hasta 160 caracteres', ejemplo: 'Coca Cola 500ml' },
-  categoria: { obligatorio: 'No', formato: 'Texto, hasta 60 caracteres', ejemplo: 'Bebidas' },
+  categoria: { obligatorio: 'No', formato: 'Texto, hasta 60 caracteres. Si ya existe el mismo rubro (sin importar mayúsculas, tildes ni espacios) se usa el existente', ejemplo: 'Bebidas' },
+  marca: { obligatorio: 'No', formato: 'Texto, hasta 60 caracteres. Si ya existe la misma marca (sin importar mayúsculas, tildes ni espacios) se usa la existente. Vacío = se conserva (o se detecta por el nombre)', ejemplo: 'Dos Corazones' },
   proveedorId: { obligatorio: 'No', formato: 'Nombre del proveedor como figura en Configuración → Proveedores (o su código). Si no existe, la fila se rechaza', ejemplo: 'Arcor' },
   costoFinal: { obligatorio: 'No', formato: 'Número ≥ 0 (acepta coma decimal: 1234,50)', ejemplo: '1000' },
   // AC-PLA-3b: descuentos, ganancia, precio 2 y minimo venta no son obligatorios.
@@ -37,6 +41,9 @@ const INFO_PRODUCTO = {
   precio: { obligatorio: 'No', formato: 'Número ≥ 0. Si queda vacío se calcula: costo × (1 − desc1/100) × (1 − desc2/100) × (1 + ganancia/100)', ejemplo: '' },
   precioVenta2: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '1300' },
   bultoX: { obligatorio: 'No', formato: 'Entero ≥ 1 (vacío = 1)', ejemplo: '12' },
+  ventaPor: { obligatorio: 'No', formato: 'Unidad, Bulto o Ambos. "Bulto" exige "Bulto x" mayor que 1. Vacío = Ambos si Bulto x es mayor que 1, si no Unidad', ejemplo: 'Bulto' },
+  bultoNombre: { obligatorio: 'No (vacío = Bulto)', formato: 'Bulto, Display, Caja o Pack', ejemplo: 'Display' },
+  visibleTienda: { obligatorio: 'No (vacío = Sí)', formato: 'Sí o No. Si se muestra en la tienda online', ejemplo: 'Sí' },
   minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
   stock: { obligatorio: 'No', formato: 'Entero ≥ 0. Solo para productos NUEVOS (stock inicial). En productos que ya existen se ignora: usá Stock → Ingreso de mercadería', ejemplo: '24' },
 };
@@ -67,9 +74,10 @@ const armarColumnas = (campos, info) => campos.map(c => ({
   ...(info[c.key] || { obligatorio: c.requerido ? 'Sí' : 'No', formato: 'Texto', ejemplo: '' }),
 }));
 
-// AC-PLA-2 / AC-PLA-4 (decision del dueño, 2026-10-12): la comision se carga
-// solo desde la ficha del cliente. No va en la plantilla y, si un archivo trae
-// la columna, se ignora (no crea ni pisa la comision) y se avisa en el resumen.
+// AC-PLA-2 / AC-PLA-4 / AC-COMR-2: el cliente ya no tiene comisión (REQ-COMR:
+// se carga por vendedor y rubro). No va en la plantilla y, si un archivo viejo
+// trae la columna, se ignora (no crea ni pisa el dato viejo) y se avisa en el
+// resumen como informativo. `comision` queda acá como alias legacy.
 export const CAMPOS_EXCLUIDOS_PLANTILLA = Object.freeze({
   productos: Object.freeze([]),
   clientes: Object.freeze(['comision']),
@@ -85,9 +93,12 @@ export const COLUMNAS_PLANTILLA = Object.freeze({
 });
 
 // Encabezados normalizados de los campos excluidos ("Comisión", "Comision %").
+// AC-COMR-2: CAMPOS_CLIENTE ya no tiene "Comisión", así que los encabezados
+// legacy se listan acá explícitos.
+export const ENCABEZADOS_LEGACY_COMISION = Object.freeze(['Comisión', 'Comision', 'Comisión %', '% Comisión']);
 const ENCABEZADOS_EXCLUIDOS = {
   productos: new Set(),
-  clientes: new Set(CAMPOS_CLIENTE.filter(c => CAMPOS_EXCLUIDOS_PLANTILLA.clientes.includes(c.key)).map(c => normalizarEncabezado(c.label))),
+  clientes: new Set(ENCABEZADOS_LEGACY_COMISION.map(normalizarEncabezado)),
 };
 
 export const NOMBRE_ARCHIVO_PLANTILLA = Object.freeze({
@@ -116,6 +127,9 @@ const ALIAS = {
     categoria: 'categoria', familia: 'categoria', linea: 'categoria',
     unidad: 'unidad', unit: 'unidad',
     bulto: 'bultoX', bultos: 'bultoX',
+    sevendepor: 'ventaPor', ventapor: 'ventaPor',
+    etiquetadelbulto: 'bultoNombre', tipobulto: 'bultoNombre',
+    mostrarentienda: 'visibleTienda', tienda: 'visibleTienda', visible: 'visibleTienda',
     minimo: 'minimoVenta', minimodeventa: 'minimoVenta',
     stockinicial: 'stock',
   },
@@ -143,7 +157,7 @@ const PARCIALES_PRODUCTO = [
 ];
 
 // Columnas que solo trae la plantilla nueva (no los archivos viejos).
-const SOLO_PLANTILLA_PRODUCTO = ['proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'bultoX', 'minimoVenta', 'stock'];
+const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'bultoX', 'minimoVenta', 'stock'];
 
 /**
  * Mapea los encabezados de un archivo a campos.
@@ -264,7 +278,9 @@ const PCT_PRODUCTO = ['descuento1', 'descuento2', 'ganancia'];
  * @param {{ existente?: object, existentes?: object[], proveedores?: object[], modo?: string }} ctx
  * @returns {{ ok: boolean, errores: string[], valor: { producto: object, stock: number|null }, stockIgnorado: boolean }}
  */
-export const validarFilaProducto = (valores = {}, { existente = null, existentes = [], proveedores = [], modo = 'plantilla' } = {}) => {
+// AC-COMR-4: `rubros` (los existentes + los ya vistos en el archivo) canoniza
+// el Rubro con la misma regla que el formulario ("GOLOSINAS " => "Golosinas").
+export const validarFilaProducto = (valores = {}, { existente = null, existentes = [], proveedores = [], modo = 'plantilla', rubros = null, marcas = null } = {}) => {
   const errores = [];
   // AC-PLA-3b: en los opcionales, "-"/"–" cuenta como vacío (en altas queda el
   // default; en existentes se conserva el valor). validarProducto no se afloja.
@@ -275,6 +291,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     codigo: strOr(existente?.codigo),
     nombre: strOr(existente?.nombre),
     categoria: strOr(existente?.categoria),
+    marca: strOr(existente?.marca),
     proveedorId: strOr(existente?.proveedorId),
     costoFinal: strOr(existente?.costoFinal),
     descuento1: strOr(existente?.descuento1),
@@ -284,11 +301,23 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     precioVenta2: strOr(existente?.precioVenta2),
     bultoX: strOr(existente?.bultoX, '1'),
     minimoVenta: strOr(existente?.minimoVenta, '1'),
+    // AC-VTA-1: columna ausente o vacía => se conserva lo del existente o el default.
+    ventaPor: strOr(existente?.ventaPor),
+    bultoNombre: strOr(existente?.bultoNombre),
+    visibleTienda: existente?.visibleTienda === false ? false : '',
     stock: '',
   };
   if (tiene('codigo')) form.codigo = textoSeguro(valores.codigo, 40);
   if (tiene('nombre')) form.nombre = textoSeguro(valores.nombre, 160);
   if (tiene('categoria')) form.categoria = textoSeguro(valores.categoria, 60);
+  if (tiene('marca')) form.marca = textoSeguro(valores.marca, 60);
+  if (tiene('ventaPor')) form.ventaPor = normalizarVentaPor(celda(valores.ventaPor)) || celda(valores.ventaPor);
+  if (tiene('bultoNombre')) form.bultoNombre = celda(valores.bultoNombre);
+  if (tiene('visibleTienda')) {
+    const vt = parsearBooleano(celda(valores.visibleTienda));
+    if (vt === null) errores.push('Mostrar en tienda: poné Sí o No');
+    else form.visibleTienda = vt;
+  }
   for (const k of ['costoFinal', 'precioVenta2', 'bultoX', 'minimoVenta']) if (tiene(k)) form[k] = celda(valores[k]);
   for (const k of PCT_PRODUCTO) if (tiene(k)) form[k] = sinPorcentaje(valores[k]);
   // AC-PLA-3b: minimo venta 0 = sin minimo (1).
@@ -314,7 +343,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   const stockIgnorado = !!existente && tiene('stock');
   if (!existente && tiene('stock')) form.stock = celda(valores.stock);
 
-  const r = validarProducto(form, { existentes, proveedores: proveedoresValidos, editId: existente?.id ?? null });
+  const r = validarProducto(form, { existentes, proveedores: proveedoresValidos, editId: existente?.id ?? null, rubros: Array.isArray(rubros) ? rubros : null, marcas: Array.isArray(marcas) ? marcas : null });
   const err = { ...r.errores };
   // Codigo obligatorio solo en altas de la plantilla nueva: los archivos viejos
   // y los upserts por nombre lo aceptan vacio (AC-PROD-5 / AC-PLA-3).
@@ -363,10 +392,9 @@ export const validarFilaCliente = (valores = {}, { existente = null, existentes 
     else form.vendedor = v.nombre;
   }
 
-  // AC-PLA-4: la comision (excluida) nunca sale del archivo. Aunque `valores`
-  // la traiga, form.comision queda vacia. En un alta queda null (se carga desde
-  // la ficha); en una actualizacion la clave se saca del valor para que
-  // { ...existente, ...valor } conserve la comision de la ficha tal cual.
+  // AC-PLA-4 / AC-COMR-2: la comision nunca sale del archivo. validarCliente
+  // ya no devuelve la clave (ni en altas ni en actualizaciones), así que
+  // { ...existente, ...valor } conserva el dato viejo de la ficha tal cual.
   const r = validarCliente(form, existentes, { editId: existente?.id ?? null, now });
   errores.push(...mensajes(r.errores));
   const valor = { ...r.cliente };
@@ -431,6 +459,16 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
   const vistosCodigo = new Map();
   const vistosNombre = new Map();
   const entradas = [];
+  // AC-COMR-4: rubros existentes + los que va agregando este mismo archivo.
+  const rubros = entidad === 'productos' ? listarRubros(base) : null;
+  // AC-VTA-1: idem para la marca.
+  const marcas = entidad === 'productos' ? listarMarcas(base) : null;
+  const sumarRubro = (valor) => {
+    const r = rubros ? resolverRubro(valor?.producto?.categoria, rubros) : null;
+    if (r?.esNuevo) rubros.push(r.rubro);
+    const m = marcas ? resolverMarca(valor?.producto?.marca, marcas) : null;
+    if (m?.esNuevo) marcas.push(m.marca);
+  };
 
   for (const { r, n } of filas.slice(1)) {
     // S-PLA-01 (celda demasiado larga) y BUG-PLA-02 (columnas corridas en un CSV).
@@ -451,8 +489,9 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
         continue;
       }
       // Archivo viejo: como antes, la ultima fila gana (se fusiona en la previa).
-      const r2 = validarFilaProducto(valores, { existente: prev.accion === 'actualizar' ? prev.existente : null, existentes: base, proveedores, modo });
+      const r2 = validarFilaProducto(valores, { existente: prev.accion === 'actualizar' ? prev.existente : null, existentes: base, proveedores, modo, rubros, marcas });
       if (!r2.ok) { entradas.push({ fila: n, accion: 'rechazar', errores: r2.errores }); continue; }
+      sumarRubro(r2.valor);
       entradas[previo] = { ...prev, valor: { ...r2.valor, stock: prev.valor.stock } };
       entradas.push({ fila: n, accion: 'fusionada', errores: [], destino: prev.fila });
       continue;
@@ -460,10 +499,11 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
 
     const existente = (codigoK && porCodigo.get(codigoK)) || (nombreK ? porNombre.get(nombreK) : null) || null;
     const res = entidad === 'productos'
-      ? validarFilaProducto(valores, { existente, existentes: base, proveedores, modo })
+      ? validarFilaProducto(valores, { existente, existentes: base, proveedores, modo, rubros, marcas })
       : validarFilaCliente(valores, { existente, existentes: base, vendedores, now, fechaCorta });
 
     if (!res.ok) { entradas.push({ fila: n, accion: 'rechazar', errores: res.errores }); continue; }
+    sumarRubro(res.valor);
     const idx = entradas.length;
     entradas.push({
       fila: n,
@@ -516,7 +556,7 @@ const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
 export const avisoColumnasExcluidas = (excluidas = []) => {
   const cols = (Array.isArray(excluidas) ? excluidas : []).filter(Boolean);
   if (!cols.length) return '';
-  return `La columna ${cols.map(c => `"${c}"`).join(', ')} se ignoró: la comisión se carga solo desde la ficha del cliente.`;
+  return `La columna ${cols.map(c => `"${c}"`).join(', ')} se ignoró: ahora la comisión se carga por vendedor y rubro (Configuración → Vendedores).`;
 };
 
 /**

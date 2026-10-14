@@ -239,10 +239,12 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
     ].join('\n');
     await subir(inputClientes(), { name: 'clientes.csv', size: csv.length, text: () => Promise.resolve(csv) });
     expect(addCliente).toHaveBeenCalledTimes(2);
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes las altas traían comision: null; ahora no traen la clave.
     expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({
-      codigo: '0042', nombre: 'Nuevo SA', cuit: '30-71234567-1', vendedor: 'Juan', comision: null, extrasDirty: true, boletaContraBoleta: false,
+      codigo: '0042', nombre: 'Nuevo SA', cuit: '30-71234567-1', vendedor: 'Juan', extrasDirty: true, boletaContraBoleta: false,
     }));
-    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: '0045', comision: null }));
+    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: '0045' }));
+    for (const [c] of addCliente.mock.calls) expect(c).not.toHaveProperty('comision');
     expect(updateCliente).toHaveBeenCalledWith(expect.objectContaining({ id: 10, nombre: 'Kiosco Pepe SRL', boletaContraBoleta: true, extrasDirty: true }));
     expect(mockApp.recargar).toHaveBeenCalled();
     expect(container.querySelector('[data-testid="resultado-clientes-resumen"]').textContent).toContain('Creados: 2 · Actualizados: 1 · Rechazados: 3');
@@ -251,8 +253,9 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
     expect(rech).toContain('Fila 5: Vendedor "Viejo" no existe o está dado de baja');
     expect(rech).toContain('Fila 6: Código repetido en el archivo (ya está en la fila 2)');
     expect(rech).not.toMatch(/comisi/i);
+    // MOD (RUN 20261014-1449, AC-COMR-2): texto nuevo del aviso.
     expect(container.querySelector('[data-testid="resultado-clientes-excluidas"]').textContent)
-      .toBe('La columna "Comisión" se ignoró: la comisión se carga solo desde la ficha del cliente.');
+      .toBe('La columna "Comisión" se ignoró: ahora la comisión se carga por vendedor y rubro (Configuración → Vendedores).');
   });
 
   it('AC-PLA-4 importar con columna Comisión no pisa la comisión de la ficha de un existente y avisa en el resumen', async () => {
@@ -263,7 +266,9 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
     expect(updateCliente).toHaveBeenCalledTimes(1);
     expect(updateCliente.mock.calls[0][0]).toMatchObject({ id: 10, direccion: 'Mitre 2', comision: 4 });
     expect(addCliente).toHaveBeenCalledTimes(1);
-    expect(addCliente.mock.calls[0][0]).toMatchObject({ codigo: '0077', comision: null });
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null en el alta; ahora la clave no existe.
+    expect(addCliente.mock.calls[0][0]).toMatchObject({ codigo: '0077' });
+    expect(addCliente.mock.calls[0][0]).not.toHaveProperty('comision');
     const res = container.querySelector('[data-testid="resultado-clientes"]').textContent;
     expect(res).toContain('1 creado, 1 actualizado');
     expect(res).toContain('La columna "Comisión" se ignoró');

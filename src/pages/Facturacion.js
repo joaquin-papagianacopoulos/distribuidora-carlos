@@ -15,6 +15,7 @@ import { isPedidoVisible, normalizePedidoFecha, getArmadoLog, getDeudaPendienteP
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
 import { acotarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
+import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
 
 // REQ-COM (AC-COM-13): texto extra para confirmar cambios sobre un pedido que
@@ -116,6 +117,13 @@ const FacturacionItemRow = ({
 
   const aplicarDescuentoPct = () => onAplicarDescuentoPct(item);
 
+  // REQ-VTA (AC-VTA-2/3): paso por bulto, aviso de no múltiplo (sobre lo tipeado) y "3 Display (48 u.)".
+  const paso = pasoCantidad(producto);
+  const cantidadMostrada = cantidadTipeada(String(cantidadText ?? '')) ?? item.cantidad;
+  const avisoVenta = avisoMultiplo(cantidadMostrada, producto);
+  const textoBultos = textoRenglonBultos(congelarBultosRenglon({ ...item, cantidad: cantidadMostrada }, producto));
+  const precioDelBulto = ventaPorEfectivo(producto) !== 'unidad' ? precioBulto(item.precio, producto?.bultoX) : null;
+
   const precioModificado =
     item.precioOriginal !== undefined &&
     item.precioOriginal !== null &&
@@ -126,6 +134,14 @@ const FacturacionItemRow = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>
           {item.nombre}
+          {avisoVenta && (
+            <div data-testid="aviso-multiplo" role="alert" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
+              {'⚠️'} {avisoVenta}
+            </div>
+          )}
+          {textoBultos && (
+            <div data-testid="texto-bultos" style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{textoBultos}</div>
+          )}
           {precioModificado && (
             <div style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
               {item.descuentoPct
@@ -172,10 +188,10 @@ const FacturacionItemRow = ({
         </button>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>×</span>
         <div className="qty-control">
-          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, -1); setCantidadText(String(Math.max(1, item.cantidad - 1))); }}>−</button>
+          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, -paso); setCantidadText(String(Math.max(paso, item.cantidad - paso))); }}>−</button>
           <input className="qty-input" type="text" value={cantidadText}
             onChange={handleCantidadChange} onBlur={handleCantidadBlur} inputMode="numeric" />
-          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, 1); setCantidadText(String(item.cantidad + 1)); }}>+</button>
+          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, paso); setCantidadText(String(item.cantidad + paso)); }}>+</button>
         </div>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>=</span>
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
@@ -186,8 +202,10 @@ const FacturacionItemRow = ({
       <BultoControl
         visible={puedeBulto}
         bultoX={producto?.bultoX}
+        nombre={normalizarBultoNombre(producto?.bultoNombre)}
+        precioBulto={precioDelBulto}
         cantidad={item.cantidad}
-        puedeRestar={Number(item.cantidad) > CANTIDAD_MINIMA_RENGLON}
+        puedeRestar={Number(item.cantidad) > Math.max(CANTIDAD_MINIMA_RENGLON, paso)}
         onSumar={() => onBulto && onBulto(item.productoId, 'sumar')}
         onRestar={() => onBulto && onBulto(item.productoId, 'restar')}
       />
@@ -409,12 +427,12 @@ const Facturacion = () => {
       destacharRemovido(p.id);
       return;
     }
-    const cantidadNueva = (itemsEdit.find(i => i.productoId === p.id)?.cantidad ?? 0) + 1;
+    const cantidadNueva = (itemsEdit.find(i => i.productoId === p.id)?.cantidad ?? 0) + pasoCantidad(p);
     setItemsEdit(prev => {
       const existe = prev.find(i => i.productoId === p.id);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + 1 }) : i);
+        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) }) : i);
         return sortItems(next);
       }
       // AC-BUL-9: el renglón arranca en 1 con la marca "cantidad por defecto".
@@ -436,8 +454,9 @@ const Facturacion = () => {
   };
 
   const cambiarCantidad = (productoId, delta) => {
+    const piso = pasoCantidad(productosIndex.byId.get(String(productoId)));
     setItemsEdit(prev => {
-      const next = sortItems(prev.map(i => i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad: Math.max(1, i.cantidad + delta) }) : i));
+      const next = sortItems(prev.map(i => i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad: Math.max(piso, i.cantidad + delta) }) : i));
       const it = next.find(x => x.productoId === productoId);
       if (it) {
         setDraftByPid(d => {
@@ -461,10 +480,12 @@ const Facturacion = () => {
     const actual = itemsEditRef.current.find(i => i.productoId === productoId);
     if (!actual) return;
     // C4 / S-BUL-08: el bulto sale SOLO del producto con el mismo id.
-    const bx = productoParaBulto(actual, productosIndex.byId)?.bultoX;
+    const prodBulto = productoParaBulto(actual, productosIndex.byId);
+    const bx = prodBulto?.bultoX;
+    const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prodBulto));
     const cantidad = op === 'sumar'
       ? sumarBultoRenglon(actual.cantidad, bx, { cantidadPorDefecto: actual[MARCA_CANTIDAD_POR_DEFECTO] === true })
-      : restarBulto(actual.cantidad, bx, { minimo: CANTIDAD_MINIMA_RENGLON });
+      : restarBulto(actual.cantidad, bx, { minimo });
     if (cantidad === actual.cantidad) return;
     const cambiar = (lista) => sortItems(lista.map(i => i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad }) : i));
     itemsEditRef.current = cambiar(itemsEditRef.current);
@@ -631,6 +652,19 @@ const Facturacion = () => {
         return;
       }
 
+      // AC-VTA-3: producto "solo bulto" con cantidad no múltiplo. El admin la puede
+      // guardar igual (con confirmación); el resto, no. Lo sin cambios no se valida.
+      const vm = validarMultiplosItems(itemsFinal, productosIndex.byId, { permiso: permisoNorm, pantalla: 'facturacion', previos: pedidoEditando.items });
+      if (!vm.ok) {
+        const detalle = vm.avisos.map(a => `${a.nombre} (${a.cantidad} u., bulto x ${a.bultoX})`).join(', ');
+        if (vm.bloquea) { alert(`Hay cantidades que no son múltiplo del bulto: ${detalle}`); return; }
+        if (!window.confirm(`Estas cantidades no son múltiplo del bulto: ${detalle}.
+
+¿Guardar igual?`)) return;
+      }
+      // AC-VTA-2: la cantidad queda en unidades; se congelan bultos/bultoX/bultoNombre.
+      const itemsGuardar = congelarBultosItems(itemsFinal, productosIndex.byId, { previos: pedidoEditando.items });
+
       // Lo que se destacho sale de la lista de faltantes del pedido.
       const logOriginal = getArmadoLog(pedidoEditando);
       const idsRestaurados = (logOriginal?.removidos || [])
@@ -651,7 +685,7 @@ const Facturacion = () => {
         } : {}),
         clienteNombre: (clienteNombreEdit || '').trim() || pedidoEditando.clienteNombre,
         fecha: normalizePedidoFecha(fechaEdit),
-        items: itemsFinal,
+        items: itemsGuardar,
         total: itemsFinal.reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0),
       };
 

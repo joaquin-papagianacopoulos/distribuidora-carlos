@@ -85,7 +85,8 @@ describe('AC-SEC-3 AC-PLA-6 formula injection en la importacion', () => {
     const rows = [[...LABELS_C, 'Comisión'], ['0001', 'Kiosco', 'Mitre 1', ...Array(LABELS_C.length - 3).fill(''), '=1+1']];
     const plan = planificarImportacion(rows, 'clientes', { existentes: [], vendedores: [], now: NOW });
     expect(plan.excluidas).toEqual(['Comisión']);
-    expect(plan.entradas[0].valor.comision).toBeNull();
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes valor.comision era null; ahora la clave no existe.
+    expect(plan.entradas[0].valor).not.toHaveProperty('comision');
   });
 });
 
@@ -114,7 +115,7 @@ describe('AC-SEC-3 AC-PLA-6 formula injection en la plantilla exportada', () => 
 describe('AC-PROD-3 AC-STK-8 regla dura 4: la importacion no escribe stock', () => {
   test('AC-PROD-3 un producto existente con columna Stock no genera stock (stockIgnorado)', () => {
     const existentes = [{ id: 'p1', codigo: 'A1', nombre: 'Prod', precio: 10, unidad: 'unidad' }];
-    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '10', '', '', '', '999']];
+    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '', '10', '', '', '', '', '', '', '999']];
     const plan = planificarImportacion(rows, 'productos', { existentes, proveedores: [] });
     expect(plan.entradas[0].accion).toBe('actualizar');
     expect(plan.entradas[0].valor.stock).toBeNull();

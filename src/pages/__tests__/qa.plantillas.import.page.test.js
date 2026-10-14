@@ -276,7 +276,9 @@ describe('AC-PLA-4 / AC-PLA-2 clientes: texto de ayuda y comisión', () => {
     const txt = 'Código cliente;Comisión;Razón social;Domicilio de entrega;Ciudad\n0010;99;Kiosco Pepe;Mitre 1;Rosario\n0555;7;Nuevo;Calle 5;Salta\n';
     await subir(inputClientes(), csv('c.csv', txt));
     expect(updateCliente.mock.calls[0][0]).toMatchObject({ id: 10, ciudad: 'Rosario', comision: 4 });
-    expect(addCliente.mock.calls[0][0]).toMatchObject({ codigo: '0555', ciudad: 'Salta', comision: null });
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null en el alta; ahora la clave no existe.
+    expect(addCliente.mock.calls[0][0]).toMatchObject({ codigo: '0555', ciudad: 'Salta' });
+    expect(addCliente.mock.calls[0][0]).not.toHaveProperty('comision');
     expect(container.querySelector('[data-testid="resultado-clientes-excluidas"]')).not.toBeNull();
   });
 

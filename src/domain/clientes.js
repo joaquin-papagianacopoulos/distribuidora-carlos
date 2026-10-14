@@ -1,5 +1,5 @@
 // src/domain/clientes.js — REQ-CLI: alta de clientes.
-import { texto, toNum, validarCuit, formatearCuit, esFechaISO, hoyISO, claveUnica, soloDigitos } from './validacion';
+import { texto, validarCuit, formatearCuit, esFechaISO, hoyISO, claveUnica, soloDigitos } from './validacion';
 
 export const PROVINCIAS = [
   'Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes',
@@ -12,7 +12,10 @@ export const TIPOS_IVA = [
   'Responsable Inscripto', 'Monotributo', 'Exento', 'Consumidor Final', 'No Responsable',
 ];
 
-// Orden y etiquetas EXACTOS que pidió el cliente (AC-CLI-1).
+// Orden y etiquetas EXACTOS que pidió el cliente (AC-CLI-1). REQ-COMR
+// (AC-COMR-1): "Comisión" ya no es un campo del cliente (quedan 16). El dato
+// viejo `comision` se conserva en IndexedDB y en Supabase, pero no se muestra,
+// no se valida, no se mapea y no se usa.
 export const CAMPOS_CLIENTE = [
   { key: 'codigo', label: 'Código cliente', requerido: true },
   { key: 'nombre', label: 'Razón social', requerido: true },
@@ -27,7 +30,6 @@ export const CAMPOS_CLIENTE = [
   { key: 'telefono', label: 'Celular', tipo: 'tel' },
   { key: 'vendedor', label: 'Vendedor', tipo: 'vendedor' },
   { key: 'cobrador', label: 'Cobrador' },
-  { key: 'comision', label: 'Comisión', tipo: 'number', sufijo: '%' },
   { key: 'fechaAlta', label: 'Fecha de alta', tipo: 'date' },
   { key: 'tipoCliente', label: 'Tipo de cliente' },
   { key: 'rubro', label: 'Rubro' },
@@ -36,7 +38,7 @@ export const CAMPOS_CLIENTE = [
 export const clienteVacio = (now = new Date()) => ({
   codigo: '', nombre: '', direccion: '', ciudad: '', codigoPostal: '', provincia: '',
   zona: '', pais: 'Argentina', tipoIva: '', cuit: '', telefono: '', vendedor: '',
-  cobrador: '', comision: '', fechaAlta: hoyISO(now), tipoCliente: '', rubro: '',
+  cobrador: '', fechaAlta: hoyISO(now), tipoCliente: '', rubro: '',
 });
 
 // Sugiere el próximo código numérico libre (ej. "0042").
@@ -66,7 +68,6 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
     telefono: soloDigitos(form.telefono).slice(0, 15),
     vendedor: texto(form.vendedor, 80),
     cobrador: texto(form.cobrador, 80),
-    comision: null,
     fechaAlta: texto(form.fechaAlta, 10) || hoyISO(now),
     tipoCliente: texto(form.tipoCliente, 60),
     rubro: texto(form.rubro, 60),
@@ -100,18 +101,15 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
     errores.telefono = 'El celular debe tener entre 8 y 15 dígitos';
   }
 
-  if (form.comision !== '' && form.comision !== null && form.comision !== undefined) {
-    const n = toNum(form.comision);
-    if (n === null || n < 0 || n > 100) errores.comision = 'La comisión debe ser un % entre 0 y 100';
-    else c.comision = n;
-  }
-
   if (!esFechaISO(c.fechaAlta)) errores.fechaAlta = 'Fecha de alta inválida';
 
   return { ok: Object.keys(errores).length === 0, errores, cliente: c };
 };
 
 // Columnas nuevas en Supabase (snake_case). Las legacy las arma syncClientes.
+// AC-COMR-1: `comision` NO viaja en ninguna fila. PostgREST arma el upsert por
+// lote con la unión de claves: si una sola fila la mandara, al resto se le
+// pondría null. Sin la clave, el ON CONFLICT no toca la columna existente.
 export const clienteExtraToRemote = (c = {}) => ({
   codigo: c.codigo || null,
   ciudad: c.ciudad || null,
@@ -123,7 +121,6 @@ export const clienteExtraToRemote = (c = {}) => ({
   cuit: c.cuit || null,
   vendedor: c.vendedor || null,
   cobrador: c.cobrador || null,
-  comision: (c.comision === null || c.comision === undefined || c.comision === '') ? null : Number(c.comision),
   fecha_alta: c.fechaAlta || null,
   tipo_cliente: c.tipoCliente || null,
   rubro: c.rubro || null,
@@ -144,7 +141,6 @@ export const clienteExtraFromRemote = (r = {}, local = {}) => {
     cuit: pick('cuit', 'cuit'),
     vendedor: pick('vendedor', 'vendedor'),
     cobrador: pick('cobrador', 'cobrador'),
-    comision: r.comision !== undefined ? r.comision : (local?.comision ?? null),
     fechaAlta: pick('fecha_alta', 'fechaAlta'),
     tipoCliente: pick('tipo_cliente', 'tipoCliente'),
     rubro: pick('rubro', 'rubro'),

@@ -84,12 +84,12 @@ describe('AC-PLA-3 AC-PLA-7 round-trip con xlsx real y celdas tipadas', () => {
 
 describe('AC-PLA-3 AC-PLA-4 encabezados con tildes, mayusculas y basura invisible', () => {
   it.each([
-    ['MAYUSCULAS con tilde', ['CÓDIGO', 'DESCRIPCIÓN', 'RUBRO', 'PROVEEDOR', 'COSTO FINAL', 'DESCUENTO 1', 'DESCUENTO 2', '% GANANCIA', 'PRECIO VENTA 1', 'PRECIO VENTA 2', 'BULTO X', 'MÍNIMO VENTA', 'STOCK']],
-    ['minusculas sin tilde', ['codigo', 'descripcion', 'rubro', 'proveedor', 'costo final', 'descuento 1', 'descuento 2', '% ganancia', 'precio venta 1', 'precio venta 2', 'bulto x', 'minimo venta', 'stock']],
-    ['espacios de mas y NBSP', ['  Código ', 'Descripción\u00A0', ' Rubro', 'Proveedor ', 'Costo  final', 'Descuento   1', 'Descuento 2', '%  Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mínimo\u00A0venta', 'Stock']],
-    ['tildes descompuestas (NFD)', ['Co\u0301digo', 'Descripcio\u0301n', 'Rubro', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mi\u0301nimo venta', 'Stock']],
-    ['con BOM al principio', ['\uFEFFCódigo', 'Descripción', 'Rubro', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mínimo venta', 'Stock']],
-  ])('AC-PLA-3 productos %s: las 13 columnas se mapean a su campo, sin ignoradas', (_n, headers) => {
+    ['MAYUSCULAS con tilde', ['CÓDIGO', 'DESCRIPCIÓN', 'RUBRO', 'MARCA', 'PROVEEDOR', 'COSTO FINAL', 'DESCUENTO 1', 'DESCUENTO 2', '% GANANCIA', 'PRECIO VENTA 1', 'PRECIO VENTA 2', 'BULTO X', 'SE VENDE POR', 'ETIQUETA DEL BULTO', 'MOSTRAR EN TIENDA', 'MÍNIMO VENTA', 'STOCK']],
+    ['minusculas sin tilde', ['codigo', 'descripcion', 'rubro', 'marca', 'proveedor', 'costo final', 'descuento 1', 'descuento 2', '% ganancia', 'precio venta 1', 'precio venta 2', 'bulto x', 'se vende por', 'etiqueta del bulto', 'mostrar en tienda', 'minimo venta', 'stock']],
+    ['espacios de mas y NBSP', ['  Código ', 'Descripción\u00A0', ' Rubro', 'Marca', 'Proveedor ', 'Costo  final', 'Descuento   1', 'Descuento 2', '%  Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo\u00A0venta', 'Stock']],
+    ['tildes descompuestas (NFD)', ['Co\u0301digo', 'Descripcio\u0301n', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mi\u0301nimo venta', 'Stock']],
+    ['con BOM al principio', ['\uFEFFCódigo', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']],
+  ])('AC-PLA-3 productos %s: las 17 columnas se mapean a su campo, sin ignoradas', (_n, headers) => {
     const m = mapearEncabezados(headers, 'productos');
     COLUMNAS_PLANTILLA.productos.forEach((c, i) => expect(m.indices[c.key]).toBe(i));
     expect(m.ignoradas).toEqual([]);

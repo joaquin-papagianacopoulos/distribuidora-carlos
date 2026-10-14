@@ -45,13 +45,13 @@ const errorDe = (key) => container.querySelector(`[data-error-for="${key}"]`);
 const PROVEEDORES = [{ id: 'prov-1', codigo: 'P1', descripcion: 'Arcor' }];
 
 describe('ProductoForm', () => {
-  it('AC-PROD-1 muestra las 13 etiquetas del SPEC', async () => {
+  it('AC-PROD-1 muestra las etiquetas del SPEC (AC-VTA-1 suma 4)', async () => {
     await render({ onGuardar: jest.fn() });
     const labels = [...container.querySelectorAll('label.input-label')]
       .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, ''));
     expect(labels).toEqual([
-      'Código', 'Descripción', 'Rubro', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mínimo venta', 'Stock',
+      'Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
+      '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock',
     ]);
   });
 
@@ -113,9 +113,12 @@ describe('ProductoForm', () => {
     expect(campo('precio').value).toBe('900');
   });
 
+  // MOD (RUN 20261014-1449, AC-COMR-3): el Rubro ahora es un selector, así que
+  // se renderiza con rubros: ['Bebidas'] (el select necesita la opción). Las
+  // aserciones de onGuardar no cambian.
   it('AC-PROD-3 onGuardar recibe (producto, stock) con el stock aparte del producto', async () => {
     const onGuardar = jest.fn(() => Promise.resolve());
-    await render({ onGuardar, proveedores: PROVEEDORES });
+    await render({ onGuardar, proveedores: PROVEEDORES, rubros: ['Bebidas'] });
     await llenar({
       codigo: 'CC500', nombre: '  Coca   Cola 500 ', categoria: 'Bebidas', proveedorId: 'prov-1',
       costoFinal: '1000', descuento1: '10', ganancia: '50', precioVenta2: '1400',
@@ -199,5 +202,68 @@ describe('ProductoForm', () => {
     await render({ onGuardar: jest.fn(), proveedores: PROVEEDORES });
     const opts = [...campo('proveedorId').options].filter(o => o.value);
     expect(opts.map(o => [o.value, o.textContent])).toEqual([['prov-1', 'P1 — Arcor']]);
+  });
+});
+
+// REQ-VTA (AC-VTA-1): Marca, Se vende por, Etiqueta del bulto y Mostrar en tienda.
+describe('ProductoForm unidad de venta y marca (REQ-VTA)', () => {
+  const nuevoEn = async (key, texto) => {
+    await setValue(campo(key), '__nuevo__');
+    await setValue(container.querySelector(`#campo-${key}-nuevo`), texto);
+    await click(boton('Usar'));
+  };
+
+  it('AC-VTA-1 muestra los 4 campos nuevos con sus defaults en un alta', async () => {
+    await render({ onGuardar: jest.fn() });
+    expect(campo('marca').tagName).toBe('SELECT');
+    expect(campo('ventaPor').value).toBe('unidad');
+    expect(campo('bultoNombre').value).toBe('Bulto');
+    expect(campo('visibleTienda').type).toBe('checkbox');
+    expect(campo('visibleTienda').checked).toBe(true);
+  });
+
+  it('AC-VTA-1 el selector de marca ofrece las existentes y "Agregar marca nueva…"', async () => {
+    await render({ onGuardar: jest.fn(), marcas: ['Arcor', 'Bagley'] });
+    expect([...campo('marca').options].map(o => o.textContent)).toEqual(['— Sin marca —', 'Arcor', 'Bagley', 'Agregar marca nueva…']);
+  });
+
+  it('AC-VTA-1 "Agregar marca nueva…" con dedupe: ARCOR reutiliza Arcor', async () => {
+    const onGuardar = jest.fn(() => Promise.resolve());
+    await render({ onGuardar, marcas: ['Arcor'] });
+    await nuevoEn('marca', ' ARCOR ');
+    expect(container.querySelector('[data-testid="marca-aviso"]').textContent).toContain('Arcor');
+    await llenar({ codigo: 'A1', nombre: 'Alfajor' });
+    await click(boton('Guardar'));
+    expect(onGuardar.mock.calls[0][0].marca).toBe('Arcor');
+  });
+
+  it('AC-VTA-1 Dos Corazones: bulto x16, Se vende por bulto, Display, guarda los campos', async () => {
+    const onGuardar = jest.fn(() => Promise.resolve());
+    await render({ onGuardar, marcas: [] });
+    await nuevoEn('marca', 'Dos Corazones');
+    await llenar({ codigo: 'DC1', nombre: 'Dos Corazones', precio: '900', bultoX: '16', ventaPor: 'bulto', bultoNombre: 'Display' });
+    await click(campo('visibleTienda'));
+    await click(boton('Guardar'));
+    expect(onGuardar).toHaveBeenCalledTimes(1);
+    expect(onGuardar.mock.calls[0][0]).toMatchObject({
+      marca: 'Dos Corazones', bultoX: 16, ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false, precio: 900,
+    });
+  });
+
+  it('AC-VTA-1 "bulto" con Bulto x 1 muestra el error en el campo Se vende por y no guarda', async () => {
+    const onGuardar = jest.fn();
+    await render({ onGuardar });
+    await llenar({ codigo: 'DC1', nombre: 'Dos Corazones', bultoX: '1', ventaPor: 'bulto' });
+    await click(boton('Guardar'));
+    expect(onGuardar).not.toHaveBeenCalled();
+    expect(errorDe('ventaPor').textContent).toMatch(/Bulto x/);
+  });
+
+  it('AC-VTA-1 editar un producto viejo (sin campos nuevos) arranca con los defaults derivados', async () => {
+    const inicial = { id: 5, codigo: 'A1', nombre: 'Alfajor', precio: 900, bultoX: 12 };
+    await render({ onGuardar: jest.fn(), inicial, existentes: [inicial] });
+    expect(campo('ventaPor').value).toBe('ambos');
+    expect(campo('bultoNombre').value).toBe('Bulto');
+    expect(campo('visibleTienda').checked).toBe(true);
   });
 });

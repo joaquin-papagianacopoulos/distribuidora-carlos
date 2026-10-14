@@ -1,14 +1,18 @@
-// src/pages/Comisiones.js — REQ-COM (AC-COM-2..14). Solo admin.
+// src/pages/Comisiones.js — REQ-COM (AC-COM-2..14) + REQ-COMR (AC-COMR-10..13). Solo admin.
 // Dashboard del período, avisos, asignación de comisiones, cierre e historial.
-// Toda la lógica está en src/domain/comisiones.js; acá solo se muestra.
+// Toda la lógica (y toda la aritmética) está en src/domain/comisiones.js y
+// src/domain/rubros.js; acá solo se muestra.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import {
   armarDashboard, puedeCerrar, firmaDashboard, periodoPorDefecto, validarPeriodo,
   setAsignacionBorrador, CONFIG_COMISIONES, puedeVerComisiones, contarPendientesServidor,
   confirmarAsignacionBorrador, asignacionLineaValida, pedidoIdComision, buscarCliente,
-  ayudaAnulacion,
+  ayudaAnulacion, modeloDeCierre, filasPdfCierre,
 } from '../domain/comisiones';
+import ComisionRubroGrid from '../components/ComisionRubroGrid';
+import { listarRubros } from '../domain/rubros';
+import { syncComisionesRubro } from '../services/comisionesRubroService';
 import { permisoValido } from '../domain/permisos';
 import { vendedoresParaSelector } from '../domain/vendedores';
 import {
@@ -44,21 +48,39 @@ const CampoPin = ({ id, value, onChange }) => (
   </label>
 );
 
-// ---------------- Avisos (AC-COM-6) ----------------
-const Avisos = ({ avisos }) => {
+// ---------------- Avisos (AC-COM-6, AC-COMR-11) ----------------
+const Avisos = ({ avisos, onCargarPct }) => {
   const c = avisos.contadores;
+  const c1 = avisos.vendedorSinPctRubro || [];
+  const c2 = avisos.productosSinRubro || [];
   const filas = [
     ['a', c.a, 'pedido(s) cargado(s) por un vendedor distinto al de la ficha', avisos.cargadoPorOtro.map(l => `${l.clienteNombre} (cargó ${l.cargadoPor})`)],
     ['b', c.b, 'cliente(s) sin vendedor en la ficha', avisos.clienteSinVendedor.map(x => x.clienteNombre)],
     ['c', c.c, 'cliente(s) sin % de comisión (comisión 0)', avisos.clienteSinPct.map(x => x.clienteNombre)],
+    ['c2', c.c2 || 0, 'producto(s) sin rubro vendido(s) en el período (comisión 0)', c2.map(x => `${x.nombre} (${x.renglones} renglón/es, ${pesos(x.monto)})`)],
+    ['vsi', c.vendedorSinId || 0, 'vendedor(es) sin sincronizar (sin tabla de %; bloquean el cierre)', (avisos.vendedorSinSincronizar || []).map(x => x.vendedor)],
+    ['ri', c.renglonInvalido || 0, 'pedido(s) con renglones inválidos (comisionan 0)', (avisos.renglonInvalido || []).map(x => `${x.clienteNombre} #${x.pedidoId}`)],
     ['d', c.d, 'pedido(s) facturado(s) sin marcar como entregado (no se cuentan)', avisos.noEntregados.map(p => p.clienteNombre)],
     ['s', c.sinSincronizar, 'pedido(s) sin sincronizar (bloquean el cierre)', avisos.sinSincronizar.map(p => p.clienteNombre)],
     ['m', c.montoInvalido, 'pedido(s) con total inválido (comisión 0)', avisos.montoInvalido.map(l => l.clienteNombre)],
   ].filter(f => f[1] > 0);
-  if (filas.length === 0) return <div className="card" data-testid="avisos" style={{ color: 'var(--success)', fontSize: 13 }}>Sin avisos.</div>;
+  if (filas.length === 0 && c1.length === 0) return <div className="card" data-testid="avisos" style={{ color: 'var(--success)', fontSize: 13 }}>Sin avisos.</div>;
   return (
     <div className="card" data-testid="avisos" style={{ borderColor: 'var(--warning)' }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{'⚠️'} Avisos ({c.total})</div>
+      {c1.length > 0 && (
+        <div data-testid="aviso-c1" style={{ fontSize: 13, marginBottom: 6 }}>
+          <strong>{c1.length}</strong> vendedor(es) sin % para un rubro vendido en el período (esas ventas comisionan 0):
+          {c1.map(x => (
+            <div key={`${x.vendedorId}|${x.clave}`} data-testid={`aviso-c1-${x.vendedorId}-${x.clave}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '2px 0 2px 8px' }}>
+              <span>{x.vendedor} · {x.rubro} · {x.pedidos} pedido(s) · {pesos(x.montoAfectado)} vendido</span>
+              {onCargarPct && (
+                <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => onCargarPct(x)}>Cargar %</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {filas.map(([k, n, txt, nombres]) => (
         <div key={k} data-testid={`aviso-${k}`} style={{ fontSize: 13, marginBottom: 4 }}>
           <strong>{n}</strong> {txt}
@@ -68,6 +90,24 @@ const Avisos = ({ avisos }) => {
     </div>
   );
 };
+
+// AC-COMR-12: desglose por rubro de un pedido para un vendedor.
+const DesgloseRubros = ({ desglose, testid }) => (
+  <div data-testid={testid} style={{ paddingLeft: 10, fontSize: 12, color: 'var(--text3)' }}>
+    {(desglose || []).map(d => (
+      <div key={d.rubroClave || 'sin-rubro'} style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span>{d.rubro || 'Sin rubro'} · {pesos(d.subtotal)} · {d.pct === null || d.pct === undefined ? 'sin %' : `${d.pct} %`}</span>
+        <span>{pesos(d.comision)}</span>
+      </div>
+    ))}
+  </div>
+);
+
+// AC-COMR-10: en pedidos divididos con el modelo por rubro no hay una
+// comisión única: se muestra la de cada vendedor.
+const textoComisionLinea = (linea) => (linea.modelo === 'rubro' && linea.comisionUnica === false
+  ? `comisión ${(linea.partes || []).map(p => `${p.vendedor} ${pesos(p.monto)}`).join(' / ')}`
+  : `comisión ${pesos(linea.comision)}`);
 
 // AC-COM-17: texto corto de una asignación confirmada.
 const resumenAsignacion = (a) => {
@@ -84,7 +124,7 @@ const AsignacionPedido = ({ linea, asignacionBorrador, vendedores, onCambiar, on
   const set = (patch) => onCambiar(linea.pedidoId, { ...(asignacionBorrador || {}), modo, ...patch });
   const encabezado = (
     <div style={{ fontWeight: 600 }}>
-      {linea.clienteNombre} · {fechaCorta(linea.fecha)} · {pesos(linea.total)} · comisión {pesos(linea.comision)}
+      {linea.clienteNombre} · {fechaCorta(linea.fecha)} · {pesos(linea.total)} · {textoComisionLinea(linea)}
     </div>
   );
   if (linea.asignacionConfirmada && !editando) {
@@ -183,11 +223,14 @@ const ResumenVendedores = ({ resumen, abierto, setAbierto }) => (
                 {c.pedidos.map(p => (
                   <div key={`${p.tipo}-${p.pedidoId}-${p.ajusteSeq || 0}`} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text2)' }}>
                     <span>
-                      {p.tipo === 'ajuste' ? 'Ajuste ' : ''}#{p.pedidoId} · {fechaCorta(p.fecha)} · {p.pct === null || p.pct === undefined ? 'sin %' : `${p.pct} %`}
+                      {p.tipo === 'ajuste' ? 'Ajuste ' : ''}#{p.pedidoId} · {fechaCorta(p.fecha)} · {p.modelo === 'rubro' ? 'por rubro' : (p.pct === null || p.pct === undefined ? 'sin %' : `${p.pct} %`)}
                       {p.asignacion === 'dividir' ? ` · dividido ${p.division} %` : ''}
                     </span>
                     <span>{pesos(p.total)} → {pesos(p.comision)}</span>
                   </div>
+                ))}
+                {c.pedidos.filter(p => p.modelo === 'rubro' && (p.desglose || []).length > 0).map(p => (
+                  <DesgloseRubros key={`d-${p.tipo}-${p.pedidoId}-${p.ajusteSeq || 0}`} desglose={p.desglose} testid={`desglose-${v.vendedor}-${p.pedidoId}`} />
                 ))}
               </div>
             ))}
@@ -226,6 +269,16 @@ const Historial = ({ cierres, onPdf, onAnular, procesando }) => {
           {(c.totales?.porVendedor || []).map(v => (
             <div key={v.vendedor} style={{ color: 'var(--text2)' }}>{v.vendedor}: {pesos(v.totalComision)}</div>
           ))}
+          {/* AC-COMR-13: los cierres por rubro muestran su desglose congelado (las filas las arma el dominio). */}
+          {modeloDeCierre(c) === 'rubro' && (
+            <details data-testid={`desglose-cierre-${c.id}`} style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--text2)' }}>Desglose por rubro</summary>
+              {filasPdfCierre(c).detalle.map((f, i) => (
+                // eslint-disable-next-line react/no-array-index-key
+                <div key={i} style={{ fontSize: 12, color: 'var(--text3)' }}>{f.join(' · ')}</div>
+              ))}
+            </details>
+          )}
           {c.estado === 'anulado' && (
             <div style={{ color: 'var(--danger)' }}>Anulado por {c.anuladoPor || '—'} el {fechaHora(c.anuladoAt)}: {c.motivoAnulacion}</div>
           )}
@@ -303,6 +356,9 @@ const Comisiones = () => {
   const [procesando, setProcesando] = useState(false);
   const [pin, setPin] = useState(''); // S-COM-01: solo en memoria durante la confirmación
   const [pinReintento, setPinReintento] = useState('');
+  // REQ-COMR: grilla de % abierta desde un aviso (c1) y PIN de "Actualizar %".
+  const [gridPct, setGridPct] = useState(null); // { vendedor, rubro }
+  const [pinRubro, setPinRubro] = useState('');
 
   const vp = useMemo(() => validarPeriodo(periodo), [periodo]);
 
@@ -410,6 +466,29 @@ const Comisiones = () => {
     }
   };
 
+  // REQ-COMR (AC-COMR-7): sube los % pendientes y baja la tabla del servidor.
+  const actualizarPct = async () => {
+    setProcesando(true);
+    const pinUsado = pinRubro;
+    setPinRubro('');
+    try {
+      const r = await syncComisionesRubro({ pin: pinUsado });
+      const ok = r?.ok && !r?.pendientes;
+      setMensaje({ tipo: ok ? 'ok' : 'error', texto: ok ? '% de comisión actualizados con el servidor.' : (r?.mensaje || 'Quedaron % sin sincronizar.') });
+      await cargar();
+    } catch (e) {
+      setMensaje({ tipo: 'error', texto: `No se pudieron actualizar los %: ${e?.message || String(e)}` });
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  const abrirGridPct = (aviso) => {
+    const v = (datos?.vendedores || []).find(x => String(x?.remoteId ?? '') === String(aviso.vendedorId)) || null;
+    setGridPct(v ? { vendedor: v, rubro: aviso.rubro } : null);
+    if (!v) setMensaje({ tipo: 'error', texto: `No se encontró al vendedor ${aviso.vendedor} en este dispositivo.` });
+  };
+
   const verPdf = async (cierre) => {
     const w = window.open('', '_blank');
     try {
@@ -475,11 +554,47 @@ const Comisiones = () => {
         </div>
       )}
 
+      {/* REQ-COMR (AC-COMR-7): estado de la tabla de % por rubro */}
+      {datos?.faltaMigracion005 && (
+        <div className="card" role="alert" data-testid="falta-005" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
+          Falta la migración 005 en Supabase: los % quedan en este dispositivo y no se puede cerrar todavía.
+        </div>
+      )}
+      {datos && dashboard?.modelo === 'rubro' && (
+        <div className="card" data-testid="pct-rubro" style={{ fontSize: 13, borderColor: datos.pendientesRubro > 0 ? 'var(--warning)' : undefined }}>
+          {datos.pendientesRubro > 0
+            ? <div data-testid="pendientes-rubro"><strong>{datos.pendientesRubro}</strong> % de comisión sin sincronizar con el servidor (bloquean el cierre).</div>
+            : <div>Los % de comisión por rubro se cargan en Configuración → Vendedores. Para traer los de otro dispositivo, actualizalos con tu PIN.</div>}
+          <CampoPin id="pin-rubro" value={pinRubro} onChange={setPinRubro} />
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ width: 'auto', marginTop: 6 }}
+            disabled={procesando || !online || !pinRubro.trim() || datos.faltaMigracion005}
+            onClick={actualizarPct}
+          >
+            Actualizar % de comisión
+          </button>
+        </div>
+      )}
+
       {cargando && !dashboard && <div className="card">Cargando…</div>}
 
       {dashboard && (
         <>
-          <Avisos avisos={dashboard.avisos} />
+          <Avisos avisos={dashboard.avisos} onCargarPct={dashboard.modelo === 'rubro' ? abrirGridPct : null} />
+
+          {gridPct && (
+            <ComisionRubroGrid
+              key={`${gridPct.vendedor.id}-${gridPct.rubro}`}
+              vendedor={gridPct.vendedor}
+              rubros={listarRubros(datos.productos || [])}
+              rubroFoco={gridPct.rubro}
+              online={!!online}
+              onGuardado={() => cargar()}
+              onCerrar={() => setGridPct(null)}
+            />
+          )}
 
           <div className="card" data-testid="totales" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>{dashboard.totales.pedidos} pedidos · {dashboard.totales.clientes} clientes</span>

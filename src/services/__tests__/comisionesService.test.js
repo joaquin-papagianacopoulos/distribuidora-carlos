@@ -1,6 +1,12 @@
 // REQ-COM: servicio de comisiones (AC-COM-9, 10, 11, 12, 16) con Supabase,
 // IndexedDB y sync mockeados.
-const mockLocal = { pedidos: [], clientes: [], vendedores: [], cierres: [], borradores: {} };
+// MOD (RUN 20261014-1449, AC-COMR-9/13): el servicio ahora arma el dashboard
+// con el modelo vigente (por vendedor y rubro). Los fixtures suman items con
+// rubro, productos y la tabla de % (Carlos: rubro X = 5 %), así los montos
+// esperados (50 / 25 / total 75) se mantienen. Las RPC de la tabla de %
+// (admin_leer/guardar_comisiones_rubro) se registran aparte (mockSb.rubro).
+const mockLocal = { pedidos: [], clientes: [], vendedores: [], cierres: [], borradores: {}, productos: [], tablaRubros: [] };
+const mockOrden = [];
 jest.mock('../../db', () => {
   const impl = {
     getPedidos: async () => mockLocal.pedidos.map(p => ({ ...p })),
@@ -16,6 +22,19 @@ jest.mock('../../db', () => {
     },
     getComisionBorrador: async (id) => mockLocal.borradores[id] || null,
     putComisionBorrador: async (b) => { mockLocal.borradores[b.id] = { ...b }; },
+    getProductos: async () => mockLocal.productos.map(p => ({ ...p })),
+    getComisionesRubro: async () => mockLocal.tablaRubros.map(f => ({ ...f })),
+    putComisionesRubroLocal: async (rows) => impl.putComisionesRubroRemotos(rows.map(r => ({ ...r, pendingSync: true }))),
+    putComisionesRubroRemotos: async (rows) => {
+      for (const r of rows || []) {
+        const i = mockLocal.tablaRubros.findIndex(f => f.id === r.id);
+        if (i >= 0) mockLocal.tablaRubros[i] = { ...r }; else mockLocal.tablaRubros.push({ ...r });
+      }
+    },
+    clearComisionesRubroPendingSync: async (ids) => {
+      const set = new Set(ids || []);
+      mockLocal.tablaRubros = mockLocal.tablaRubros.map(f => (set.has(f.id) ? { ...f, pendingSync: false } : f));
+    },
   };
   const mod = { __impl: impl };
   for (const k of Object.keys(impl)) mod[k] = jest.fn(impl[k]);
@@ -24,11 +43,28 @@ jest.mock('../../db', () => {
 jest.mock('../../sync/syncService', () => ({
   pullPedidosByRango: jest.fn(async () => ({ ok: true, count: 0 })),
   syncPedidosPendientes: jest.fn(async () => ({ ok: true })),
+  syncProductos: jest.fn(async () => ({ ok: true })),
+  downloadMaestros: jest.fn(async () => ({ ok: true })),
 }));
-const mockSb = { rpc: [], rpcRespuestas: [], remoto: [], selectError: null };
+const mockSb = { rpc: [], rpcRespuestas: [], remoto: [], selectError: null, rubro: [], rubroError: null, rubroRemoto: [] };
+// RPC de la tabla de % (REQ-COMR): sondeo sin credenciales => no_autorizado;
+// leer => la tabla remota; guardar => acepta todo con el mismo id.
+const mockRpcRubro = (fn, args) => {
+  mockSb.rubro.push({ fn, args });
+  mockOrden.push(`rubro:${fn}`);
+  if (mockSb.rubroError) return Promise.resolve({ data: null, error: mockSb.rubroError });
+  if (!args?.p_admin_id) return Promise.resolve({ data: { ok: false, motivo: 'no_autorizado' }, error: null });
+  if (fn === 'admin_leer_comisiones_rubro') return Promise.resolve({ data: { ok: true, filas: mockSb.rubroRemoto }, error: null });
+  return Promise.resolve({ data: { ok: true, filas: (args.p_filas || []).map(f => ({ ...f, id_enviado: f.id })), rechazadas: [] }, error: null });
+};
 jest.mock('../../lib/supabase', () => ({
   supabase: {
-    rpc: (fn, args) => { mockSb.rpc.push({ fn, args }); return Promise.resolve(mockSb.rpcRespuestas.shift() || { data: { ok: true }, error: null }); },
+    rpc: (fn, args) => {
+      if (/comisiones_rubro/.test(fn)) return mockRpcRubro(fn, args);
+      mockOrden.push(`rpc:${fn}`);
+      mockSb.rpc.push({ fn, args });
+      return Promise.resolve(mockSb.rpcRespuestas.shift() || { data: { ok: true }, error: null });
+    },
     from: () => {
       const api = {
         select: () => api, order: () => api, range: () => api,
@@ -40,7 +76,7 @@ jest.mock('../../lib/supabase', () => ({
 }));
 
 import * as db from '../../db';
-import { pullPedidosByRango, syncPedidosPendientes } from '../../sync/syncService';
+import { pullPedidosByRango, syncPedidosPendientes, syncProductos, downloadMaestros } from '../../sync/syncService';
 import {
   cargarDatosComisiones, guardarBorrador, confirmarCierre, anularCierre, syncComisiones, pullCierres,
   enviarCierre, esFaltaMigracion, esErrorDeRed, MSG_FALTA_MIGRACION, mensajeRechazo,
@@ -50,7 +86,11 @@ import { armarDashboard, firmaDashboard, setAsignacionBorrador, claveBorrador } 
 
 const setOnline = (v) => Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => v });
 const PERIODO = { desde: '2026-10-01', hasta: '2026-10-31' };
-const ped = (o) => ({ id: 1, remoteId: 'R1', clienteId: 10, clienteNombre: 'Kiosco', vendedor: 'Carlos', fecha: '2026-10-10', estado: 'facturado', entregado: true, total: 1000, synced: true, ...o });
+const ped = (o) => {
+  const p = { id: 1, remoteId: 'R1', clienteId: 10, clienteNombre: 'Kiosco', vendedor: 'Carlos', fecha: '2026-10-10', estado: 'facturado', entregado: true, total: 1000, synced: true, ...o };
+  return { items: [{ productoId: 'p1', nombre: 'Alfajor', precio: p.total, cantidad: 1, rubro: 'X' }], ...p };
+};
+const FILA_CARLOS_X = { id: 't-carlos-x', vendedorId: 'uuid-carlos', vendedorNombre: 'Carlos', rubro: 'X', rubroClave: 'x', clave: 'uuid-carlos|x', pct: 5, editadoAt: 1, pendingSync: false };
 const ERR_RED = { message: 'TypeError: Failed to fetch' };
 const ERR_SIN_RPC = { code: 'PGRST202', message: 'Could not find the function public.cerrar_comisiones' };
 const PIN = '1234';
@@ -62,13 +102,20 @@ beforeEach(() => {
   jest.clearAllMocks();
   for (const k of Object.keys(db.__impl)) db[k].mockImplementation(db.__impl[k]);
   pullPedidosByRango.mockImplementation(async () => ({ ok: true, count: 0 }));
-  syncPedidosPendientes.mockImplementation(async () => ({ ok: true }));
+  syncPedidosPendientes.mockImplementation(async () => { mockOrden.push('pedidos'); return { ok: true }; });
+  syncProductos.mockImplementation(async () => { mockOrden.push('productos'); return { ok: true }; });
+  downloadMaestros.mockImplementation(async () => { mockOrden.push('maestros'); return { ok: true }; });
   mockLocal.pedidos = [ped({}), ped({ id: 2, remoteId: 'R2', total: 500 })];
   mockLocal.clientes = [{ id: 10, nombre: 'Kiosco', vendedor: 'Carlos', comision: 5 }];
   mockLocal.vendedores = [{ id: 1, remoteId: 'uuid-jorge', nombre: 'Jorge', permiso: 1 }, { id: 2, remoteId: 'uuid-carlos', nombre: 'Carlos', permiso: 2 }];
   mockLocal.cierres = [];
   mockLocal.borradores = {};
+  mockLocal.productos = [{ id: 'p1', nombre: 'Alfajor', categoria: 'X' }];
+  mockLocal.tablaRubros = [{ ...FILA_CARLOS_X }];
   mockSb.rpc = []; mockSb.rpcRespuestas = []; mockSb.remoto = []; mockSb.selectError = null;
+  mockSb.rubro = []; mockSb.rubroError = null;
+  mockSb.rubroRemoto = [{ id: 't-carlos-x', vendedor_id: 'uuid-carlos', rubro: 'X', rubro_clave: 'x', pct: 5, editado_at: '1970-01-01T00:00:00.001Z' }];
+  mockOrden.length = 0;
   setUsuarioSesion({ id: 1, nombre: 'Jorge', permiso: 1 });
   setOnline(true);
   warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -135,9 +182,12 @@ describe('AC-COM-10 AC-COM-16 confirmar cierre', () => {
     expect(db.putComisionCierreLocal).toHaveBeenCalledWith(expect.objectContaining({ id: r.cierreId, estado: 'pendiente', cerradoPor: 'Jorge' }));
     expect(mockSb.rpc[0].fn).toBe('cerrar_comisiones');
     expect(mockSb.rpc[0].args.p_cierre).toMatchObject({ id: r.cierreId, desde: '2026-10-01', hasta: '2026-10-31', cerrado_por: 'Jorge', total_comision: 75 });
+    // MOD (RUN 20261014-1449, AC-COMR-13): antes pct: 5 (el del cliente); ahora
+    // pct: null, modelo 'rubro' y las partes por vendedor (el servidor recalcula).
+    expect(mockSb.rpc[0].args.p_cierre.modelo).toBe('rubro');
     expect(mockSb.rpc[0].args.p_renglones).toEqual([
-      { pedido_id: 'R1', tipo: 'pedido', ajuste_seq: 0, total: 1000, comision: 50, pct: 5, sin_comision: false },
-      { pedido_id: 'R2', tipo: 'pedido', ajuste_seq: 0, total: 500, comision: 25, pct: 5, sin_comision: false },
+      { pedido_id: 'R1', tipo: 'pedido', ajuste_seq: 0, total: 1000, comision: 50, pct: null, sin_comision: false, modelo: 'rubro', partes: [{ vendedor_id: 'uuid-carlos', pct: 100, monto: 50 }] },
+      { pedido_id: 'R2', tipo: 'pedido', ajuste_seq: 0, total: 500, comision: 25, pct: null, sin_comision: false, modelo: 'rubro', partes: [{ vendedor_id: 'uuid-carlos', pct: 100, monto: 25 }] },
     ]);
     // S-COM-01: id remoto + PIN viajan solo en la llamada
     expect(mockSb.rpc[0].args).toMatchObject(CRED);
@@ -151,6 +201,13 @@ describe('AC-COM-10 AC-COM-16 confirmar cierre', () => {
     const d = armarDashboard({ ...datos, periodo: PERIODO });
     expect(d.lineas).toEqual([]);
     expect(d.yaCerrados).toHaveLength(2);
+  });
+
+  it('S01-3 confirmarCierre pasa la credencial del admin a syncProductos', async () => {
+    await confirmarCierre({ pin: PIN, periodo: PERIODO });
+    const arg = syncProductos.mock.calls[0][0];
+    expect(arg.cred).toMatchObject({ p_admin_pin: PIN });
+    expect(typeof arg.cred.p_admin_id).toBe('string');
   });
 
   it('AC-COM-16 reintento del mismo UUID (ya_existia) => vigente sin duplicar', async () => {
@@ -459,5 +516,77 @@ describe('AC-SEC-4 S-COM-01 PIN del admin en cerrar / anular / reintentar', () =
     expect(mensajeRechazo('no_admin')).toMatch(/admin/);
     expect(mensajeRechazo('raro')).toMatch(/raro/);
     expect(mensajeRechazo(undefined)).toMatch(/sin motivo/);
+  });
+});
+
+// REQ-COMR (RUN 20261014-1449): el servicio usa el modelo vigente por rubro.
+describe('AC-COMR-9 AC-COMR-13 comisionesService con el modelo por vendedor y rubro', () => {
+  it('AC-COMR-9 cargarDatosComisiones devuelve modelo rubro, productos, tabla de % y pendientes', async () => {
+    mockLocal.tablaRubros.push({ id: 't2', vendedorId: 'uuid-carlos', rubro: 'Y', rubroClave: 'y', pct: 3, pendingSync: true });
+    const d = await cargarDatosComisiones(PERIODO, { online: true });
+    expect(d).toMatchObject({ modelo: 'rubro', pendientesRubro: 1, faltaMigracion005: false });
+    expect(d.productos).toHaveLength(1);
+    expect(d.tablaRubros).toHaveLength(2);
+    // la sonda de la 005 no manda credenciales
+    expect(mockSb.rubro[0]).toEqual({ fn: 'admin_leer_comisiones_rubro', args: { p_admin_id: '', p_admin_pin: '' } });
+    const dash = armarDashboard({ ...d, periodo: PERIODO });
+    expect(dash.modelo).toBe('rubro');
+    expect(dash.totales.totalComision).toBe(75);
+  });
+
+  it('AC-COMR-9 AC-COMR-7 confirmarCierre: orden pedidos -> productos/maestros -> % (con la MISMA cred) -> RPC de cierre', async () => {
+    mockLocal.tablaRubros = [{ ...FILA_CARLOS_X, pendingSync: true, editadoAt: 5 }];
+    const r = await confirmarCierre({ pin: PIN, periodo: PERIODO });
+    expect(r.ok).toBe(true);
+    const i = (x) => mockOrden.indexOf(x);
+    expect(i('pedidos')).toBeGreaterThanOrEqual(0);
+    expect(i('pedidos')).toBeLessThan(i('productos'));
+    expect(i('productos')).toBeLessThan(i('maestros'));
+    expect(i('maestros')).toBeLessThan(i('rubro:admin_guardar_comisiones_rubro'));
+    expect(i('rubro:admin_guardar_comisiones_rubro')).toBeLessThan(i('rpc:cerrar_comisiones'));
+    const guardar = mockSb.rubro.find(x => x.fn === 'admin_guardar_comisiones_rubro');
+    expect(guardar.args).toMatchObject(CRED);
+    expect(mockSb.rpc[0].args).toMatchObject(CRED);
+    // el % quedó subido (pendingSync limpio) y no se guardó el PIN
+    expect(mockLocal.tablaRubros[0].pendingSync).toBe(false);
+    expect(JSON.stringify(mockLocal)).not.toContain(`"${PIN}"`);
+  });
+
+  it('AC-COMR-7 con la 005 faltante no se llama a cerrar_comisiones', async () => {
+    mockSb.rubroError = { code: 'PGRST202', message: 'Could not find the function public.admin_leer_comisiones_rubro' };
+    const d = await cargarDatosComisiones(PERIODO, { online: true });
+    expect(d.faltaMigracion005).toBe(true);
+    const r = await confirmarCierre({ pin: PIN, periodo: PERIODO });
+    expect(r).toMatchObject({ ok: false, motivo: 'falta_migracion_005', mensaje: expect.stringMatching(/005/) });
+    expect(mockSb.rpc).toHaveLength(0);
+    expect(mockLocal.cierres).toEqual([]);
+  });
+
+  it('AC-COMR-13 modelo_obsoleto y cierre_invalido se mapean a su mensaje', () => {
+    expect(mensajeRechazo('modelo_obsoleto')).toBe('Actualizá la app: el cierre se calcula por vendedor y rubro.');
+    expect(mensajeRechazo('cierre_invalido')).toMatch(/formato inválido/);
+  });
+
+  it('AC-COMR-7 si falla la sync de los % (PIN mal) no se cierra', async () => {
+    mockLocal.tablaRubros = [{ ...FILA_CARLOS_X, pendingSync: true }];
+    const sb = require('../../lib/supabase').supabase;
+    const orig = sb.rpc;
+    sb.rpc = (fn, args) => (fn === 'admin_guardar_comisiones_rubro'
+      ? Promise.resolve({ data: { ok: false, motivo: 'no_autorizado' }, error: null })
+      : orig(fn, args));
+    try {
+      const r = await confirmarCierre({ pin: PIN, periodo: PERIODO });
+      expect(r).toMatchObject({ ok: false, motivo: 'no_autorizado' });
+      expect(mockSb.rpc).toHaveLength(0);
+    } finally {
+      sb.rpc = orig;
+    }
+  });
+});
+
+describe('S-COMR-05 AC-COMR-13 mensajes de rechazo nuevos identifican los pedidos', () => {
+  it('S-COMR-05 monto_desbordado y desglose_inconsistente listan los pedidos', () => {
+    expect(mensajeRechazo('monto_desbordado', ['R7', 'R9'])).toMatch(/2 pedido\(s\).*R7, R9/);
+    expect(mensajeRechazo('desglose_inconsistente', ['R3'])).toMatch(/1 pedido\(s\).*R3/);
   });
 });

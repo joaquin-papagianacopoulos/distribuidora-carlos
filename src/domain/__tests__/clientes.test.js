@@ -5,12 +5,16 @@ const base = { codigo: 'C001', nombre: 'Almacén Don José SRL', direccion: 'Av.
 // 20123456786 es un CUIT con dígito verificador válido (ver test de validarCuit).
 
 describe('AC-CLI-1 campos del alta de clientes', () => {
-  it('AC-CLI-1 tiene exactamente los 17 campos pedidos, en orden y con sus etiquetas', () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes 17 campos con 'Comisión'; ahora
+  // 16, porque el cliente ya no tiene comisión (se carga por vendedor y rubro).
+  it('AC-CLI-1 AC-COMR-1 tiene exactamente los 16 campos pedidos, en orden y con sus etiquetas', () => {
     expect(CAMPOS_CLIENTE.map(c => c.label)).toEqual([
       'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal', 'Provincia',
-      'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Celular', 'Vendedor', 'Cobrador', 'Comisión',
+      'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Celular', 'Vendedor', 'Cobrador',
       'Fecha de alta', 'Tipo de cliente', 'Rubro',
     ]);
+    expect(CAMPOS_CLIENTE.some(c => c.key === 'comision')).toBe(false);
+    expect(clienteVacio()).not.toHaveProperty('comision');
   });
   it('AC-CLI-1 cliente vacío trae país Argentina y fecha de alta de hoy', () => {
     const v = clienteVacio(new Date(2026, 9, 7));
@@ -86,20 +90,30 @@ describe('AC-CLI-4 código único', () => {
 });
 
 describe('validaciones de formato', () => {
-  it('rechaza CP, provincia, tipo IVA, celular, comisión y fecha inválidos', () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes 'comision: 150' daba error; ahora
+  // la comisión ya no se valida (ni aparece en el cliente), el resto sí.
+  it('AC-COMR-1 rechaza CP, provincia, tipo IVA, celular y fecha inválidos; la comisión ya no se valida', () => {
     const r = validarCliente({ ...base, codigoPostal: '12', provincia: 'Narnia', tipoIva: 'Otro', telefono: '123', comision: '150', fechaAlta: '2026-02-30' });
-    expect(Object.keys(r.errores)).toEqual(expect.arrayContaining(['codigoPostal', 'provincia', 'tipoIva', 'telefono', 'comision', 'fechaAlta']));
+    expect(Object.keys(r.errores)).toEqual(expect.arrayContaining(['codigoPostal', 'provincia', 'tipoIva', 'telefono', 'fechaAlta']));
+    expect(r.errores).not.toHaveProperty('comision');
+    expect(r.cliente).not.toHaveProperty('comision');
   });
-  it('acepta CPA, celular con símbolos y comisión con coma', () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes 'comision: 2,5' quedaba 2.5; ahora la clave no se devuelve.
+  it('AC-COMR-1 acepta CPA y celular con símbolos; una comisión en el form no aparece en el cliente', () => {
     const r = validarCliente({ ...base, codigoPostal: 'b1878 abc', telefono: '+54 9 11 5555-4444', comision: '2,5', provincia: 'Buenos Aires' });
     expect(r.ok).toBe(true);
     expect(r.cliente.codigoPostal).toBe('B1878ABC');
     expect(r.cliente.telefono).toBe('5491155554444');
-    expect(r.cliente.comision).toBe(2.5);
+    expect(r.cliente).not.toHaveProperty('comision');
   });
-  it('comisión negativa o no numérica se rechaza', () => {
-    expect(validarCliente({ ...base, comision: '-1' }).errores.comision).toBeTruthy();
-    expect(validarCliente({ ...base, comision: 'abc' }).errores.comision).toBeTruthy();
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes '-1' / 'abc' daban error; ahora se ignoran sin error.
+  it('AC-COMR-1 comisión negativa o no numérica ya no da error ni se guarda', () => {
+    for (const comision of ['-1', 'abc', '150', '2,5']) {
+      const r = validarCliente({ ...base, comision });
+      expect(r.ok).toBe(true);
+      expect(r.errores).not.toHaveProperty('comision');
+      expect(r.cliente).not.toHaveProperty('comision');
+    }
   });
   it('elimina caracteres de control y limita largo (AC-SEC-2)', () => {
     const r = validarCliente({ ...base, nombre: `A\u0000B\nC${'x'.repeat(500)}` });
@@ -109,22 +123,27 @@ describe('validaciones de formato', () => {
 });
 
 describe('AC-CLI-5 / AC-CLI-6 mapeo con Supabase', () => {
-  it('AC-CLI-5 arma columnas snake_case', () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes mandaba comision: 3; ahora la
+  // clave no viaja nunca (así el upsert no pisa la columna en Supabase).
+  it('AC-CLI-5 AC-COMR-1 arma columnas snake_case sin la clave comision', () => {
     const r = clienteExtraToRemote({ codigoPostal: '1878', tipoIva: 'Monotributo', comision: '3', fechaAlta: '2026-10-07' });
-    expect(r).toMatchObject({ codigo_postal: '1878', tipo_iva: 'Monotributo', comision: 3, fecha_alta: '2026-10-07', cuit: null });
-    expect(clienteExtraToRemote({ comision: '' }).comision).toBeNull();
+    expect(r).toMatchObject({ codigo_postal: '1878', tipo_iva: 'Monotributo', fecha_alta: '2026-10-07', cuit: null });
+    expect(r).not.toHaveProperty('comision');
+    expect(clienteExtraToRemote({ comision: '' })).not.toHaveProperty('comision');
     expect(clienteExtraToRemote(undefined).codigo).toBeNull();
   });
-  it('AC-CLI-5 si la columna no existe en Supabase conserva el valor local', () => {
-    const r = clienteExtraFromRemote({ ciudad: 'Quilmes' }, { codigo: 'L1', comision: 4 });
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes el mapeo devolvía comision; ahora
+  // no la mapea (el valor local lo conserva el spread del pull: syncTolerante).
+  it('AC-CLI-5 AC-COMR-1 si la columna no existe en Supabase conserva el valor local; comision no se mapea', () => {
+    const r = clienteExtraFromRemote({ ciudad: 'Quilmes', comision: 9 }, { codigo: 'L1', comision: 4 });
     expect(r.ciudad).toBe('Quilmes');
     expect(r.codigo).toBe('L1');
-    expect(r.comision).toBe(4);
+    expect(r).not.toHaveProperty('comision');
   });
   it('AC-CLI-6 cliente viejo sin campos nuevos no rompe el mapeo', () => {
     const r = clienteExtraFromRemote({ codigo: null, comision: null }, undefined);
     expect(r.codigo).toBe('');
-    expect(r.comision).toBeNull();
+    expect(r).not.toHaveProperty('comision');
     expect(clienteExtraFromRemote(undefined, undefined).rubro).toBe('');
   });
 });

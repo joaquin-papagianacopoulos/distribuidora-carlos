@@ -6,3 +6,13 @@
 export const esColumnaInexistente = (error) =>
   String(error?.code) === 'PGRST204' || String(error?.code) === '42703' ||
   /could not find the .* column|column .* does not exist/i.test(String(error?.message || ''));
+
+// S-VTA-01: la RPC no existe todavia (migracion 007 sin aplicar).
+export const esFuncionInexistente = (error) =>
+  String(error?.code) === 'PGRST202' || String(error?.code) === '42883' ||
+  /could not find the function/i.test(String(error?.message || ''));
+
+// S-VTA-01: la escritura directa esta cerrada (grants revocados / RLS).
+export const esEscrituraDenegada = (error) =>
+  String(error?.code) === '42501' ||
+  /permission denied|row-level security/i.test(String(error?.message || ''));

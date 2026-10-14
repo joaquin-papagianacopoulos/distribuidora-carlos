@@ -45,7 +45,7 @@ describe('REQ-PROD productos', () => {
     expect(manual.producto.precio).toBe(199.9);
   });
   it('AC-PROD-1 tiene las 13 etiquetas pedidas', () => {
-    expect(CAMPOS_PRODUCTO.map(c => c.label)).toEqual(['Código', 'Descripción', 'Rubro', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mínimo venta', 'Stock']);
+    expect(CAMPOS_PRODUCTO.map(c => c.label)).toEqual(['Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']);
   });
   it('obligatorios, duplicados y proveedor inexistente', () => {
     const r = validarProducto({ codigo: 'dup', nombre: '', proveedorId: 'nope' }, { existentes: [{ id: 5, codigo: 'DUP', nombre: 'X' }], proveedores });

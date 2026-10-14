@@ -10,6 +10,9 @@ import {
 import ClienteForm from '../components/ClienteForm';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
+import ComisionRubroGrid from '../components/ComisionRubroGrid';
+import { listarRubros } from '../domain/rubros';
+import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
 import { nuevoId } from '../domain/validacion';
@@ -23,6 +26,9 @@ import { syncProductos, buscarImagenesFaltantes } from '../sync/syncService';
 import { guardarVendedorAdmin, darDeBajaVendedorAdmin } from '../services/vendedoresService';
 import { filtrarActivos, vendedoresParaSelector, MSG_BAJA_SIN_CONEXION } from '../domain/vendedores';
 import { supabase } from '../lib/supabase';
+import {
+  sondearMigracion007, subirProductosConPin, borrarProductoAdmin, contarProductosPendientes,
+} from '../services/productosAdminService';
 import { isImageSearchConfigured } from '../services/imageSearch';
 import { normalize } from '../utils/fuzzy';
 import { detectarMarca } from '../utils/brands';
@@ -40,21 +46,29 @@ const opcionesPlan = (origen) => (origen === 'csv'
 // REQ-PLA / AC-PROD-5: la decision (crear / actualizar / rechazar) la toma el
 // dominio (planificarImportacion); aca solo se ejecuta el plan.
 const importarProductos = async (rows, { proveedores, usuario, origen }) => {
-  const plan = planificarImportacion(rows, 'productos', { existentes: await getProductos(), proveedores, ...opcionesPlan(origen) });
+  const existentesProd = await getProductos();
+  const plan = planificarImportacion(rows, 'productos', { existentes: existentesProd, proveedores, ...opcionesPlan(origen) });
   if (!plan.ok) return { tipo: 'error', msg: plan.error };
   // Archivos viejos (nombre/precio/...) suben solo columnas basicas; la
   // plantilla nueva marca extrasDirty como el formulario (AC-PROD-5 / AC-PLA-3).
   const extras = plan.modo === 'plantilla' ? { extrasDirty: true } : {};
   const entradas = [];
+  // AC-VTA-1: marcas existentes + las que va creando este archivo (dedupe AC-COMR-4).
+  const marcas = listarMarcas(existentesProd);
+  const marcaDe = (p, previa) => {
+    const m = marcaParaGuardar({ marcaForm: p.marca, marcaExistente: previa, nombre: p.nombre, marcas, detectar: detectarMarca });
+    if (m && !marcas.includes(m)) marcas.push(m);
+    return m;
+  };
   for (const e of plan.entradas) {
     let id;
     try {
       if (e.accion === 'crear') {
         const p = e.valor.producto;
-        id = await addProductoLocal({ ...p, marca: detectarMarca(p.nombre), ...extras });
+        id = await addProductoLocal({ ...p, marca: marcaDe(p, ''), ...extras });
       } else if (e.accion === 'actualizar') {
         const p = e.valor.producto;
-        await updateProducto({ ...e.existente, ...p, marca: detectarMarca(p.nombre) || e.existente.marca || '', ...extras });
+        await updateProducto({ ...e.existente, ...p, marca: marcaDe(p, e.existente.marca), ...extras });
       }
     } catch (err) {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
@@ -141,7 +155,7 @@ const ResultadoImport = ({ r, testId }) => {
 
 
 const Configuracion = () => {
-  const { productos, clientes, vendedores, vendedorActual, seleccionarVendedor, recargar, proveedores = [], stockMap } = useApp();
+  const { productos, clientes, vendedores, vendedorActual, seleccionarVendedor, recargar, proveedores = [], stockMap, online = true } = useApp();
   const isAdmin = Number(vendedorActual?.permiso || 2) === 1;
   const [tab, setTab] = useState('productos');
   const [showForm, setShowForm] = useState(false);
@@ -156,6 +170,15 @@ const Configuracion = () => {
   // El PIN vive solo en este estado y se limpia antes de llamar al servidor.
   const [bajaItem, setBajaItem] = useState(null);
   const [bajaPin, setBajaPin] = useState('');
+  // S-VTA-01: PIN para subir productos / borrar un producto (migracion 007). Nunca se guarda.
+  const [prodPin, setProdPin] = useState('');
+  const [prodPendientes, setProdPendientes] = useState(0);
+  const [prodMsg, setProdMsg] = useState('');
+  const [subiendoProd, setSubiendoProd] = useState(false);
+  const [borrarProdItem, setBorrarProdItem] = useState(null);
+  const [borrarProdPin, setBorrarProdPin] = useState('');
+  // REQ-COMR (AC-COMR-6): grilla Rubro -> % del vendedor elegido (solo admin).
+  const [rubroVendedor, setRubroVendedor] = useState(null);
   const csvRef = useRef(null);
   // REQ-PLA
   const [resultadoClientes, setResultadoClientes] = useState(null);
@@ -206,10 +229,10 @@ const Configuracion = () => {
   const guardarProducto = async (data, stock, stockMostrado) => {
     try {
       if (editItem) {
-        await updateProducto({ ...editItem, ...data, marca: editItem.marca || detectarMarca(data.nombre), extrasDirty: true });
+        await updateProducto({ ...editItem, ...data, marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true });
         if (stock !== null && stock !== undefined) await ajustarStock(editItem.id, stock, { usuario: usuarioActual, base: stockMostrado });
       } else {
-        const id = await addProductoLocal({ ...data, unidad: 'unidad', marca: detectarMarca(data.nombre), extrasDirty: true });
+        const id = await addProductoLocal({ ...data, unidad: 'unidad', marca: marcaParaGuardar({ marcaForm: data.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true });
         if (stock) await ajustarStock(id, stock, { usuario: usuarioActual, inicial: true });
       }
     } catch (e) {
@@ -302,6 +325,50 @@ const Configuracion = () => {
     await recargar();
   };
 
+  const refrescarPendientesProd = async () => {
+    try { setProdPendientes(await contarProductosPendientes()); } catch { /* sin db */ }
+  };
+  React.useEffect(() => { if (tab === 'productos') refrescarPendientesProd(); }, [tab, productos]); // eslint-disable-line
+
+  const subirProductos = async () => {
+    const pin = prodPin;
+    setProdPin('');
+    setSubiendoProd(true);
+    setProdMsg('');
+    try {
+      const r = await subirProductosConPin(pin);
+      if (!r.ok) setProdMsg(r.mensaje || 'No se pudieron subir los productos.');
+      else {
+        const rech = r.rechazados?.length || 0;
+        setProdMsg(rech ? `Se subieron ${r.subidos || 0}; el servidor rechazó ${rech} (quedan marcados).` : 'Productos subidos.');
+      }
+      await recargar();
+      await refrescarPendientesProd();
+    } finally {
+      setSubiendoProd(false);
+    }
+  };
+
+  const confirmarBorrarProducto = async () => {
+    const item = borrarProdItem;
+    if (!item) return;
+    const pin = borrarProdPin;
+    setBorrarProdPin('');
+    setBorrandoId(item.id);
+    let r;
+    try {
+      r = await borrarProductoAdmin({ pin, producto: item });
+    } finally {
+      setBorrandoId(null);
+    }
+    if (!r.ok) {
+      alert('No se pudo borrar el producto:\n' + (r.mensaje || ''));
+      return;
+    }
+    setBorrarProdItem(null);
+    await recargar();
+  };
+
   const handleDelete = async (item) => {
     if (tab === 'vendedores') {
       // Requiere conexion: sin servidor no se toca nada (AC-VEN-1).
@@ -317,6 +384,13 @@ const Configuracion = () => {
     if (tab === 'productos') {
       if (!navigator.onLine) {
         alert('Para borrar un producto tenés que tener internet. Si no, vuelve a aparecer al sincronizar.');
+        return;
+      }
+      // S-VTA-01: con la 007 el borrado va por RPC con PIN de admin.
+      const sonda = await sondearMigracion007();
+      if (!sonda.faltaMigracion) {
+        setBorrarProdPin('');
+        setBorrarProdItem(item);
         return;
       }
       setBorrandoId(item.id);
@@ -395,8 +469,13 @@ const Configuracion = () => {
       // Sincronizar productos actualizados a Supabase
       if (navigator.onLine) {
         try {
-          await syncProductos();
-          setResultadoCSV({ ...r, msg: `${r.msg} Sincronizado ✓` });
+          const rs = await syncProductos();
+          setResultadoCSV({
+            ...r,
+            msg: rs?.requierePinAdmin
+              ? `${r.msg} Quedaron ${rs.pendientes} producto(s) sin subir: usá "Subir productos" con tu PIN.`
+              : `${r.msg} Sincronizado ✓`,
+          });
         } catch (err) {
           setResultadoCSV({ ...r, msg: `${r.msg} (Sin internet, se sincronizará luego)` });
         }
@@ -489,6 +568,65 @@ const Configuracion = () => {
           </button>
         </div>
       </div>
+
+      {/* S-VTA-01: subir productos pendientes con el PIN del admin */}
+      {tab === 'productos' && prodPendientes > 0 && (
+        <div className="card" style={{ marginBottom: 16 }} data-testid="productos-pendientes">
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{prodPendientes} producto(s) sin subir</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
+            Los cambios quedan en este dispositivo hasta que un admin los suba con su PIN.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              data-testid="admin-pin-productos"
+              value={prodPin}
+              onChange={e => setProdPin(e.target.value)}
+              placeholder="Tu PIN de admin"
+            />
+            <button className="btn btn-primary" onClick={subirProductos} disabled={subiendoProd} data-testid="subir-productos">
+              {subiendoProd ? 'Subiendo...' : 'Subir productos'}
+            </button>
+          </div>
+        </div>
+      )}
+      {tab === 'productos' && prodMsg && (
+        <div className="card" style={{ marginBottom: 16, fontSize: 13 }} data-testid="productos-msg">{prodMsg}</div>
+      )}
+
+      {/* S-VTA-01: confirmar borrado de producto con el PIN del admin */}
+      {borrarProdItem && tab === 'productos' && (
+        <div className="card" style={{ marginTop: 16 }} data-testid="baja-producto">
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Borrar "{borrarProdItem.nombre}"</div>
+          <div className="input-group">
+            <label className="input-label">Tu PIN de admin (para confirmar)</label>
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              data-testid="admin-pin-baja-producto"
+              value={borrarProdPin}
+              onChange={e => setBorrarProdPin(e.target.value)}
+              placeholder="Se verifica en el servidor; necesitás conexión"
+              autoFocus
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 80 }}>
+            <button className="btn btn-ghost" onClick={() => { setBorrarProdItem(null); setBorrarProdPin(''); }}>Cancelar</button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)' }}
+              onClick={confirmarBorrarProducto}
+              disabled={borrandoId === borrarProdItem.id}
+              data-testid="confirmar-baja-producto"
+            >{borrandoId === borrarProdItem.id ? 'Borrando...' : 'Borrar producto'}</button>
+          </div>
+        </div>
+      )}
 
       {/* Importacion de productos (CSV/XLSX + plantilla) — solo pestaña productos */}
       {tab === 'productos' && (
@@ -642,6 +780,11 @@ const Configuracion = () => {
               </div>
               <div className="list-item-sub">
                 {tab === 'productos' && `$${item.precio?.toLocaleString('es-AR')} · ${item.unidad || ''} ${item.codigo ? `· ${item.codigo}` : ''} · Stock: ${stockDe(stockMap, item.id)}`}
+                {tab === 'productos' && item.syncRechazo && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--danger)' }} data-testid="producto-rechazado">
+                    ⚠ RECHAZADO POR EL SERVIDOR
+                  </span>
+                )}
                 {tab === 'clientes' && `${item.codigo ? `${item.codigo} · ` : ''}${item.direccion || ''} ${item.telefono ? `· ${item.telefono}` : ''}`}
                 {tab === 'proveedores' && `Código ${item.codigo} · ${productos.filter(p => p.proveedorId === item.id).length} producto(s)`}
                 {tab === 'vendedores' && (item.zona ? `Zona: ${item.zona}` : '')}
@@ -650,6 +793,15 @@ const Configuracion = () => {
             <div style={{ display: 'flex', gap: 6 }}>
               {tab !== 'vendedores' && (
                 <button className="btn-icon" onClick={() => openEdit(item)} style={{ fontSize: 14 }}>✏</button>
+              )}
+              {tab === 'vendedores' && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ width: 'auto' }}
+                  data-testid={`pct-rubro-${item.id}`}
+                  onClick={() => setRubroVendedor(rubroVendedor?.id === item.id ? null : item)}
+                >% por rubro</button>
               )}
               <button
                 className="btn-icon"
@@ -661,6 +813,17 @@ const Configuracion = () => {
           </div>
         ))}
       </div>
+
+      {/* REQ-COMR (AC-COMR-6): % de comisión por rubro del vendedor */}
+      {rubroVendedor && tab === 'vendedores' && (
+        <ComisionRubroGrid
+          key={rubroVendedor.id}
+          vendedor={rubroVendedor}
+          rubros={listarRubros(productos)}
+          online={!!online}
+          onCerrar={() => setRubroVendedor(null)}
+        />
+      )}
 
       {/* REQ-VEN: confirmar baja de vendedor con el PIN del admin */}
       {bajaItem && tab === 'vendedores' && (
@@ -713,6 +876,8 @@ const Configuracion = () => {
           inicial={editItem}
           existentes={productos}
           proveedores={proveedores}
+          rubros={listarRubros(productos)}
+          marcas={listarMarcas(productos)}
           stockActual={editItem ? stockDe(stockMap, editItem.id) : 0}
           onGuardar={guardarProducto}
           onCancelar={cerrarForm}

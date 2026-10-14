@@ -4,6 +4,8 @@
 
 import { toInt } from './validacion';
 import { MAX_CANTIDAD } from './stock';
+import { rubroDeProducto } from './rubros';
+import { cantidadInicialRenglon } from './unidadVenta';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
 export const CANTIDAD_MINIMA_RENGLON = 1;
@@ -56,14 +58,20 @@ export const CANTIDAD_INICIAL_RENGLON = 1;
 export const MARCA_CANTIDAD_POR_DEFECTO = '_cantidadPorDefecto';
 
 // AC-BUL-9: renglón nuevo con la unidad por defecto y la marca puesta.
+// AC-COMR-5: guarda el rubro normalizado del producto EN ESE MOMENTO (solo si
+// tiene uno: un producto sin rubro deja el renglón igual que antes). Cambiar
+// después el rubro del producto no toca los renglones ya guardados.
 export function renglonNuevo(producto, extra = {}) {
   const p = producto && typeof producto === 'object' ? producto : {};
+  const rubro = rubroDeProducto(p);
   return {
     productoId: p.id,
     nombre: p.nombre,
     precio: p.precio,
     precioOriginal: p.precio,
-    cantidad: CANTIDAD_INICIAL_RENGLON,
+    // AC-VTA-3: "solo bulto" arranca en 1 bulto; el resto, en 1 unidad (AC-BUL-9).
+    cantidad: cantidadInicialRenglon(p),
+    ...(rubro ? { rubro } : {}),
     ...extra,
     [MARCA_CANTIDAD_POR_DEFECTO]: true,
   };
@@ -119,9 +127,11 @@ export function desgloseBultos(cantidad, bultoX) {
 }
 
 // AC-BUL-1: etiqueta del botón o null si no hay bulto.
-export function etiquetaBotonBulto(bultoX) {
+// AC-VTA-3: con `nombre` (Display, Caja, Pack) la etiqueta lo usa; default 'Bulto'.
+export function etiquetaBotonBulto(bultoX, nombre = 'Bulto') {
   const bx = normalizarBultoX(bultoX);
-  return bx === null ? null : `+ Bulto (x ${bx})`;
+  const n = typeof nombre === 'string' && nombre.trim() ? nombre.trim() : 'Bulto';
+  return bx === null ? null : `+ ${n} (x ${bx})`;
 }
 
 // AC-BUL-8: permisos por pantalla (1 admin, 2 vendedor, 3 armador).

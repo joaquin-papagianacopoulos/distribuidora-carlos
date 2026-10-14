@@ -5,8 +5,20 @@
 // Todo el dinero se opera en CENTAVOS ENTEROS y se devuelve en pesos con 2
 // decimales: así una división 50/50 de $0,01 da 0,01 + 0,00 (la suma cierra
 // exacto) y 1,005 no se convierte en 1,00 por error de punto flotante.
+//
+// REQ-COMR (RUN 20261014-1449): la comisión se calcula por vendedor y por rubro
+// del producto, renglón por renglón (modelo 'rubro'). El modelo viejo (% de la
+// ficha del cliente, modelo 'cliente') se conserva para los cierres ya
+// confirmados y sus ajustes: un cierre sin `modelo` se lee como 'cliente'.
+/* global BigInt */
 import { texto, toNum, claveUnica, nuevoId, esFechaISO } from './validacion';
 import { isPedidoOculto, normalizePedidoFecha } from '../utils/pedidos';
+import { rubroDeRenglon, indexarTablaRubros, pctDe, vendedorIdPorNombre } from './rubros';
+
+// AC-COMR-13: versión del modelo de cálculo. Los servicios siempre mandan
+// MODELO_VIGENTE; sin `modelo` se usa 'cliente' (compatibilidad).
+export const MODELOS_COMISION = ['cliente', 'rubro'];
+export const MODELO_VIGENTE = 'rubro';
 
 // ---------------------------------------------------------------------------
 // Configuración / supuestos "a confirmar con el dueño" (plan §9 y §10).
@@ -226,6 +238,172 @@ export const repartirComision = (comision, asignacion) => {
 };
 
 // ---------------------------------------------------------------------------
+// REQ-COMR: aritmética exacta por renglón (AC-COMR-9). Criterio de redondeo:
+//  1. precio del renglón al centavo (round half away from zero sobre el string
+//     decimal, igual que round(numeric, 2) en Postgres): 1,005 -> 1,01.
+//  2. subtotal = round(precioCents × cantidad) en centavos (el importe vendido,
+//     como el total del pedido; NO es redondear la comisión).
+//  3. comisión de un vendedor en un pedido = round( Σ subtotal × pct × división
+//     / 10^8 ) — UN SOLO redondeo por pedido y por vendedor, con BigInt.
+// La migración 005 hace exactamente la misma cuenta con numeric.
+// ---------------------------------------------------------------------------
+// S-COMR-05: largo acotado (misma regla que comision_rubro_base en la 005) para
+// que un número patológico sea un renglón inválido y no un desborde.
+const RE_DECIMAL = /^-?\d{1,12}(\.\d{1,20})?$/;
+const RE_CANTIDAD = /^\d{1,9}(\.\d{1,6})?$/;
+// Tope de la base de un pedido en centavos (la 005 usa el mismo tope: 10^11 pesos).
+export const MAX_CENTAVOS_PEDIDO = 1e13;
+
+// Representación decimal exacta de un number o string (sin exponente, sin coma).
+const decimalTexto = (v) => {
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return null;
+    const s = String(v);
+    return /e/i.test(s) ? null : s;
+  }
+  return typeof v === 'string' ? v : null;
+};
+
+// round half away from zero de num / den (BigInt, den > 0).
+const divRedondeoBig = (num, den) => {
+  const neg = num < BigInt(0);
+  const a = neg ? -num : num;
+  let q = a / den;
+  if ((a % den) * BigInt(2) >= den) q += BigInt(1);
+  return neg ? -q : q;
+};
+
+const bigANumero = (b) => {
+  const n = Number(b);
+  return Number.isSafeInteger(n) ? n : null;
+};
+
+// Pesos (string decimal exacto) -> centavos enteros. Exponente, coma, NaN,
+// objeto o null => null.
+export const decimalACentavos = (v) => {
+  const s = decimalTexto(v);
+  if (s === null || !RE_DECIMAL.test(s)) return null;
+  const neg = s[0] === '-';
+  const [ent, frac = ''] = (neg ? s.slice(1) : s).split('.');
+  const dig = `${ent}${(frac + '00').slice(0, 2)}`;
+  let c = BigInt(dig);
+  if (frac.length > 2 && Number(frac[2]) >= 5) c += BigInt(1);
+  const n = bigANumero(neg ? -c : c);
+  return n === 0 ? 0 : n;
+};
+
+// Cantidad del renglón como entero escalado: { q, escala } (q / 10^escala).
+const cantidadEscalada = (v) => {
+  const s = decimalTexto(v);
+  if (s === null || !RE_CANTIDAD.test(s)) return null;
+  const [ent, frac = ''] = s.split('.');
+  const q = BigInt(`${ent}${frac}`);
+  if (q <= BigInt(0)) return null;
+  // Sin el operador ** (Babel lo pasa a Math.pow, que no acepta BigInt).
+  let den = BigInt(1);
+  for (let i = 0; i < frac.length; i += 1) den *= BigInt(10);
+  return { q, den };
+};
+
+// Subtotal de un renglón en centavos. Los renglones `eliminado` (tachados en
+// Armado) no cuentan y no son inválidos.
+export const subtotalRenglonCentavos = (item) => {
+  if (String(item?.eliminado) === 'true') return { cents: 0, valido: true, eliminado: true };
+  const p = decimalACentavos(item?.precio);
+  if (p === null || p < 0) return { cents: 0, valido: false };
+  const c = cantidadEscalada(item?.cantidad);
+  if (!c) return { cents: 0, valido: false };
+  const cents = bigANumero(divRedondeoBig(BigInt(p) * c.q, c.den));
+  if (cents === null) return { cents: 0, valido: false };
+  return { cents, valido: true };
+};
+
+// Base de cálculo de un pedido agrupada por rubro (AC-COMR-9, 11).
+// S9: un pedido sin renglones válidos y con total > 0 (p. ej. WEB sin items)
+// cuenta como renglón inválido.
+export const baseRubrosPedido = (pedido, productosById) => {
+  const items = Array.isArray(pedido?.items) ? pedido.items : [];
+  const porClave = new Map();
+  const sinRubro = [];
+  let invalidos = 0;
+  let validos = 0;
+  let acumulado = 0;
+  for (const item of items) {
+    const st = subtotalRenglonCentavos(item);
+    if (st.eliminado) continue;
+    // S-COMR-05: un renglón que haría desbordar la base del pedido es inválido
+    // (comisiona 0 y el aviso identifica el pedido), no un fallo genérico.
+    if (!st.valido || acumulado + st.cents > MAX_CENTAVOS_PEDIDO) { invalidos += 1; continue; }
+    acumulado += st.cents;
+    validos += 1;
+    const r = rubroDeRenglon(item, productosById);
+    if (!r.clave) {
+      sinRubro.push({ productoId: item?.productoId ?? null, nombre: texto(item?.nombre, 160), subtotalCents: st.cents });
+      continue;
+    }
+    if (!porClave.has(r.clave)) porClave.set(r.clave, { rubro: r.rubro, clave: r.clave, subtotalCents: 0 });
+    porClave.get(r.clave).subtotalCents += st.cents;
+  }
+  if (validos === 0 && invalidos === 0 && (aCentavos(pedido?.total) || 0) > 0) invalidos = 1;
+  const porRubro = [...porClave.values()].sort((a, b) => (a.clave < b.clave ? -1 : a.clave > b.clave ? 1 : 0));
+  return { porRubro, sinRubro, invalidos };
+};
+
+// Prorrateo por mayor resto (Hamilton): reparte `total` según `pesos` (BigInt)
+// y suma exacto. Empate: gana el orden de la lista (clave alfabética).
+const hamilton = (total, pesos) => {
+  const W = pesos.reduce((a, p) => a + p, BigInt(0));
+  if (W === BigInt(0) || total === 0) return pesos.map(() => 0);
+  const neg = total < 0;
+  const T = BigInt(Math.abs(total));
+  const base = pesos.map(p => (T * p) / W);
+  const restos = pesos.map((p, i) => ({ i, r: (T * p) % W }));
+  let falta = Number(T - base.reduce((a, b) => a + b, BigInt(0)));
+  restos.sort((a, b) => (a.r === b.r ? a.i - b.i : (a.r > b.r ? -1 : 1)));
+  for (const { i } of restos) {
+    if (falta <= 0) break;
+    base[i] += BigInt(1);
+    falta -= 1;
+  }
+  return base.map(b => (neg ? -Number(b) : Number(b)));
+};
+
+// Comisión de UNA parte (vendedor) sobre la base del pedido. pctPorClave(clave)
+// devuelve el % del vendedor para ese rubro o null (sin % => 0 + aviso c1).
+export const comisionParteRubro = ({ base, vendedorId = null, pctPorClave, divisionPct } = {}) => {
+  const div = porcentajeValido(divisionPct);
+  const divCent = div === null ? 0 : pctABase(div);
+  const buscar = typeof pctPorClave === 'function' ? pctPorClave : () => null;
+  const filas = [];
+  const sinPct = [];
+  let num = BigInt(0);
+  for (const r of base?.porRubro || []) {
+    const pctRaw = buscar(r.clave);
+    const pct = pctRaw === null || pctRaw === undefined ? null : porcentajeValido(pctRaw);
+    if (pct === null) {
+      sinPct.push({ rubro: r.rubro, clave: r.clave, subtotalCents: mulDivRedondeo(r.subtotalCents, divCent, 10000) });
+      filas.push({ r, pct: null, peso: BigInt(0) });
+      continue;
+    }
+    const peso = BigInt(r.subtotalCents) * BigInt(pctABase(pct));
+    num += peso * BigInt(divCent);
+    filas.push({ r, pct: pctABase(pct) / 100, peso });
+  }
+  const montoCents = bigANumero(divRedondeoBig(num, BigInt(100000000))) || 0;
+  const reparto = hamilton(montoCents, filas.map(f => f.peso));
+  const desglose = filas.map((f, i) => ({
+    rubro: f.r.rubro,
+    rubroClave: f.r.clave,
+    subtotal: deCentavos(f.r.subtotalCents),
+    pct: f.pct,
+    comision: deCentavos(reparto[i]),
+  }));
+  const sinRubroCents = (base?.sinRubro || []).reduce((a, s) => a + (Number(s.subtotalCents) || 0), 0);
+  if ((base?.sinRubro || []).length) desglose.push({ rubro: '', rubroClave: '', subtotal: deCentavos(sinRubroCents), pct: null, comision: 0 });
+  return { montoCents, desglose, sinPct, vendedorId };
+};
+
+// ---------------------------------------------------------------------------
 // Identidades (pedido, cliente, vendedor)
 // ---------------------------------------------------------------------------
 export const pedidoIdComision = (pedido) =>
@@ -389,15 +567,9 @@ const conPartes = (cents, totalCents, asignacion) => {
   return com.map((p, i) => ({ vendedor: p.vendedor, pct: p.pct, monto: deCentavos(p.montoCents), total: deCentavos(tot[i].montoCents) }));
 };
 
-export const armarLinea = (pedido, { clientes, vendedores, asignacionBorrador = null } = {}, config = CONFIG_COMISIONES) => {
-  const { cliente, porNombre } = buscarCliente(pedido, clientes);
-  const pct = porcentajeValido(cliente?.comision);
-  const { cents, aviso } = comisionCentavos(pedido?.total, pct);
-  const totalCents = aCentavos(pedido?.total);
-  const totalOk = totalCents !== null && totalCents >= 0 ? totalCents : 0;
-  const ficha = fichaValida(cliente, vendedores);
-  const cargaDeOtro = esCargaDeOtroVendedor(pedido, cliente, vendedores, config);
-
+// Asignación vigente de un pedido (default de la ficha o la del borrador).
+// La comparten el modelo 'cliente' y el modelo 'rubro' (AC-COM-7/8/17 sin cambios).
+const resolverAsignacion = (pedido, cliente, vendedores, asignacionBorrador, config) => {
   let asignacion = asignacionPorDefecto(pedido, cliente, vendedores);
   let asignacionErrores = null;
   let asignacionConfirmada = false;
@@ -410,6 +582,18 @@ export const armarLinea = (pedido, { clientes, vendedores, asignacionBorrador = 
     // viejos sin la marca => no confirmada.
     asignacionConfirmada = asignacionBorrador.confirmada === true && v.ok;
   }
+  return { asignacion, asignacionErrores, asignacionConfirmada };
+};
+
+export const armarLinea = (pedido, { clientes, vendedores, asignacionBorrador = null } = {}, config = CONFIG_COMISIONES) => {
+  const { cliente, porNombre } = buscarCliente(pedido, clientes);
+  const pct = porcentajeValido(cliente?.comision);
+  const { cents, aviso } = comisionCentavos(pedido?.total, pct);
+  const totalCents = aCentavos(pedido?.total);
+  const totalOk = totalCents !== null && totalCents >= 0 ? totalCents : 0;
+  const ficha = fichaValida(cliente, vendedores);
+  const cargaDeOtro = esCargaDeOtroVendedor(pedido, cliente, vendedores, config);
+  const { asignacion, asignacionErrores, asignacionConfirmada } = resolverAsignacion(pedido, cliente, vendedores, asignacionBorrador, config);
 
   return {
     tipo: 'pedido',
@@ -436,20 +620,168 @@ export const armarLinea = (pedido, { clientes, vendedores, asignacionBorrador = 
 };
 
 // ---------------------------------------------------------------------------
+// REQ-COMR: línea del dashboard con el modelo por vendedor y rubro.
+// Misma forma que armarLinea + modelo:'rubro', pct:null, partes[].vendedorId,
+// partes[].desglose, comisionUnica y avisosRubro.
+// ---------------------------------------------------------------------------
+const pctPorClaveDe = (indiceTabla, vendedorId) => (clave) => (vendedorId ? pctDe(indiceTabla, vendedorId, clave) : null);
+
+export const armarLineaRubro = (pedido, { clientes, vendedores, productosById, indiceTabla, asignacionBorrador = null } = {}, config = CONFIG_COMISIONES) => {
+  const { cliente, porNombre } = buscarCliente(pedido, clientes);
+  const totalCents = aCentavos(pedido?.total);
+  const totalOk = totalCents !== null && totalCents >= 0 ? totalCents : 0;
+  const ficha = fichaValida(cliente, vendedores);
+  const cargaDeOtro = esCargaDeOtroVendedor(pedido, cliente, vendedores, config);
+  const { asignacion, asignacionErrores, asignacionConfirmada } = resolverAsignacion(pedido, cliente, vendedores, asignacionBorrador, config);
+  const sinComision = asignacion?.modo === 'sin_comision';
+  const base = baseRubrosPedido(pedido, productosById);
+
+  const avisosRubro = { sinPct: [], sinRubro: sinComision ? [] : base.sinRubro, vendedorSinId: [], invalidos: sinComision ? 0 : base.invalidos };
+  let partes = [];
+  let comisionCents = 0;
+  if (asignacion?.modo && !sinComision) {
+    const tot = repartirCentavos(totalOk, asignacion.partes);
+    partes = (asignacion.partes || []).map((p, i) => {
+      const vendedorId = vendedorIdPorNombre(p.vendedor, vendedores);
+      if (!vendedorId) avisosRubro.vendedorSinId.push(p.vendedor);
+      const c = comisionParteRubro({ base, vendedorId, pctPorClave: pctPorClaveDe(indiceTabla, vendedorId), divisionPct: p.pct });
+      if (vendedorId) {
+        for (const s of c.sinPct) avisosRubro.sinPct.push({ vendedor: p.vendedor, vendedorId, rubro: s.rubro, clave: s.clave, subtotalCents: s.subtotalCents });
+      }
+      comisionCents += c.montoCents;
+      return { vendedor: p.vendedor, vendedorId, pct: Number(p.pct), monto: deCentavos(c.montoCents), total: deCentavos(tot[i].montoCents), desglose: c.desglose };
+    });
+  }
+
+  return {
+    tipo: 'pedido',
+    modelo: 'rubro',
+    pedidoId: pedidoIdComision(pedido),
+    localId: pedido?.id ?? null,
+    fecha: normalizePedidoFecha(pedido?.fecha),
+    clienteId: cliente?.id ?? pedido?.clienteId ?? null,
+    clienteNombre: texto(cliente?.nombre || pedido?.clienteNombre, 120),
+    clientePorNombre: porNombre,
+    cargadoPor: vendedorQueCargo(pedido),
+    vendedorFicha: ficha,
+    pct: null,
+    total: deCentavos(totalOk),
+    // Suma técnica de las partes (servidor y totales). En pedidos divididos NO
+    // se muestra como "comisión del pedido" (AC-COMR-10): comisionUnica=false.
+    comision: deCentavos(comisionCents),
+    comisionUnica: asignacion?.modo !== 'dividir',
+    aviso: totalCents === null || totalCents < 0 ? 'total_invalido' : null,
+    cargaDeOtro,
+    sinVendedor: !ficha,
+    asignacion,
+    asignacionErrores,
+    asignacionEditada: !!asignacionBorrador,
+    asignacionConfirmada,
+    avisosRubro,
+    partes,
+  };
+};
+
+// ---------------------------------------------------------------------------
 // Ajustes pendientes (AC-COM-13)
 // ---------------------------------------------------------------------------
-export const calcularAjustesPendientes = (pedidos, cierres, config = CONFIG_COMISIONES) => {
+// REQ-COMR (AC-COMR-14): acumulado ya cerrado por vendedor y por rubro de un
+// pedido (base + ajustes vigentes). Clave del vendedor: vendedorId (o nombre).
+const claveParte = (p) => (p?.vendedorId ? `id:${p.vendedorId}` : `n:${claveUnica(p?.vendedor)}`);
+const acumularPartes = (acc, partes) => {
+  for (const p of partes || []) {
+    const k = claveParte(p);
+    if (!acc.has(k)) acc.set(k, { montoCents: 0, rubros: new Map() });
+    const a = acc.get(k);
+    a.montoCents += aCentavos(p.monto) || 0;
+    for (const d of p.desglose || []) {
+      const rk = String(d?.rubroClave ?? '');
+      if (!a.rubros.has(rk)) a.rubros.set(rk, { rubro: d?.rubro ?? '', subtotalCents: 0, comisionCents: 0 });
+      const r = a.rubros.get(rk);
+      r.subtotalCents += aCentavos(d?.subtotal) || 0;
+      r.comisionCents += aCentavos(d?.comision) || 0;
+    }
+  }
+};
+
+// Ajuste de un pedido cerrado con el modelo 'rubro': se recalcula con los ítems
+// actuales, la MISMA asignación congelada y el % congelado por rubro (un rubro
+// que no estaba en el cierre usa el % vigente: supuesto S6).
+const ajusteRubro = (l, pedido, prev, sigueContando, ctx) => {
+  const asignacion = l.asignacion || { modo: null, partes: [] };
+  const base = sigueContando ? baseRubrosPedido(pedido, ctx.productosById) : { porRubro: [], sinRubro: [], invalidos: 0 };
+  const cerrado = new Map();
+  acumularPartes(cerrado, l.partes);
+  acumularPartes(cerrado, prev.partes);
+  const totalActualCents = sigueContando ? Math.max(0, aCentavos(pedido.total) || 0) : 0;
+  const cerradoTotalCents = (aCentavos(l.total) || 0) + prev.sumaTotalCents;
+  const difTotal = totalActualCents - cerradoTotalCents;
+  const tot = repartirCentavos(difTotal, l.partes || []);
+  let actualCents = 0;
+  let difCents = 0;
+  const partes = (l.partes || []).map((p, i) => {
+    const vendedorId = p.vendedorId || vendedorIdPorNombre(p.vendedor, ctx.vendedores);
+    const congelado = new Map((p.desglose || []).filter(d => d?.rubroClave).map(d => [String(d.rubroClave), d.pct]));
+    const pctPorClave = (clave) => (congelado.has(clave) ? congelado.get(clave) : pctPorClaveDe(ctx.indiceTabla, vendedorId)(clave));
+    const c = comisionParteRubro({ base, vendedorId, pctPorClave, divisionPct: p.pct });
+    const prevV = cerrado.get(claveParte(p)) || { montoCents: 0, rubros: new Map() };
+    const dif = c.montoCents - prevV.montoCents;
+    actualCents += c.montoCents;
+    difCents += dif;
+    const claves = new Set([...c.desglose.map(d => d.rubroClave), ...prevV.rubros.keys()]);
+    const desglose = [...claves].sort().map(k => {
+      const act = c.desglose.find(d => d.rubroClave === k);
+      const ant = prevV.rubros.get(k) || { rubro: '', subtotalCents: 0, comisionCents: 0 };
+      return {
+        rubro: act ? act.rubro : ant.rubro,
+        rubroClave: k,
+        subtotal: deCentavos((act ? aCentavos(act.subtotal) : 0) - ant.subtotalCents),
+        pct: act ? act.pct : (congelado.has(k) ? congelado.get(k) : null),
+        comision: deCentavos((act ? aCentavos(act.comision) : 0) - ant.comisionCents),
+      };
+    }).filter(d => d.subtotal !== 0 || d.comision !== 0);
+    return { vendedor: p.vendedor, vendedorId, pct: Number(p.pct), monto: deCentavos(dif), total: deCentavos(tot[i]?.montoCents || 0), desglose };
+  });
+  if (difCents === 0 && difTotal === 0 && partes.every(p => p.monto === 0)) return null;
+  return {
+    tipo: 'ajuste',
+    modelo: 'rubro',
+    pedidoId: String(l.pedidoId),
+    localId: pedido.id ?? null,
+    ajusteDeCierreId: l.cierreId,
+    ajusteSeq: prev.maxSeq + 1,
+    fecha: l.fecha,
+    clienteId: l.clienteId ?? null,
+    clienteNombre: l.clienteNombre,
+    pct: null,
+    comisionCerrada: deCentavos((aCentavos(l.comision) || 0) + prev.sumaCents),
+    comisionActual: deCentavos(actualCents),
+    diferencia: deCentavos(difCents),
+    total: deCentavos(difTotal),
+    comision: deCentavos(difCents),
+    comisionUnica: asignacion.modo !== 'dividir',
+    motivo: !sigueContando ? 'ya_no_cuenta' : 'total_cambio',
+    asignacion,
+    partes,
+  };
+};
+
+// ctx = { productosById, indiceTabla, vendedores }: solo hace falta para bases
+// con modelo 'rubro'. Con base 'cliente' el resultado es idéntico al de antes
+// (diferencia de total × % congelado): el cambio de modelo no genera ajustes.
+export const calcularAjustesPendientes = (pedidos, cierres, config = CONFIG_COMISIONES, ctx = {}) => {
   const base = new Map(); // pid -> línea congelada del pedido
-  const ajustes = new Map(); // pid -> { sumaCents, sumaTotalCents, maxSeq }
+  const ajustes = new Map(); // pid -> { sumaCents, sumaTotalCents, maxSeq, partes }
   for (const c of cierres || []) {
     if (!cierreOcupa(c)) continue;
     for (const l of c.lineas || []) {
       const pid = String(l.pedidoId);
       if (l.tipo === 'ajuste') {
-        const a = ajustes.get(pid) || { sumaCents: 0, sumaTotalCents: 0, maxSeq: 0 };
+        const a = ajustes.get(pid) || { sumaCents: 0, sumaTotalCents: 0, maxSeq: 0, partes: [] };
         a.sumaCents += aCentavos(l.comision) || 0;
         a.sumaTotalCents += aCentavos(l.total) || 0;
         a.maxSeq = Math.max(a.maxSeq, Number(l.ajusteSeq || 0));
+        a.partes.push(...(Array.isArray(l.partes) ? l.partes : []));
         ajustes.set(pid, a);
       } else if (!base.has(pid)) {
         base.set(pid, { ...l, cierreId: c.id });
@@ -468,10 +800,15 @@ export const calcularAjustesPendientes = (pedidos, cierres, config = CONFIG_COMI
     const pedido = porRemoto.get(pid);
     if (!pedido) continue; // sin datos locales: no se puede saber si cambió
     if (l.asignacion?.modo === 'sin_comision') continue;
-    const prev = ajustes.get(pid) || { sumaCents: 0, sumaTotalCents: 0, maxSeq: 0 };
+    const prev = ajustes.get(pid) || { sumaCents: 0, sumaTotalCents: 0, maxSeq: 0, partes: [] };
+    const sigueContando = esFacturadoActivo(pedido) && estaEntregado(pedido, config);
+    if (l.modelo === 'rubro') {
+      const a = ajusteRubro(l, pedido, prev, sigueContando, ctx || {});
+      if (a) out.push(a);
+      continue;
+    }
     const cerradoCents = (aCentavos(l.comision) || 0) + prev.sumaCents;
     const cerradoTotalCents = (aCentavos(l.total) || 0) + prev.sumaTotalCents;
-    const sigueContando = esFacturadoActivo(pedido) && estaEntregado(pedido, config);
     const actual = sigueContando ? comisionCentavos(pedido.total, l.pct) : { cents: 0 };
     const totalActualCents = sigueContando ? Math.max(0, aCentavos(pedido.total) || 0) : 0;
     const dif = actual.cents - cerradoCents;
@@ -532,8 +869,64 @@ export const calcularAvisos = (lineas, noEntregados = [], sinSincronizar = []) =
     montoInvalido: montoInvalido.length,
   };
   contadores.total = contadores.a + contadores.b + contadores.c + contadores.d + contadores.sinSincronizar + contadores.montoInvalido;
-  return { cargadoPorOtro, clienteSinVendedor, clienteSinPct, montoInvalido, noEntregados: noEntregados || [], sinSincronizar: sinSincronizar || [], contadores };
+  const rubro = avisosDeRubro(ls);
+  // Los contadores nuevos solo aparecen si hay líneas del modelo 'rubro' (la
+  // salida del modelo viejo queda idéntica).
+  if (ls.some(l => l?.modelo === 'rubro')) {
+    contadores.c1 = rubro.vendedorSinPctRubro.length;
+    contadores.c2 = rubro.productosSinRubro.length;
+    contadores.vendedorSinId = rubro.vendedorSinSincronizar.length;
+    contadores.renglonInvalido = rubro.renglonInvalido.length;
+    contadores.total += contadores.c1 + contadores.c2 + contadores.vendedorSinId + contadores.renglonInvalido;
+  }
+  return { cargadoPorOtro, clienteSinVendedor, clienteSinPct, montoInvalido, noEntregados: noEntregados || [], sinSincronizar: sinSincronizar || [], ...rubro, contadores };
 };
+
+// AC-COMR-11: (c1) vendedor sin % para un rubro (por vendedor + rubro, con
+// pedidos y monto afectado: en pedidos divididos, la parte de ese vendedor) y
+// (c2) productos sin rubro vendidos. Más: vendedor sin sincronizar y renglones
+// inválidos (comisionan 0).
+function avisosDeRubro(lineas) {
+  const c1 = new Map();
+  const c2 = new Map();
+  const sinId = new Map();
+  const invalidos = [];
+  for (const l of lineas) {
+    const a = l?.avisosRubro;
+    if (!a) continue;
+    for (const s of a.sinPct || []) {
+      const k = `${s.vendedorId}|${s.clave}`;
+      if (!c1.has(k)) c1.set(k, { vendedor: s.vendedor, vendedorId: s.vendedorId, rubro: s.rubro, clave: s.clave, pedidos: new Set(), cents: 0 });
+      const x = c1.get(k);
+      x.pedidos.add(String(l.pedidoId));
+      x.cents += Number(s.subtotalCents) || 0;
+    }
+    for (const s of a.sinRubro || []) {
+      const k = s.productoId !== null && s.productoId !== undefined ? `id:${s.productoId}` : `n:${claveUnica(s.nombre)}`;
+      if (!c2.has(k)) c2.set(k, { productoId: s.productoId ?? null, nombre: s.nombre, renglones: 0, cents: 0 });
+      const x = c2.get(k);
+      x.renglones += 1;
+      x.cents += Number(s.subtotalCents) || 0;
+    }
+    for (const v of a.vendedorSinId || []) {
+      const k = claveUnica(v);
+      if (!sinId.has(k)) sinId.set(k, { vendedor: v, pedidos: 0 });
+      sinId.get(k).pedidos += 1;
+    }
+    if (a.invalidos > 0) invalidos.push({ pedidoId: l.pedidoId, clienteNombre: l.clienteNombre, renglones: a.invalidos });
+  }
+  const orden = (a, b) => String(a).localeCompare(String(b), 'es');
+  return {
+    vendedorSinPctRubro: [...c1.values()]
+      .map(({ pedidos, cents, ...x }) => ({ ...x, pedidos: pedidos.size, montoAfectado: deCentavos(cents) }))
+      .sort((a, b) => orden(a.vendedor, b.vendedor) || orden(a.clave, b.clave)),
+    productosSinRubro: [...c2.values()]
+      .map(({ cents, ...x }) => ({ ...x, monto: deCentavos(cents) }))
+      .sort((a, b) => orden(a.nombre, b.nombre)),
+    vendedorSinSincronizar: [...sinId.values()],
+    renglonInvalido: invalidos,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Resumen por vendedor (AC-COM-5)
@@ -552,6 +945,7 @@ export const resumirPorVendedor = (lineas, ajustes = []) => {
       if (l.tipo !== 'ajuste') cli.cuentaComoCliente = true;
       acc.vendidoCents += aCentavos(parte.total) || 0;
       acc.comisionCents += aCentavos(parte.monto) || 0;
+      const esRubro = l.modelo === 'rubro';
       cli.pedidos.push({
         pedidoId: l.pedidoId,
         tipo: l.tipo,
@@ -560,9 +954,12 @@ export const resumirPorVendedor = (lineas, ajustes = []) => {
         totalPedido: l.total,
         pct: l.pct,
         comision: parte.monto,
-        comisionPedido: l.comision,
+        // AC-COMR-10: en un pedido dividido con el modelo por rubro no hay una
+        // "comisión del pedido" única (cada vendedor aplica su tabla).
+        comisionPedido: esRubro && l.asignacion?.modo === 'dividir' ? null : l.comision,
         asignacion: l.asignacion?.modo || null,
         division: parte.pct,
+        ...(esRubro ? { modelo: 'rubro', vendedorId: parte.vendedorId ?? null, desglose: parte.desglose || [] } : {}),
         ...(l.tipo === 'ajuste' ? { ajusteSeq: l.ajusteSeq, ajusteDeCierreId: l.ajusteDeCierreId } : {}),
       });
     }
@@ -584,17 +981,36 @@ export const resumirPorVendedor = (lineas, ajustes = []) => {
 // ---------------------------------------------------------------------------
 // Dashboard completo
 // ---------------------------------------------------------------------------
-export const armarDashboard = ({ pedidos, clientes, vendedores, cierres, borrador, periodo }, config = CONFIG_COMISIONES) => {
+// Map<String(id), producto> para resolver el rubro actual de renglones viejos.
+export const indexarProductos = (productos) => {
+  const m = new Map();
+  for (const p of Array.isArray(productos) ? productos : []) {
+    if (p && typeof p === 'object' && p.id !== null && p.id !== undefined && !m.has(String(p.id))) m.set(String(p.id), p);
+  }
+  return m;
+};
+
+// modelo: 'rubro' (REQ-COMR, lo que mandan los servicios) o, si falta,
+// 'cliente' (compatibilidad: salida idéntica a la de REQ-COM).
+export const armarDashboard = ({
+  pedidos, clientes, vendedores, cierres, borrador, periodo,
+  modelo, productos, tablaRubros, pendientesRubro = 0, faltaMigracion005 = false,
+}, config = CONFIG_COMISIONES) => {
   const vp = validarPeriodo(periodo, config);
   const cerrados = pedidosEnCierresVigentes(cierres);
   const clas = vp.ok
     ? clasificarPedidos(pedidos, vp.periodo, cerrados, config)
     : { incluidos: [], noEntregados: [], sinSincronizar: [], yaCerrados: [] };
   const asign = borrador?.asignaciones || {};
+  const esRubro = modelo === 'rubro';
+  const productosById = indexarProductos(productos);
+  const indiceTabla = indexarTablaRubros(tablaRubros);
   const lineas = clas.incluidos
-    .map(p => armarLinea(p, { clientes, vendedores, asignacionBorrador: asign[pedidoIdComision(p)] || null }, config))
+    .map(p => (esRubro
+      ? armarLineaRubro(p, { clientes, vendedores, productosById, indiceTabla, asignacionBorrador: asign[pedidoIdComision(p)] || null }, config)
+      : armarLinea(p, { clientes, vendedores, asignacionBorrador: asign[pedidoIdComision(p)] || null }, config)))
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.clienteNombre).localeCompare(String(b.clienteNombre), 'es'));
-  const ajustes = calcularAjustesPendientes(pedidos, cierres, config);
+  const ajustes = calcularAjustesPendientes(pedidos, cierres, config, { productosById, indiceTabla, vendedores });
   const avisos = calcularAvisos(lineas, clas.noEntregados, clas.sinSincronizar);
   const resumenPorVendedor = resumirPorVendedor(lineas, ajustes);
   const sumC = (arr, k) => arr.reduce((acc, x) => acc + (aCentavos(x[k]) || 0), 0);
@@ -618,14 +1034,20 @@ export const armarDashboard = ({ pedidos, clientes, vendedores, cierres, borrado
     noEntregados: clas.noEntregados,
     sinSincronizar: clas.sinSincronizar,
     yaCerrados: clas.yaCerrados,
+    ...(esRubro ? { modelo: 'rubro', pendientesRubro: Number(pendientesRubro) || 0, faltaMigracion005: !!faltaMigracion005 } : {}),
   };
 };
 
 // Huella del dashboard para detectar si cambió entre lo que vio el admin y lo
-// que se recalculó con datos frescos justo antes de confirmar.
+// que se recalculó con datos frescos justo antes de confirmar. REQ-COMR: con
+// el modelo por rubro incluye el vendedorId y el monto de cada parte (un
+// cambio de % invalida la confirmación).
+const firmaParte = (p) => (p?.vendedorId !== undefined ? [p.vendedor, p.monto, p.vendedorId] : [p.vendedor, p.monto]);
 export const firmaDashboard = (d) => JSON.stringify({
-  l: (d?.lineas || []).map(l => [l.pedidoId, l.comision, l.total, (l.partes || []).map(p => [p.vendedor, p.monto])]),
-  a: (d?.ajustes || []).map(a => [a.pedidoId, a.ajusteSeq, a.diferencia]),
+  l: (d?.lineas || []).map(l => [l.pedidoId, l.comision, l.total, (l.partes || []).map(firmaParte)]),
+  a: (d?.ajustes || []).map(a => (a.modelo === 'rubro'
+    ? [a.pedidoId, a.ajusteSeq, a.diferencia, (a.partes || []).map(firmaParte)]
+    : [a.pedidoId, a.ajusteSeq, a.diferencia])),
 });
 
 // ---------------------------------------------------------------------------
@@ -641,13 +1063,23 @@ export const puedeCerrar = (d) => {
   if (invalidas.length) motivos.push(`${invalidas.length} asignación(es) inválida(s): revisá las divisiones`);
   const sinSync = (d?.sinSincronizar || []).length;
   if (sinSync) motivos.push(`${sinSync} pedido(s) sin sincronizar: sincronizá antes de cerrar`);
+  // REQ-COMR (AC-COMR-7/8): sin el id remoto del vendedor no hay tabla de %, y
+  // sin la 005 (o con % sin subir) el servidor no puede verificar el cierre.
+  const sinIdVend = lineas.filter(l => (l.avisosRubro?.vendedorSinId || []).length > 0);
+  if (sinIdVend.length) motivos.push(`${sinIdVend.length} pedido(s) con un vendedor sin sincronizar: sincronizá los vendedores antes de cerrar`);
+  if (d?.faltaMigracion005) motivos.push('Falta la migración 005 en Supabase: no se puede cerrar con comisiones por rubro');
+  if (Number(d?.pendientesRubro) > 0) motivos.push(`Hay ${Number(d.pendientesRubro)} % de comisión sin sincronizar: sincronizá los % antes de cerrar`);
   if (lineas.length === 0 && (d?.ajustes || []).length === 0) motivos.push('No hay pedidos ni ajustes para cerrar en este período');
   return { ok: motivos.length === 0, motivos };
 };
 
 const copia = (x) => JSON.parse(JSON.stringify(x ?? null));
 
+// AC-COMR-13: las líneas del modelo 'rubro' congelan además, por parte,
+// vendedorId y el desglose por rubro (subtotal, %, comisión) — viajan dentro
+// de `partes`, que se copia entera.
 const lineaCongelada = (l) => ({
+  ...(l.modelo === 'rubro' ? { modelo: 'rubro' } : {}),
   tipo: l.tipo,
   pedidoId: String(l.pedidoId),
   fecha: l.fecha,
@@ -688,9 +1120,17 @@ export const construirCierre = (d, { admin, now = new Date(), genId = nuevoId } 
     },
     detalle: resumen.map(v => ({ vendedor: v.vendedor, totalVendido: v.totalVendido, totalComision: v.totalComision, clientes: v.detalle })),
     lineas: [...d.lineas, ...d.ajustes].map(lineaCongelada),
+    ...(d.modelo === 'rubro' ? { modelo: 'rubro' } : {}),
     createdAt: ts,
     updatedAt: ts,
   };
+};
+
+// AC-COMR-13: 'rubro' si el cierre (o alguna de sus líneas) lo dice; si no,
+// 'cliente' (cierres viejos sin el campo).
+export const modeloDeCierre = (c) => {
+  if (c?.modelo === 'rubro') return 'rubro';
+  return (Array.isArray(c?.lineas) ? c.lineas : []).some(l => l?.modelo === 'rubro') ? 'rubro' : 'cliente';
 };
 
 export const validarAnulacion = (cierre, motivo, usuario, now = Date.now()) => {
@@ -767,10 +1207,11 @@ export const cierreToRemote = (c) => ({
     totales: c.totales || {},
     detalle: c.detalle || [],
     lineas: c.lineas || [],
+    ...(modeloDeCierre(c) === 'rubro' ? { modelo: 'rubro' } : {}),
   },
   p_renglones: renglonesDeCierre(c).map((r, i) => {
     const l = (c.lineas || [])[i] || {};
-    return {
+    const base = {
       pedido_id: r.pedidoId,
       tipo: r.tipo,
       ajuste_seq: r.ajusteSeq,
@@ -778,6 +1219,18 @@ export const cierreToRemote = (c) => ({
       comision: r.comision,
       pct: pctCongelado(l.pct),
       sin_comision: l.asignacion?.modo === 'sin_comision',
+    };
+    if (l.modelo !== 'rubro') return base;
+    // AC-COMR-13: el servidor recalcula cada parte con SU tabla y arma el
+    // desglose; el cliente solo manda vendedor, división y monto por parte.
+    return {
+      ...base,
+      modelo: 'rubro',
+      partes: (Array.isArray(l.partes) ? l.partes : []).map(p => ({
+        vendedor_id: p?.vendedorId === null || p?.vendedorId === undefined ? null : String(p.vendedorId),
+        pct: Number(p?.pct),
+        monto: Number(p?.monto || 0),
+      })),
     };
   }),
 });
@@ -803,6 +1256,7 @@ export const cierreFromRemote = (r, local = null) => ({
   detalle: Array.isArray(r.detalle) ? r.detalle : [],
   lineas: Array.isArray(r.lineas) ? r.lineas : (local?.lineas || []),
   anulacionPendiente: r.estado === 'anulado' ? null : (local?.anulacionPendiente ?? null),
+  ...(r.modelo === 'rubro' ? { modelo: 'rubro' } : {}),
   pendingSync: false,
   updatedAt: parseFecha(r.updated_at) ?? Date.now(),
 });
@@ -915,10 +1369,49 @@ export const filasPdfCierre = (cierre) => {
   const resumen = lista(c.totales?.porVendedor).map(v => [texto(v?.vendedor, MAX_NOMBRE), texto(v?.pedidos, 12), texto(v?.clientes, 12), fmtPesos(v?.totalVendido), fmtPesos(v?.totalComision)]);
   resumen.push(['TOTAL', String(c.totales?.pedidos ?? ''), String(c.totales?.clientes ?? ''), fmtPesos(c.totales?.totalVendido), fmtPesos(c.totales?.totalComision)]);
   const detalle = [];
+  // AC-COMR-13: cierre con el modelo por rubro => una fila por (vendedor,
+  // pedido, rubro). Los cierres viejos ('cliente') salen exactamente como antes.
+  if (modeloDeCierre(c) === 'rubro') {
+    for (const v of lista(c.detalle)) {
+      for (const cli of lista(v?.clientes)) {
+        for (const p of lista(cli?.pedidos)) {
+          const modo = typeof p?.asignacion === 'string' && Object.prototype.hasOwnProperty.call(NOMBRE_MODO, p.asignacion) ? p.asignacion : null;
+          const pedido = `${p?.tipo === 'ajuste' ? 'Ajuste ' : ''}#${texto(p?.pedidoId, 64)}${modo === 'dividir' ? ` (${texto(p.division, 10)} %)` : ''}`;
+          const fila = (rubro, subtotal, pct, comision) => [
+            texto(v?.vendedor, MAX_NOMBRE),
+            texto(cli?.clienteNombre, 120),
+            pedido,
+            fmtFecha(texto(p?.fecha, 30)),
+            rubro,
+            fmtPesos(subtotal),
+            pct === null || pct === undefined ? '-' : `${texto(pct, 10)} %`,
+            fmtPesos(comision),
+          ].map(String);
+          const desglose = lista(p?.desglose);
+          if (p?.modelo === 'rubro' && desglose.length) {
+            for (const d of desglose) detalle.push(fila(texto(d?.rubro, 60) || 'Sin rubro', d?.subtotal, d?.pct, d?.comision));
+          } else {
+            // Ajuste de un cierre viejo (modelo 'cliente') o pedido sin desglose.
+            detalle.push(fila('-', p?.total, p?.pct, p?.comision));
+          }
+        }
+      }
+    }
+    return {
+      titulo,
+      subtitulo,
+      anulado,
+      headResumen: ['Vendedor', 'Pedidos', 'Clientes', 'Total vendido', 'Comisión'],
+      resumen,
+      headDetalle: ['Vendedor', 'Cliente', 'Pedido', 'Fecha', 'Rubro', 'Subtotal', '%', 'Comisión'],
+      detalle,
+      filename: `comisiones_${c.desde || ''}_${c.hasta || ''}${c.estado === 'anulado' ? '_ANULADO' : ''}.pdf`,
+    };
+  }
   for (const v of lista(c.detalle)) {
     for (const cli of lista(v?.clientes)) {
       for (const p of lista(cli?.pedidos)) {
-        const modo = typeof p?.asignacion === 'string' && Object.prototype.hasOwnProperty.call(NOMBRE_MODO, p.asignacion) ? p.asignacion : null;
+        const modo =typeof p?.asignacion === 'string' && Object.prototype.hasOwnProperty.call(NOMBRE_MODO, p.asignacion) ? p.asignacion : null;
         detalle.push([
           texto(v?.vendedor, MAX_NOMBRE),
           texto(cli?.clienteNombre, 120),

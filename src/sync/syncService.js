@@ -4,10 +4,12 @@ import { isPedidoOculto, makePedidoEliminado, normalizePedidoFecha } from '../ut
 import { fetchProductImage, isImageSearchConfigured, ImageSearchQuotaError } from '../services/imageSearch';
 import { detectarMarca } from '../utils/brands';
 import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
-import { productoExtraToRemote, productoExtraFromRemote } from '../domain/productos';
+import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote } from '../domain/productos';
+import { normalizarBultoNombre } from '../domain/unidadVenta';
 
 import { pedidoEntregaToRemote, pedidoEntregaFromRemote, sinColumnasEntrega } from '../domain/comisiones';
-import { esColumnaInexistente } from './tolerancia';
+import { esColumnaInexistente, esEscrituraDenegada } from './tolerancia';
+import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
 import { vendedorDesdeRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO, COLUMNAS_VENDEDOR_LEGACY } from '../domain/vendedores';
 
 // Si Supabase todavia no tiene las columnas nuevas (migracion 001 sin correr),
@@ -28,6 +30,27 @@ export const upsertTolerante = async (table, rowsCompletas, rowsLegacy) => {
   const r2 = await supabase.from(table).upsert(rowsLegacy, { onConflict: 'id' });
   return { error: r2.error, legacy: true };
 };
+// AC-VTA-5: upsert en escalones [completo (001+006), solo 001, basico]. Baja de
+// nivel solo si falta una columna: si el error nombra una columna de la 006
+// pasa al escalon 001; cualquier otra columna faltante cae al basico. Asi, si
+// falta solo la 006, las columnas de la 001 (bulto_x, costo_final...) igual suben.
+const COLUMNAS_006 = /venta_por|bulto_nombre|visible_tienda/;
+const avisosEscalon = new Set();
+export const upsertEscalonado = async (table, variantes) => {
+  let i = 0;
+  for (;;) {
+    const { error } = await supabase.from(table).upsert(variantes[i], { onConflict: 'id' });
+    if (!error) return { error: null, nivel: i };
+    if (!esColumnaInexistente(error) || i >= variantes.length - 1) return { error, nivel: i };
+    const siguiente = i === 0 && variantes.length > 2 && COLUMNAS_006.test(String(error.message || '')) ? 1 : variantes.length - 1;
+    if (!avisosEscalon.has(siguiente)) {
+      avisosEscalon.add(siguiente);
+      console.warn(`Supabase: faltan columnas nuevas en "${table}". Correr supabase/migrations/${siguiente === 1 ? '006_unidad_venta' : '001_altas_y_stock'}.sql. Se sube solo lo que existe.`);
+    }
+    i = siguiente;
+  }
+};
+
 // agregar al import de db
 import {
   getPedidos, markPedidoSynced, putPedidoRemoto, deletePedido,
@@ -37,6 +60,7 @@ import {
   getFaltantes, addFaltante, deleteFaltante, updateFaltante,
   getDeudas, addDeuda, deleteDeuda, updateDeuda,
   clearProductosPendingSync, // ← agregar
+  clearProductosPendingSyncSiIgual,
   clearClientesPendingSync,
   putPedidosRemotoBatch,
   putClientesBatch,
@@ -194,14 +218,13 @@ const softDeleteRemotePedido = async (pedido) => {
   return finalPedido;
 };
 
-export const syncProductos = async () => {
-  const productos = await getProductos();
-  // extrasPendientes: se subio solo lo basico porque Supabase no tenia las
-  // columnas nuevas; se reintenta hasta que la migracion exista (bug B1).
-  const pendientes = productos.filter(p => p.pendingSync || p.extrasPendientes);
-  
-  if (pendientes.length === 0) return { ok: true };
+// S-VTA-01: despues de la migracion 007 la escritura directa de productos esta
+// cerrada para la anon key. Flag de modulo: no reintentar el directo en la misma
+// sesion (se resetea al recargar).
+let escrituraDirectaCerrada = false;
+export const _resetEscrituraDirectaProductos = () => { escrituraDirectaCerrada = false; };
 
+const subirProductosDirecto = async (pendientes) => {
   for (let i = 0; i < pendientes.length; i += 100) {
     const slice = pendientes.slice(i, i + 100);
     const invalid = slice.find(p => !Number.isSafeInteger(p.id));
@@ -229,15 +252,19 @@ export const syncProductos = async () => {
     let error = null;
     let legacy = false;
     if (idxExtras.length) {
-      const r = await upsertTolerante('productos', idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]) })), idxExtras.map(i => batch[i]));
-      error = r.error; legacy = r.legacy;
+      const r = await upsertEscalonado('productos', [
+        idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]), ...productoVentaToRemote(slice[i]) })),
+        idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]) })),
+        idxExtras.map(i => batch[i]),
+      ]);
+      error = r.error; legacy = r.nivel > 0;
     }
     if (!error && idxBasico.length) {
       const r = await supabase.from('productos').upsert(idxBasico.map(i => batch[i]), { onConflict: 'id' });
       error = r.error;
     }
 
-    if (error) throw error;
+    if (error) return { error };
 
     // Limpiar la marca apenas se confirma la subida de ESTA tanda, no de
     // "todo lo pendiente" (ver comentario en clearProductosPendingSync).
@@ -246,7 +273,67 @@ export const syncProductos = async () => {
       await patchRegistros('productos', idxExtras.map(i => batch[i].id), { extrasPendientes: !!legacy, extrasDirty: false });
     }
   }
+  return { error: null };
+};
 
+// Sube por RPC con PIN de admin. Devuelve { ok, motivo?, faltaMigracion?, subidos, rechazados }.
+const subirProductosRpc = async (pendientes, cred) => {
+  const lotes = armarLotesProductosRpc(pendientes);
+  if (lotes.invalidos?.length) {
+    const inv = lotes.invalidos[0];
+    throw new Error(`syncProductos: id inválido para bigint (producto "${inv.nombre}" id=${String(inv.id)})`);
+  }
+  let subidos = 0;
+  const rechazados = [];
+  for (const lote of lotes) {
+    const { data, error } = await supabase.rpc('admin_guardar_productos', {
+      ...argsAdminProductos({ adminId: cred?.p_admin_id, adminPin: cred?.p_admin_pin }),
+      p_filas: lote.filas,
+    });
+    const r = interpretarGuardarProductos({ data, error });
+    if (!r.ok) {
+      return { ok: false, motivo: r.motivo, mensaje: r.mensaje, faltaMigracion: r.motivo === 'falta_migracion', subidos, rechazados };
+    }
+    const enLote = new Set(lote.ids);
+    const aceptados = r.aceptados.filter(id => enLote.has(id));
+    const limpiados = await clearProductosPendingSyncSiIgual(
+      aceptados, lote.huellas, { extrasPendientes: false, extrasDirty: false, syncRechazo: null },
+    );
+    subidos += limpiados.length;
+    for (const x of r.rechazados) {
+      if (!enLote.has(x.id)) continue;
+      rechazados.push(x);
+      await patchRegistros('productos', [x.id], { syncRechazo: x.motivo });
+    }
+  }
+  return { ok: true, subidos, rechazados };
+};
+
+export const syncProductos = async ({ cred = null } = {}) => {
+  const productos = await getProductos();
+  // extrasPendientes: se subio solo lo basico porque Supabase no tenia las
+  // columnas nuevas; se reintenta hasta que la migracion exista (bug B1).
+  const pendientes = productos.filter(p => p.pendingSync || p.extrasPendientes);
+
+  if (pendientes.length === 0) return { ok: true };
+
+  if (cred) {
+    const r = await subirProductosRpc(pendientes, cred);
+    if (r.ok) return { ok: true, subidos: r.subidos, rechazados: r.rechazados };
+    if (!r.faltaMigracion) return { ok: false, motivo: r.motivo, mensaje: r.mensaje, pendientes: pendientes.length };
+    // Sin la 007: camino directo de siempre.
+  } else if (escrituraDirectaCerrada) {
+    return { ok: true, requierePinAdmin: true, pendientes: pendientes.length };
+  }
+
+  const d = await subirProductosDirecto(pendientes);
+  if (d.error) {
+    if (!cred && esEscrituraDenegada(d.error)) {
+      escrituraDirectaCerrada = true;
+      return { ok: true, requierePinAdmin: true, pendientes: pendientes.length };
+    }
+    throw d.error;
+  }
   return { ok: true };
 };
 
@@ -440,6 +527,10 @@ export const syncClientes = async () => {
     // pendientes. Un reordenamiento desde "Orden" (vendedor, quiza con datos
     // viejos) sube solo lo basico y no pisa con NULL lo que cargo el admin.
     const conExtras = (b) => { const c = porId.get(b.id); return !!(c?.extrasDirty || c?.extrasPendientes); };
+    // REQ-COMR (AC-COMR-1): `comision` no viaja en NINGUNA fila (la excluye
+    // clienteExtraToRemote). PostgREST arma el upsert del lote con la unión de
+    // claves de todas las filas: si una sola la trajera, a las demás se les
+    // mandaría null. Sin la clave, el ON CONFLICT no toca la columna vieja.
     const batchCompleto = batch.map(b => (conExtras(b) ? { ...b, ...clienteExtraToRemote(porId.get(b.id)) } : b));
     const subirGrupos = async (filas, filasLegacy) => {
       const extras = filas.map((f, k) => [f, filasLegacy[k]]).filter(([, l]) => conExtras(l));
@@ -770,7 +861,10 @@ export const uploadSeedToSupabase = async () => {
       marca: p.marca ?? '', imagen_url: p.imagen_url ?? null,
     }));
     const { error } = await supabase.from('productos').upsert(batch, { onConflict: 'id' });
-    if (error) throw error;
+    if (error) {
+      if (esEscrituraDenegada(error)) throw new Error('La escritura directa de productos esta cerrada: usar "Subir productos" con PIN de admin.');
+      throw error;
+    }
     console.log(`Productos subidos: ${Math.min(i + 100, productos.length)}/${productos.length}`);
   }
 
@@ -835,7 +929,12 @@ export const downloadMaestros = async () => {
         // Revisor (no bloqueante 7): tambien los campos nuevos; si no, una
         // edicion solo de minimo/bulto/proveedor se pisaba con el remoto.
         (local.extrasDirty !== true) &&
-        Object.entries(productoExtraFromRemote(r, local)).every(([k, v]) => String(local[k] ?? '') === String(v ?? ''));
+        String(local.marca || '') === String(r.marca ?? local.marca ?? '') &&
+        // AC-VTA-5: defaults aplicados en ambos lados (undefined vs true no es diferencia).
+        Object.entries(productoExtraFromRemote(r, local)).every(([k, v]) => {
+          const l = k === 'bultoNombre' ? normalizarBultoNombre(local[k]) : (k === 'visibleTienda' ? local[k] !== false : local[k]);
+          return String(l ?? '') === String(v ?? '');
+        });
       if (!same) continue;
     }
 

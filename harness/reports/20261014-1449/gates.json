@@ -1,0 +1,55 @@
+{
+  "at": "2026-10-14T18:56:49.018Z",
+  "pass": true,
+  "gates": {
+    "unit-tests": {
+      "pass": true,
+      "summary": "1 skipped, 5 todo, 1805 passed, 1811 total",
+      "detail": "1 skipped, 5 todo, 1805 passed, 1811 total",
+      "ms": 7438
+    },
+    "coverage-domain": {
+      "pass": true,
+      "linesPct": 100,
+      "detail": "líneas 100% (mín 90%)",
+      "ms": 0
+    },
+    "traceability": {
+      "pass": true,
+      "total": 89,
+      "cubiertos": 89,
+      "faltan": [],
+      "detail": "89/89 AC con test",
+      "ms": 13
+    },
+    "build": {
+      "pass": true,
+      "detail": "ok",
+      "ms": 7602
+    },
+    "secret-scan": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin secretos",
+      "ms": 24
+    },
+    "security-rules": {
+      "pass": true,
+      "hits": [],
+      "detail": "sin hallazgos",
+      "ms": 15
+    },
+    "npm-audit": {
+      "pass": true,
+      "critical": [],
+      "high": [
+        "xlsx"
+      ],
+      "nuevosCrit": [],
+      "nuevosHigh": [],
+      "toolingOnly": 75,
+      "detail": "runtime critical: [] high: [xlsx] | tooling de build (no se publica): 75",
+      "ms": 6504
+    }
+  }
+}

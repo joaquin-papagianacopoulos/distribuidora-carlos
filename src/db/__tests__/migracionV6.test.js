@@ -1,7 +1,8 @@
 // S-COM-13 (iteracion 3): upgrade de IndexedDB v5 -> v6. Solo quita la
 // propiedad "pin" de los vendedores; no borra registros ni stores.
 describe('AC-SEC-4 S-COM-13 DB_VERSION 6 quita el PIN local sin borrar datos', () => {
-  const TODOS = ['productos', 'clientes', 'pedidos', 'vendedores', 'faltantes', 'deudas', 'proveedores', 'movimientosStock', 'ingresos', 'comisionesCierres', 'comisionesBorradores'];
+  // MOD (RUN 20261014-1449, AC-COMR-7): TODOS incluye el store de v7.
+  const TODOS = ['productos', 'clientes', 'pedidos', 'vendedores', 'faltantes', 'deudas', 'proveedores', 'movimientosStock', 'ingresos', 'comisionesCierres', 'comisionesBorradores', 'comisionesRubro'];
 
   const correr = async ({ oldVersion, vendedores, conTx = true }) => {
     jest.resetModules();
@@ -60,7 +61,8 @@ describe('AC-SEC-4 S-COM-13 DB_VERSION 6 quita el PIN local sin borrar datos', (
         { id: 3, remoteId: 9, nombre: 'Ana', permiso: 3, tienePin: false },
       ],
     });
-    expect(r.version).toBe(6);
+    // MOD (RUN 20261014-1449, AC-COMR-7): la versión actual pasó a 7.
+    expect(r.version).toBe(7);
     expect(r.filas).toEqual([
       { id: 1, remoteId: 7, nombre: 'Jorge', permiso: 1, zona: '', tienePin: true },
       { id: 2, remoteId: 8, nombre: 'Carlos', permiso: 2, tienePin: false },

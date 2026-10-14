@@ -94,18 +94,25 @@ describe('AC-SEC-2 validarCliente / validarProveedor', () => {
     expect(r.cliente.nombre.length).toBeLessThanOrEqual(120);
     expect(r.cliente.direccion.length).toBeLessThanOrEqual(160);
     expect(r.cliente.telefono).toMatch(/^\d{0,15}$/);
-    expect(r.cliente.comision).toBeNull();
-    expect(r.errores.comision).toBeTruthy();
+    // MOD (RUN 20261014-1449, AC-COMR-1): antes comision 'Infinity' quedaba null
+    // con error; ahora la comisión ni se valida ni se devuelve (no hay forma de
+    // que un valor hostil llegue al cliente).
+    expect(r.cliente).not.toHaveProperty('comision');
+    expect(r.errores).not.toHaveProperty('comision');
     expect(r.errores.cuit).toBeTruthy();
     expect(r.errores.fechaAlta).toBeTruthy();
     expect(r.errores.provincia).toBeTruthy();
     expect(r.errores.tipoIva).toBeTruthy();
   });
 
-  test('AC-SEC-2 comision negativa o mayor a 100 se rechaza', () => {
+  // MOD (RUN 20261014-1449, AC-COMR-1): antes estos valores daban error de
+  // comisión; ahora se ignoran: no se guardan en el cliente (validación movida
+  // a la tabla de % por vendedor y rubro, validarPctRubro).
+  test('AC-SEC-2 AC-COMR-1 comision negativa o mayor a 100 se ignora (no llega al cliente)', () => {
     for (const c of ['-1', '100.01', NaN, 'NaN']) {
       const r = validarCliente({ codigo: 'C1', nombre: 'X', direccion: 'Y', comision: c });
-      expect(r.errores.comision).toBeTruthy();
+      expect(r.errores).not.toHaveProperty('comision');
+      expect(r.cliente).not.toHaveProperty('comision');
     }
   });
 

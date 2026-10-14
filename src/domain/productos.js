@@ -1,10 +1,16 @@
 // src/domain/productos.js — REQ-PROD: alta de productos y cálculo de precios.
 import { texto, toNum, toInt, redondear2, claveUnica } from './validacion';
+import { normalizarRubro, resolverRubro } from './rubros';
+import { resolverMarca, normalizarMarca } from './marcas';
+import { validarUnidadVenta, VENTA_POR, BULTO_NOMBRES, ventaPorEfectivo, normalizarBultoNombre, parsearBooleano } from './unidadVenta';
 
 export const CAMPOS_PRODUCTO = [
   { key: 'codigo', label: 'Código', requerido: true },
   { key: 'nombre', label: 'Descripción', requerido: true },
-  { key: 'categoria', label: 'Rubro' },
+  // AC-COMR-3: el Rubro es un selector (rubros existentes + "Agregar rubro nuevo…").
+  { key: 'categoria', label: 'Rubro', tipo: 'rubro' },
+  // AC-VTA-1: la Marca es un selector (marcas existentes + "Agregar marca nueva…").
+  { key: 'marca', label: 'Marca', tipo: 'marca' },
   { key: 'proveedorId', label: 'Proveedor', tipo: 'proveedor' },
   { key: 'costoFinal', label: 'Costo final', tipo: 'number', prefijo: '$' },
   { key: 'descuento1', label: 'Descuento 1', tipo: 'number', sufijo: '%' },
@@ -13,6 +19,10 @@ export const CAMPOS_PRODUCTO = [
   { key: 'precio', label: 'Precio venta 1', tipo: 'number', prefijo: '$' },
   { key: 'precioVenta2', label: 'Precio venta 2', tipo: 'number', prefijo: '$' },
   { key: 'bultoX', label: 'Bulto x', tipo: 'number' },
+  // AC-VTA-1: unidad de venta. El precio cargado es siempre por unidad.
+  { key: 'ventaPor', label: 'Se vende por', opciones: VENTA_POR.map(v => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) })), tipo: 'ventaPor' },
+  { key: 'bultoNombre', label: 'Etiqueta del bulto', opciones: BULTO_NOMBRES, tipo: 'bultoNombre' },
+  { key: 'visibleTienda', label: 'Mostrar en tienda', tipo: 'booleano' },
   { key: 'minimoVenta', label: 'Mínimo venta', tipo: 'number' },
   { key: 'stock', label: 'Stock', tipo: 'number' },
 ];
@@ -41,12 +51,16 @@ const pct = (v, campo, errores, label) => {
  * Valida y normaliza un producto. `stock` se devuelve aparte: no se guarda en
  * el producto, se transforma en un movimiento (AC-PROD-3).
  */
-export const validarProducto = (form = {}, { existentes = [], proveedores = [], editId = null } = {}) => {
+// AC-COMR-4: con `rubros` (los existentes) el rubro se normaliza y, si ya
+// existe con otra escritura ("GOLOSINAS " vs "Golosinas"), se reutiliza la
+// existente. Sin `rubros`, solo se normaliza.
+export const validarProducto = (form = {}, { existentes = [], proveedores = [], editId = null, rubros = null, marcas = null } = {}) => {
   const errores = {};
   const p = {
     codigo: texto(form.codigo, 40),
     nombre: texto(form.nombre, 160),
-    categoria: texto(form.categoria, 60),
+    categoria: Array.isArray(rubros) ? resolverRubro(form.categoria, rubros).rubro : normalizarRubro(form.categoria),
+    marca: Array.isArray(marcas) ? resolverMarca(form.marca, marcas).marca : normalizarMarca(form.marca),
     proveedorId: form.proveedorId ? String(form.proveedorId) : null,
   };
   if (!p.codigo) errores.codigo = 'El código es obligatorio';
@@ -90,6 +104,13 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   p.bultoX = entero(form.bultoX, 'bultoX', 'Bulto x');
   p.minimoVenta = entero(form.minimoVenta, 'minimoVenta', 'Mínimo venta');
 
+  // AC-VTA-1: "bulto" exige bultoX > 1 (error en el campo Se vende por).
+  const uv = validarUnidadVenta({ ventaPor: form.ventaPor, bultoX: p.bultoX, bultoNombre: form.bultoNombre, visibleTienda: form.visibleTienda });
+  if (uv.errores.ventaPor) errores.ventaPor = uv.errores.ventaPor;
+  p.ventaPor = uv.valor.ventaPor;
+  p.bultoNombre = uv.valor.bultoNombre;
+  p.visibleTienda = uv.valor.visibleTienda;
+
   let stock = null;
   if (form.stock !== '' && form.stock != null) {
     stock = toInt(form.stock);
@@ -110,6 +131,13 @@ export const productoExtraToRemote = (p = {}) => ({
   minimo_venta: Number(p.minimoVenta) || 1,
 });
 
+// AC-VTA-5: columnas de la migración 006 (aparte de las de la 001 para poder escalonar el sync).
+export const productoVentaToRemote = (p = {}) => ({
+  venta_por: ventaPorEfectivo(p),
+  bulto_nombre: normalizarBultoNombre(p.bultoNombre),
+  visible_tienda: parsearBooleano(p.visibleTienda) === false ? false : true,
+});
+
 export const productoExtraFromRemote = (r = {}, local = {}) => {
   const pick = (col, key, def) => (r[col] !== undefined ? (r[col] ?? def) : (local?.[key] ?? def));
   return {
@@ -121,6 +149,10 @@ export const productoExtraFromRemote = (r = {}, local = {}) => {
     precioVenta2: Number(pick('precio_venta2', 'precioVenta2', 0)),
     bultoX: Number(pick('bulto_x', 'bultoX', 1)),
     minimoVenta: Number(pick('minimo_venta', 'minimoVenta', 1)),
+    // AC-VTA-5: columna ausente (sin 006) => valor local => default derivado.
+    ventaPor: pick('venta_por', 'ventaPor', undefined),
+    bultoNombre: normalizarBultoNombre(pick('bulto_nombre', 'bultoNombre', 'Bulto')),
+    visibleTienda: pick('visible_tienda', 'visibleTienda', true) !== false,
   };
 };
 

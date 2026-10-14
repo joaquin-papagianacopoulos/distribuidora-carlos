@@ -57,6 +57,10 @@
 -- igual que CONFIG_COMISIONES.criterioEntregado = 'entregado' en
 -- src/domain/comisiones.js. Si el dueño elige "A reparto", hay que cambiar
 -- JUNTOS la RPC (p.a_reparto) y CONFIG_COMISIONES.criterioEntregado ('aReparto').
+--
+-- REQ-COMR (RUN 20261014-1449): 005_comisiones_rubro.sql REDEFINE
+-- cerrar_comisiones y los triggers de inmutabilidad de esta 003. Si se vuelve
+-- a correr esta 003 después de la 005, hay que volver a correr la 005.
 
 begin;
 

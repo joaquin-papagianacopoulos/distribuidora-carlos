@@ -15,15 +15,17 @@
 // Comisiones con su PIN.
 import { supabase } from '../lib/supabase';
 import {
-  getPedidos, getClientes, getVendedores,
+  getPedidos, getClientes, getVendedores, getProductos,
   getComisionesCierres, putComisionCierreLocal, putComisionesCierresRemotos,
-  getComisionBorrador, putComisionBorrador,
+  getComisionBorrador, putComisionBorrador, getComisionesRubro,
 } from '../db';
-import { pullPedidosByRango, syncPedidosPendientes } from '../sync/syncService';
+import { pullPedidosByRango, syncPedidosPendientes, syncProductos, downloadMaestros } from '../sync/syncService';
 import {
   armarDashboard, construirCierre, cierreToRemote, firmaDashboard, validarAnulacion, cierresConAjustesDependientes,
   mezclarCierres, claveBorrador, borradorVacio, validarPeriodo, esPendienteDeServidor, contarPendientesServidor,
+  MODELO_VIGENTE,
 } from '../domain/comisiones';
+import { syncComisionesRubro, sondearMigracion005, MSG_FALTA_MIGRACION_005 } from './comisionesRubroService';
 import { getUsuarioSesion } from './sesion';
 import { esAdmin, validarPinIngresado } from '../domain/permisos';
 
@@ -94,15 +96,26 @@ export const cargarDatosComisiones = async (periodo, { online = navigator.onLine
       avisos.push(`No se pudieron bajar los cierres: ${e?.message || String(e)}`);
     }
   }
-  const [pedidos, clientes, vendedores, cierres, borrador] = await Promise.all([
+  // REQ-COMR (AC-COMR-7): ¿está la 005? Sin ella no se puede cerrar.
+  let faltaMigracion005 = false;
+  if (online) faltaMigracion005 = !!(await sondearMigracion005())?.faltaMigracion;
+  const [pedidos, clientes, vendedores, cierres, borrador, productos, tablaRubros] = await Promise.all([
     getPedidos(), getClientes(), getVendedores(), getComisionesCierres(), getComisionBorrador(claveBorrador(periodo)),
+    getProductos(), getComisionesRubro(),
   ]);
+  const tabla = tablaRubros || [];
   return {
     pedidos: pedidos || [],
     clientes: clientes || [],
     vendedores: vendedores || [],
     cierres: cierres || [],
     borrador: borrador || borradorVacio(periodo),
+    // REQ-COMR: el dashboard se arma SIEMPRE con el modelo vigente (por rubro).
+    modelo: MODELO_VIGENTE,
+    productos: productos || [],
+    tablaRubros: tabla,
+    pendientesRubro: tabla.filter(f => f?.pendingSync && !f?.obsoleto).length,
+    faltaMigracion005,
     incompleto,
     faltaMigracion,
     avisos,
@@ -155,6 +168,10 @@ export const mensajeRechazo = (motivo, conflictos = []) => {
     case 'montos_inconsistentes': return `El total o la comisión de ${conflictos.length} pedido(s) no coincide con el servidor. Actualizá y revisá.`;
     case 'ajuste_invalido': return `${conflictos.length} ajuste(s) no coinciden con lo que tiene el servidor. Actualizá y revisá.`;
     case 'totales_inconsistentes': return 'Los totales del cierre no coinciden con los pedidos. Actualizá y revisá.';
+    case 'monto_desbordado': return `${conflictos.length} pedido(s) tienen montos demasiado grandes (${conflictos.join(', ')}). Corregí esos pedidos y volvé a intentar.`;
+    case 'desglose_inconsistente': return `El desglose por rubro de ${conflictos.length} pedido(s) no coincide con el servidor (${conflictos.join(', ')}). Actualizá y revisá.`;
+    case 'modelo_obsoleto': return 'Actualizá la app: el cierre se calcula por vendedor y rubro.';
+    case 'cierre_invalido': return 'El cierre tiene un formato inválido. Actualizá la app y volvé a intentar.';
     default: return `El servidor rechazó el cierre (${motivo || 'sin motivo'}).`;
   }
 };
@@ -215,8 +232,21 @@ export const confirmarCierre = async ({ periodo, borrador = null, firmaVista = n
     return { ok: false, motivo: 'sync', mensaje: `Primero hay que subir los pedidos pendientes: ${e?.message || String(e)}` };
   }
 
+  // REQ-COMR (R4): productos y fichas frescos, y los % subidos y bajados con
+  // la MISMA credencial del cierre, antes de recalcular y comparar la firma.
+  try {
+    await syncProductos({ cred: cr.cred });
+    await downloadMaestros();
+  } catch (e) {
+    return { ok: false, motivo: 'sync', mensaje: `No se pudieron actualizar productos y clientes: ${e?.message || String(e)}` };
+  }
+  const sr = await syncComisionesRubro({ cred: cr.cred });
+  if (sr?.faltaMigracion) return { ok: false, motivo: 'falta_migracion_005', mensaje: MSG_FALTA_MIGRACION_005 };
+  if (sr && sr.ok === false) return { ok: false, motivo: sr.motivo || 'sync', mensaje: sr.mensaje || 'No se pudieron sincronizar los % de comisión.' };
+
   const datos = await cargarDatosComisiones(periodo, { online: true });
   if (datos.faltaMigracion) return { ok: false, motivo: 'falta_migracion', mensaje: MSG_FALTA_MIGRACION };
+  if (datos.faltaMigracion005) return { ok: false, motivo: 'falta_migracion_005', mensaje: MSG_FALTA_MIGRACION_005 };
   if (datos.incompleto) return { ok: false, motivo: 'datos_incompletos', mensaje: datos.avisos.join(' ') || 'No se pudieron actualizar los datos del período.' };
 
   const dashboard = armarDashboard({ ...datos, borrador: borrador || datos.borrador, periodo });

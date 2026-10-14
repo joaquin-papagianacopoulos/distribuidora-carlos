@@ -89,3 +89,21 @@ describe('AC-BUL-9 dominio: unidad por defecto y "+ Bulto"', () => {
     expect(quitarMarcasRenglones(undefined)).toEqual([]);
   });
 });
+
+// REQ-COMR (RUN 20261014-1449): el renglón guarda el rubro del producto en ese momento.
+describe('AC-COMR-5 renglonNuevo guarda el rubro normalizado del producto', () => {
+  test('AC-COMR-5 con categoria " golosinas  " => rubro "golosinas"; cambiar después el producto no cambia el renglón', () => {
+    const producto = { id: 'p1', nombre: 'Alfajor', precio: 10, categoria: ' golosinas  ' };
+    const r = renglonNuevo(producto);
+    expect(r.rubro).toBe('golosinas');
+    producto.categoria = 'Kiosco';
+    expect(r.rubro).toBe('golosinas');
+  });
+
+  test('AC-COMR-5 sin categoria (o vacía / no texto) no agrega la clave rubro', () => {
+    expect(renglonNuevo({ id: 'p1', nombre: 'Coca', precio: 10 })).not.toHaveProperty('rubro');
+    expect(renglonNuevo({ id: 'p1', categoria: '   ' })).not.toHaveProperty('rubro');
+    expect(renglonNuevo({ id: 'p1', categoria: { x: 1 } })).not.toHaveProperty('rubro');
+    expect(renglonNuevo(null)).not.toHaveProperty('rubro');
+  });
+});

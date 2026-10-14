@@ -39,8 +39,8 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
   it('AC-PLA-1 productos: mismas etiquetas, mismo orden y mismas keys que ProductoForm (CAMPOS_PRODUCTO)', () => {
     expect(COLUMNAS_PLANTILLA.productos.map(c => c.label)).toEqual(LABELS_P);
     expect(COLUMNAS_PLANTILLA.productos.map(c => c.key)).toEqual(CAMPOS_PRODUCTO.map(c => c.key));
-    expect(LABELS_P).toEqual(['Código', 'Descripción', 'Rubro', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Mínimo venta', 'Stock']);
+    expect(LABELS_P).toEqual(['Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
+      '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']);
     expect(NOMBRE_ARCHIVO_PLANTILLA.productos).toBe('plantilla_productos.xlsx');
   });
 
@@ -59,8 +59,10 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
     expect(CAMPOS_EXCLUIDOS_PLANTILLA.clientes).toEqual(['comision']);
     expect(CAMPOS_EXCLUIDOS_PLANTILLA.productos).toEqual([]);
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.key)).not.toContain('comision');
-    // El formulario sigue teniendo los 17 (AC-CLI-1): solo la plantilla la saca.
-    expect(CAMPOS_CLIENTE.map(c => c.key)).toContain('comision');
+    // MOD (RUN 20261014-1449, AC-COMR-1/2): antes el formulario seguía teniendo
+    // 'comision' (17); ahora tampoco la tiene (16) y 'comision' queda solo
+    // como alias legacy en CAMPOS_EXCLUIDOS_PLANTILLA.
+    expect(CAMPOS_CLIENTE.map(c => c.key)).not.toContain('comision');
     const p = armarPlantilla('clientes');
     expect(p.hojas[0].filas[0]).toHaveLength(16);
     expect(p.hojas.flatMap(h => h.filas).flat().some(c => /comisi[oó]n/i.test(String(c)))).toBe(false);
@@ -232,15 +234,18 @@ describe('AC-PLA-4 validación por fila de clientes', () => {
     expect(r.ok).toBe(true);
     expect(r.valor).toMatchObject({
       codigo: '0042', provincia: 'Córdoba', tipoIva: 'Responsable Inscripto', cuit: '20-12345678-6',
-      telefono: '3415551234', vendedor: 'Juan Pérez', comision: null, fechaAlta: '2026-10-12', pais: 'Argentina',
+      telefono: '3415551234', vendedor: 'Juan Pérez', fechaAlta: '2026-10-12', pais: 'Argentina',
     });
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null en el alta; ahora la clave no existe.
+    expect(r.valor).not.toHaveProperty('comision');
   });
 
   it('AC-PLA-4 la comisión del archivo no se valida ni se toma (alta: null; actualización: la de la ficha)', () => {
     // Un valor fuera de rango ya no rechaza la fila: se ignora.
     const alta = validarFilaCliente({ codigo: 'N9', nombre: 'A', direccion: 'B', comision: '150' }, ctx);
     expect(alta.ok).toBe(true);
-    expect(alta.valor.comision).toBeNull();
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes alta.valor.comision era null; ahora la clave no existe.
+    expect(alta.valor).not.toHaveProperty('comision');
     const upd = validarFilaCliente({ codigo: '0010', nombre: 'Kiosco Pepe', direccion: 'Mitre 1', comision: '99' }, { ...ctx, existente: CLIENTES[0] });
     expect(upd.ok).toBe(true);
     expect(upd.valor).not.toHaveProperty('comision');
@@ -428,7 +433,11 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-6 armado de la plantilla', () => {
 });
 
 describe('AC-PLA-4 columna "Comisión" en el archivo de clientes se ignora y se avisa', () => {
-  const LABELS_CON_COMISION = CAMPOS_CLIENTE.map(c => c.label); // 17, como un archivo viejo
+  // MOD (RUN 20261014-1449, AC-COMR-2): antes salía de CAMPOS_CLIENTE (17);
+  // ahora CAMPOS_CLIENTE no tiene Comisión, así que el archivo viejo se arma
+  // explícito: las 16 etiquetas con 'Comisión' en su lugar original.
+  const LABELS_C16 = CAMPOS_CLIENTE.map(c => c.label);
+  const LABELS_CON_COMISION = [...LABELS_C16.slice(0, 13), 'Comisión', ...LABELS_C16.slice(13)];
   const filaCC = (obj) => LABELS_CON_COMISION.map(l => obj[l] ?? '');
 
   it('AC-PLA-4 mapearEncabezados: "Comisión" va a excluidas (no a indices ni a ignoradas)', () => {
@@ -452,8 +461,9 @@ describe('AC-PLA-4 columna "Comisión" en el archivo de clientes se ignora y se 
     expect(plan.excluidas).toEqual(['Comisión']);
     expect(plan.ignoradas).toEqual([]);
     expect(plan.entradas.map(e => e.accion)).toEqual(['crear', 'actualizar', 'crear']);
-    expect(plan.entradas[0].valor.comision).toBeNull();
-    expect(plan.entradas[2].valor.comision).toBeNull();
+    // MOD (RUN 20261014-1449, AC-COMR-2): antes las altas traían comision: null; ahora no traen la clave.
+    expect(plan.entradas[0].valor).not.toHaveProperty('comision');
+    expect(plan.entradas[2].valor).not.toHaveProperty('comision');
     expect(plan.entradas[1].valor).not.toHaveProperty('comision');
     expect({ ...CLIENTES[0], ...plan.entradas[1].valor }.comision).toBe(3);
     expect(plan.resumen).toMatchObject({ creados: 2, actualizados: 1, rechazados: 0, columnasExcluidas: ['Comisión'] });
@@ -463,7 +473,8 @@ describe('AC-PLA-4 columna "Comisión" en el archivo de clientes se ignora y se 
     const rows = [['Código cliente', 'Razón social', 'Domicilio de entrega', 'Comisión'], ['0099', 'Nuevo', 'X', '5']];
     const plan = planificarImportacion(rows, 'clientes', { existentes: [], now: NOW });
     const txt = textoResumen(plan.resumen);
-    expect(txt).toBe('✓ 1 creado, 0 actualizados. La columna "Comisión" se ignoró: la comisión se carga solo desde la ficha del cliente.');
+    // MOD (RUN 20261014-1449, AC-COMR-2): texto nuevo; el viejo ("desde la ficha del cliente") quedó falso.
+    expect(txt).toBe('✓ 1 creado, 0 actualizados. La columna "Comisión" se ignoró: ahora la comisión se carga por vendedor y rubro (Configuración → Vendedores).');
     // Sin la columna, el texto es el de siempre.
     const sin = planificarImportacion([['Código cliente', 'Razón social', 'Domicilio de entrega'], ['0099', 'Nuevo', 'X']], 'clientes', { now: NOW });
     expect(sin.resumen.columnasExcluidas).toEqual([]);
@@ -509,5 +520,62 @@ describe('AC-PLA-5 AC-PROD-3 C9 stock inicial fallido en una importación parcia
     expect(resumirEntradas([{ accion: 'actualizar', stockFallido: true }]).stockFallido).toEqual([]);
     expect(resumirEntradas(null)).toMatchObject({ creados: 0, stockFallido: [] });
     expect(textoResumen({ creados: 1, stockFallido: 'x' })).toBe('✓ 1 creado, 0 actualizados.');
+  });
+});
+
+// REQ-COMR (RUN 20261014-1449): plantillas e importación sin la comisión del
+// cliente (AC-COMR-2) y con el Rubro de productos normalizado (AC-COMR-4).
+describe('AC-COMR-2 AC-COMR-4 plantillas con el modelo por vendedor y rubro', () => {
+  it('AC-COMR-2 la plantilla de clientes no tiene Comisión: 16 columnas = CAMPOS_CLIENTE', () => {
+    expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(CAMPOS_CLIENTE.map(c => c.label));
+    expect(armarPlantilla('clientes').hojas[0].filas[0]).toHaveLength(16);
+  });
+
+  it('AC-COMR-2 un Excel viejo con "Comisión" se importa, avisa (informativo, texto nuevo) y no pisa la comision de existentes', () => {
+    const rows = [
+      ['Código cliente', 'Razón social', 'Domicilio de entrega', '% Comisión'],
+      ['0010', 'Kiosco Pepe', 'Mitre 9', '99'],
+      ['0500', 'Nuevo', 'Calle 1', '7'],
+    ];
+    const plan = planificarImportacion(rows, 'clientes', { existentes: CLIENTES, vendedores: VENDEDORES, now: NOW });
+    expect(plan.ok).toBe(true);
+    expect(plan.excluidas).toEqual(['% Comisión']);
+    expect(plan.resumen).toMatchObject({ creados: 1, actualizados: 1, rechazados: 0 });
+    for (const e of plan.entradas) expect(e.valor).not.toHaveProperty('comision');
+    expect({ ...CLIENTES[0], ...plan.entradas[0].valor }.comision).toBe(3);
+    expect(textoResumen(plan.resumen)).toContain('ahora la comisión se carga por vendedor y rubro (Configuración → Vendedores)');
+  });
+
+  it('AC-COMR-4 importación de productos: "golosinas" / "GOLOSINAS " se canonizan a la escritura existente', () => {
+    const existentes = [...PRODUCTOS, { id: 9, nombre: 'Alfajor', codigo: 'AL', precio: 5, categoria: 'Golosinas', createdAt: 1 }];
+    const rows = [
+      ['Código', 'Descripción', 'Rubro', 'Precio venta 1'],
+      ['N1', 'Chupetín', 'golosinas', '10'],
+      ['N2', 'Caramelo', ' GOLOSINAS ', '10'],
+      ['N3', 'Turrón', 'Golosínas', '10'],
+    ];
+    const plan = planificarImportacion(rows, 'productos', { existentes, proveedores: PROVEEDORES, now: NOW });
+    expect(plan.entradas.map(e => e.valor.producto.categoria)).toEqual(['Golosinas', 'Golosinas', 'Golosinas']);
+  });
+
+  it('AC-COMR-4 rubros nuevos dentro del mismo archivo también se deduplican (gana la primera escritura)', () => {
+    const rows = [
+      ['nombre', 'precio', 'categoria'],
+      ['Leche', '10', 'lácteos'],
+      ['Yogur', '20', 'LACTEOS  '],
+      ['Queso', '30', 'Lacteos'],
+      ['Sin rubro', '40', ''],
+    ];
+    const plan = planificarImportacion(rows, 'productos', { existentes: [], now: NOW });
+    expect(plan.modo).toBe('legacy');
+    expect(plan.entradas.map(e => e.valor.producto.categoria)).toEqual(['lácteos', 'lácteos', 'lácteos', '']);
+    // archivo viejo con la misma descripción repetida: se fusiona y también canoniza
+    const fus = planificarImportacion([['nombre', 'precio', 'categoria'], ['Leche', '10', 'Lácteos'], ['Leche', '11', 'LACTEOS']], 'productos', { existentes: [], now: NOW });
+    expect(fus.entradas[0].valor.producto).toMatchObject({ precio: 11, categoria: 'Lácteos' });
+  });
+
+  it('AC-COMR-4 validarFilaProducto sin lista de rubros solo normaliza (y respeta csvSafe)', () => {
+    expect(validarFilaProducto({ codigo: 'X', nombre: 'A', categoria: '  Bebidas   frías ', precio: '1' }).valor.producto.categoria).toBe('Bebidas frías');
+    expect(validarFilaProducto({ codigo: 'X', nombre: 'A', categoria: 'bebidas', precio: '1' }, { rubros: ['Bebidas'] }).valor.producto.categoria).toBe('Bebidas');
   });
 });
