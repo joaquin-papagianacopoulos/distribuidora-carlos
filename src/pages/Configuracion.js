@@ -8,6 +8,7 @@ import {
   updateCliente, putProveedor, deleteProveedor,
 } from '../db';
 import ClienteForm from '../components/ClienteForm';
+import LinksTienda from '../components/LinksTienda';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
 import ComisionRubroGrid from '../components/ComisionRubroGrid';
@@ -813,6 +814,9 @@ const Configuracion = () => {
           </div>
         ))}
       </div>
+
+      {/* REQ-WEB (AC-WEB-7): links de tienda por vendedor */}
+      {tab === 'vendedores' && <LinksTienda vendedores={filtrarActivos(vendedores)} online={!!online} />}
 
       {/* REQ-COMR (AC-COMR-6): % de comisión por rubro del vendedor */}
       {rubroVendedor && tab === 'vendedores' && (

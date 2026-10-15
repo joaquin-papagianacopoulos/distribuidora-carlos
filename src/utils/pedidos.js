@@ -3,6 +3,8 @@ const ESTADOS_OCULTOS = new Set(['cancelado', 'eliminado', 'borrado']);
 export const isPedidoOculto = (pedido) => {
   if (!pedido) return true;
   if (pedido.borrado) return true;
+  // REQ-WEB (AC-WEB-1): un pedido web que no fue aceptado no entra al flujo interno.
+  if (pedido.origen === 'web' && pedido.webEstado !== 'aceptado') return true;
   return ESTADOS_OCULTOS.has(String(pedido.estado || '').toLowerCase());
 };
 

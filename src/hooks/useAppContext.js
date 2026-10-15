@@ -28,6 +28,7 @@ import {
   syncDeudas,
   syncProductos,
   syncClientes,
+  pullPedidosWebPorRevisar,
 } from '../sync/syncService';
 
 const AppContext = createContext(null);
@@ -266,6 +267,18 @@ export const AppProvider = ({ children }) => {
           const msg = e?.message || String(e);
           console.warn('syncComisiones fallo (se reintenta en el proximo sync):', msg);
           setSyncError(`syncComisiones: ${msg}`);
+        }
+      }
+
+      // Pedidos web por revisar (REQ-WEB, AC-WEB-6): solo admin, sin limite de fecha.
+      if (Number(vendedorActual?.permiso || 2) === 1) {
+        step = 'pullPedidosWeb';
+        try {
+          await pullPedidosWebPorRevisar();
+        } catch (e) {
+          const msg = e?.message || String(e);
+          console.warn('pullPedidosWeb fallo (se reintenta en el proximo sync):', msg);
+          setSyncError(`pullPedidosWeb: ${msg}`);
         }
       }
 

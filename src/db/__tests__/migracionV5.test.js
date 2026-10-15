@@ -39,8 +39,9 @@ describe('AC-COM-16 DB_VERSION 5 migra sin borrar datos de v4', () => {
   // comisionesRubro (v7). Sigue sin borrar ni vaciar nada.
   it('AC-COM-16 AC-COMR-7 desde v4 crea solo comisionesCierres, comisionesBorradores y comisionesRubro y no borra ni vacía nada', async () => {
     const r = await correrUpgrade(V4);
-    expect(r.version).toBe(7);
-    expect(r.creados.map(c => c[0]).sort()).toEqual(['comisionesBorradores', 'comisionesCierres', 'comisionesRubro']);
+    // MOD (RUN 20261014-2100, REQ-WEB): la versión pasó a 8 y suma pedidosWebAcciones.
+    expect(r.version).toBe(8);
+    expect(r.creados.map(c => c[0]).sort()).toEqual(['comisionesBorradores', 'comisionesCierres', 'comisionesRubro', 'pedidosWebAcciones']);
     expect(r.creados.every(c => c[1].keyPath === 'id' && !c[1].autoIncrement)).toBe(true);
     expect(r.borrados).toEqual([]);
     expect(r.clears).toEqual([]);
@@ -48,7 +49,7 @@ describe('AC-COM-16 DB_VERSION 5 migra sin borrar datos de v4', () => {
 
   it('AC-COM-16 es idempotente: si los stores ya existen no vuelve a crear nada', async () => {
     // MOD (RUN 20261014-1449, AC-COMR-7): comisionesRubro se suma a los existentes.
-    const r = await correrUpgrade([...V4, 'comisionesCierres', 'comisionesBorradores', 'comisionesRubro']);
+    const r = await correrUpgrade([...V4, 'comisionesCierres', 'comisionesBorradores', 'comisionesRubro', 'pedidosWebAcciones']);
     expect(r.creados).toEqual([]);
     expect(r.borrados).toEqual([]);
   });

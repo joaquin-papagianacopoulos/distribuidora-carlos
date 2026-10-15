@@ -6,6 +6,7 @@ import { detectarMarca } from '../utils/brands';
 import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
 import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote } from '../domain/productos';
 import { normalizarBultoNombre } from '../domain/unidadVenta';
+import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
 
 import { pedidoEntregaToRemote, pedidoEntregaFromRemote, sinColumnasEntrega } from '../domain/comisiones';
 import { esColumnaInexistente, esEscrituraDenegada } from './tolerancia';
@@ -66,6 +67,8 @@ import {
   putClientesBatch,
   putVendedoresBatch,
   patchRegistros,
+  getPedidosWebAcciones,
+  putPedidosWebAccionesRaw,
 } from '../db';
 
 const RECENT_LOCAL_PROTECTION_MS = 10 * 60 * 1000;
@@ -125,6 +128,8 @@ const mapPedidoRemoto = (r, local = null) => {
     deudaGenerada: r.deuda_generada !== undefined ? !!r.deuda_generada : !!local?.deudaGenerada,
     // Entregado (REQ-COM, AC-COM-1): tolerante a columnas faltantes y a marcas locales sin subir.
     ...pedidoEntregaFromRemote(r, local),
+    // REQ-WEB: origen y datos de la bandeja "Pedidos web" (tolerante a columnas faltantes).
+    ...pedidoWebFromRemote(r, local),
     borrado: ['cancelado', 'eliminado', 'borrado'].includes(String(estado).toLowerCase()),
     synced: true,
     createdAt: local?.createdAt ?? Date.now(),
@@ -500,6 +505,137 @@ export const syncPedidosPendientes = async () => {
   await patchRegistros('pedidos', subidos.filter(id => !entregaPorId.get(id)), { entregaPendiente: false });
 
   return { ok: true, count: results.length, remaining: Math.max(0, pendientesActivos.length - MAX_PER_RUN) };
+};
+
+// ---- PEDIDOS WEB (REQ-WEB) ----
+// Baja a la bandeja los pedidos web por revisar (sin limite de fecha) y refresca
+// los locales todavia no resueltos. Tolera que la migracion 008 no este aplicada.
+const traerPedidosPorIds = async (ids) => {
+  const filas = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase.from('pedidos').select('*').in('id', ids.slice(i, i + 100));
+    if (error) throw error;
+    filas.push(...(data || []));
+  }
+  return filas;
+};
+
+const guardarPedidosWebRemotos = async (filas) => {
+  const locales = await getPedidos();
+  const byRemoteId = new Map(locales.filter(p => p.remoteId).map(p => [p.remoteId, p]));
+  const upserts = [];
+  for (const r of filas) {
+    const local = byRemoteId.get(r.id);
+    if (local && !local.synced) continue;
+    upserts.push(mapPedidoRemoto(r, local));
+  }
+  await putPedidosRemotosSinPisarLocales(upserts);
+  return upserts.length;
+};
+
+export const pullPedidosWebPorIds = async (ids) => {
+  const lista = [...new Set((ids || []).filter(x => x !== null && x !== undefined))];
+  if (lista.length === 0) return { ok: true, count: 0 };
+  return { ok: true, count: await guardarPedidosWebRemotos(await traerPedidosPorIds(lista)) };
+};
+
+export const pullPedidosWebPorRevisar = async () => {
+  const PAGE = 500;
+  let filas = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('pedidos').select('*')
+      .eq('origen', 'web').eq('web_estado', 'por_revisar')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) {
+      if (esColumnaInexistente(error)) return { ok: true, skipped: true };
+      throw error;
+    }
+    filas = filas.concat(data || []);
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  // Refrescar los locales que seguian por revisar (otro admin pudo resolverlos).
+  const vistos = new Set(filas.map(r => r.id));
+  const locales = await getPedidos();
+  const aRefrescar = locales
+    .filter(p => p.origen === 'web' && p.remoteId != null && !vistos.has(p.remoteId) && (p.webEstado || 'por_revisar') === 'por_revisar')
+    .map(p => p.remoteId);
+  if (aRefrescar.length) filas = filas.concat(await traerPedidosPorIds(aRefrescar));
+  return { ok: true, count: await guardarPedidosWebRemotos(filas) };
+};
+
+// Sube las acciones aceptar/rechazar pendientes con la credencial del admin
+// ({ p_admin_id, p_admin_pin }, solo en memoria). Se limpia pendingSync SOLO de la
+// accion resuelta. 'ya_resuelto' no se reintenta: el servidor manda.
+export const syncPedidosWeb = async ({ cred = null } = {}) => {
+  const todas = await getPedidosWebAcciones();
+  const pendientes = todas.filter(a => a.pendingSync).sort((a, b) => (a.at || 0) - (b.at || 0));
+  if (pendientes.length === 0) return { ok: true, count: 0, pendientes: 0 };
+  if (!cred) return { ok: true, count: 0, pendientes: pendientes.length, requierePinAdmin: true };
+
+  const clientes = await getClientes();
+  const resueltos = [];
+  let esperando = 0;
+  for (const a of pendientes) {
+    if (a.tipo === 'aceptar' && a.clienteId !== null && a.clienteId !== undefined) {
+      const cl = clientes.find(c => String(c.id) === String(a.clienteId));
+      // El cliente nuevo tiene que estar subido antes de vincularlo.
+      if (cl && (cl.pendingSync || cl.extrasPendientes)) { esperando++; continue; }
+    }
+    const { data, error } = await supabase.rpc('admin_resolver_pedido_web', accionWebToRpc(a, { adminId: cred.p_admin_id, pin: cred.p_admin_pin }));
+    if (error) {
+      if (['PGRST202', '42883'].includes(String(error.code))) return { ok: false, faltaMigracion: true, count: resueltos.length, pendientes: pendientes.length };
+      throw error;
+    }
+    if (!data || typeof data !== 'object') throw new Error('admin_resolver_pedido_web: respuesta inesperada');
+    if (data.ok === false && data.motivo === 'no_autorizado') return { ok: false, motivo: 'no_autorizado', count: resueltos.length, pendientes: pendientes.length };
+    let resultado = 'ok';
+    let detalle = null;
+    if (data.ok === false) {
+      resultado = data.motivo === 'ya_resuelto' ? 'ya_resuelto' : 'error';
+      detalle = { motivo: data.motivo, estado: data.estado ?? null, revisadoPor: data.revisado_por ?? null, clienteId: data.cliente_id ?? null };
+    }
+    await putPedidosWebAccionesRaw([{ ...a, pendingSync: false, resultado, detalle, updatedAt: Date.now() }]);
+    resueltos.push(a.pedidoRemoteId);
+  }
+  if (resueltos.length) await pullPedidosWebPorIds(resueltos);
+  return { ok: true, count: resueltos.length, pendientes: pendientes.length - resueltos.length, esperando };
+};
+
+// S-WEB-01: el contacto del consumidor final NO viaja en pedidos (anon key). Se baja
+// con la RPC admin_listar_pedidos_web (PIN del admin, solo en memoria) para los pedidos
+// web por revisar que todavia no tienen contacto local. Si falla, no se pisa nada.
+export const pullContactosPedidosWeb = async ({ cred = null } = {}) => {
+  const locales = await getPedidos();
+  const faltan = locales.filter(p => p.origen === 'web' && p.remoteId != null && !p.webContacto
+    && (p.webEstado || 'por_revisar') === 'por_revisar');
+  if (faltan.length === 0) return { ok: true, count: 0 };
+  if (!cred) return { ok: false, motivo: 'pin_requerido', count: 0, faltan: faltan.length };
+  let count = 0;
+  for (let i = 0; i < faltan.length; i += 100) {
+    const lote = faltan.slice(i, i + 100);
+    const { data, error } = await supabase.rpc('admin_listar_pedidos_web', {
+      p_admin_id: cred.p_admin_id, p_admin_pin: cred.p_admin_pin, p_ids: lote.map(p => String(p.remoteId)),
+    });
+    if (error) {
+      if (['PGRST202', '42883'].includes(String(error.code))) return { ok: false, faltaMigracion: true, count, faltan: faltan.length - count };
+      return { ok: false, motivo: 'red', count, faltan: faltan.length - count };
+    }
+    if (!data || typeof data !== 'object') return { ok: false, motivo: 'respuesta', count, faltan: faltan.length - count };
+    if (data.ok === false) return { ok: false, motivo: data.motivo === 'no_autorizado' ? 'no_autorizado' : 'error', count, faltan: faltan.length - count };
+    const contactos = data.contactos && typeof data.contactos === 'object' ? data.contactos : {};
+    for (const p of lote) {
+      const c = contactos[String(p.remoteId)];
+      if (c && typeof c === 'object') {
+        await patchRegistros('pedidos', [p.id], { webContacto: c });
+        count++;
+      }
+    }
+  }
+  return { ok: true, count };
 };
 
 export const syncClientes = async () => {

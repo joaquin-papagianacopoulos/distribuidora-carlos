@@ -329,3 +329,93 @@ Ejemplo de referencia (tiene que estar en los tests): **Dos Corazones**, precio 
 
 ### A confirmar con el dueño (no bloquea, el arquitecto lo deja anotado)
 - AC-VTA-3: ¿el vendedor puede cargar unidades sueltas de un producto "solo por display" en la app interna? (por ahora: no, solo el admin en Facturación).
+
+---
+
+## REQ-TIE — Tienda pública: catálogo, carrito y checkout
+
+> Pedido del dueño 2026-10-14 (`harness/pedidos/2026-10-14_REQ-TIE.md`). Corrida 2 de 3: va junto con REQ-WEB (el pedido web necesita su bandeja). Depende de REQ-VTA (ya implementado) y de la normalización de rubros de REQ-COMR. REQ-POR (portada, banners, ofertas, personalización) es la corrida siguiente: mientras tanto la tienda usa defaults (nombre/logo/colores fijos, sin ofertas) y la config mínima de AC-TIE-2/AC-TIE-7/AC-TIE-15 vive en `tienda_config` con valores por defecto. Las secciones **Supabase** y **Tests y revisión** (compartidas con REQ-WEB) están al final de REQ-WEB.
+
+### Visión
+
+Una tienda tipo Mercado Libre (catálogo, buscador, filtros, carrito y checkout) a la que los clientes entran **por una URL distinta** a la de la app interna, **sin login**. El cliente arma su pedido, completa nombre, dirección y ciudad, y el pedido **cae en la app de la distribuidora** (bandeja "Pedidos web") con la fecha del día, sus renglones y el vendedor del link.
+
+### Decisiones (tienda)
+
+| Tema | Decisión |
+|---|---|
+| Arquitectura | **Mismo repo, mismo deploy y mismo Supabase**, pero **otra URL** de entrada. La tienda es un bundle separado por code-splitting (`React.lazy`) que **no** importa IndexedDB, sync, sesión ni pantallas internas |
+| URL | La tienda se sirve en `/tienda` **y** en la raíz de cualquier hostname listado en `REACT_APP_TIENDA_HOSTS` (ej. `tienda.midominio.com`, que apunta al mismo deploy). En un host de tienda **no** se puede llegar a la app interna |
+| Ingreso del pedido | A una bandeja **"Pedidos web"** como *por revisar*. El admin lo vincula a un cliente existente o crea uno, y recién ahí pasa al flujo normal |
+| Vendedor | **Link por vendedor**: `/tienda?v=<token>`. El pedido entra a nombre de ese vendedor. El link general (sin `v`) entra sin vendedor y se asigna al vendedor de la ficha del cliente al vincularlo (o el admin elige) |
+| Precio | Se muestra **Precio venta 1** (`precio`). Nunca se exponen costo, descuentos de compra, ganancia ni precio venta 2 |
+| Stock | No se muestra la cantidad. Producto sin stock disponible → "Sin stock", no se puede agregar (el admin puede desactivar esta regla en la configuración de la tienda) |
+| Precio unitario vs bulto | El precio cargado es **por unidad**. Un producto vendido por display/bulto muestra el precio unitario y el precio del bulto = precio × `bultoX` |
+| Seguridad | Todo lo público pasa por **RPC `security definer`** en Supabase. El rol `anon` no lee ni escribe tablas directamente. El servidor **recalcula** precios, bultos y totales: nunca confía en lo que manda el navegador |
+
+
+### Acceso y estructura
+- **AC-TIE-1** `/tienda` (y la raíz de un host de `REACT_APP_TIENDA_HOSTS`) muestra la tienda **sin login**. El bundle de la tienda no incluye código de IndexedDB, sync, sesión ni pantallas internas (verificable por test de imports o análisis del build). En un host de tienda, cualquier otra ruta muestra la tienda, nunca la app interna.
+- **AC-TIE-2** La tienda tiene su propio `<title>`, favicon/logo y colores de la configuración (REQ-POR). No ofrece instalar la PWA interna ni registra el service worker de la app interna; el SW existente no rompe ni cachea mal la tienda.
+- **AC-TIE-3** El catálogo se pide con una RPC pública (`tienda_catalogo`) que devuelve **solo**: id, código, nombre, marca, rubro, imagen, precio (venta 1, o el de oferta vigente), `ventaPor`, `bultoX`, `bultoNombre`, `minimoVenta` y un booleano `disponible`. Solo productos con `visibleTienda`, no borrados y con precio > 0. Un test/auditoría verifica que `anon` no puede leer `productos`, `clientes`, `pedidos`, `vendedores` ni `movimientos_stock` directamente.
+
+### Navegación tipo Mercado Libre
+- **AC-TIE-4** Encabezado fijo con logo, buscador y carrito con contador. Diseño mobile-first (usable a 360 px, sin scroll horizontal) y grilla de 2–5 columnas según el ancho.
+- **AC-TIE-5** Buscador por nombre (y código/marca), sin distinguir mayúsculas ni tildes, que tolera palabras en cualquier orden ("corazones dos" encuentra "Dos Corazones"). Con debounce; no dispara una consulta al servidor por tecla (filtra el catálogo ya descargado).
+- **AC-TIE-6** Filtros por **rubro** y **marca** (selección múltiple, con contador de productos), combinables con la búsqueda; orden por relevancia, precio ↑/↓ y nombre. En celular, los filtros van en un panel desplegable. Los filtros activos quedan en la URL (se pueden compartir y sobreviven a recargar).
+- **AC-TIE-7** Tarjeta de producto: imagen (o placeholder), nombre, marca, precio por unidad y, si se vende por bulto, "Display x16 · $14.400". Botón "Agregar". Producto no disponible → "Sin stock", botón deshabilitado (salvo que la tienda permita pedir sin stock).
+- **AC-TIE-8** Detalle de producto (ruta propia, compartible) con imagen grande, datos, selector de cantidad y productos del mismo rubro.
+
+### Carrito
+- **AC-TIE-9** Selector de cantidad según `ventaPor`: `unidad` → unidades; `bulto` → bultos ("1 Display = 16 u."); `ambos` → el cliente elige "Unidad" o "Display x16" (en el carrito pueden convivir un renglón por unidades y otro por bultos del mismo producto, o se unifican en unidades: el arquitecto elige y lo documenta). Respeta `minimoVenta`.
+- **AC-TIE-10** El carrito muestra cada renglón (cantidad, unidades equivalentes, precio, subtotal), permite cambiar cantidad y quitar, y muestra el total. Persiste en `localStorage` (con try/catch; si falla, funciona en memoria) y se descarta si pasó más de 7 días.
+- **AC-TIE-11** Cálculo de carrito (subtotales, total, unidades equivalentes, validaciones de mínimo y múltiplos) son funciones puras en `src/domain/tienda.js` con tests — **la misma lógica que usa el servidor** está documentada y probada con los mismos casos.
+
+### Checkout
+- **AC-TIE-12** Formulario: Nombre o razón social\*, Teléfono/WhatsApp\*, Dirección de entrega\*, Ciudad\*, Código postal, Provincia (lista de REQ-CLI), CUIT (opcional, validado con dígito verificador si se carga) y Observaciones (máx. 500). Errores por campo. Los datos se recuerdan en el dispositivo para el próximo pedido.
+- **AC-TIE-13** Al confirmar se llama a la RPC `tienda_crear_pedido` con: renglones (`productoId`, cantidad, modo unidad/bulto), datos de contacto, token del vendedor (si hay) y un id de idempotencia (UUID generado en el navegador). El servidor:
+  1. valida y recalcula todo con los precios y reglas **actuales** (incluida la oferta vigente);
+  2. si algún precio, disponibilidad o regla cambió respecto de lo que vio el cliente, **no** crea el pedido y devuelve el carrito corregido para que el cliente lo vuelva a confirmar ("Cambiaron algunos precios");
+  3. crea el pedido con `origen: 'web'`, `webEstado: 'por_revisar'`, `estado: 'pendiente'`, `fecha` = **hoy en hora de Argentina** (`America/Argentina/Buenos_Aires`), `vendedor` del token, y los datos de contacto;
+  4. con el mismo id de idempotencia devuelve el mismo pedido (doble clic o reintento no duplican).
+- **AC-TIE-14** Pantalla de confirmación con número de pedido, resumen y total; el carrito se vacía. Sin conexión o con error, el carrito **no** se pierde y se puede reintentar.
+- **AC-TIE-15** Antiabuso: límite de pedidos por origen y por hora (configurable, default 5/h), campo trampa (honeypot) y topes (máx. 150 renglones, cantidades y totales razonables). Al superar el límite se muestra un mensaje claro, sin detalles internos.
+
+## REQ-WEB — Bandeja "Pedidos web" en la app interna
+
+- **AC-WEB-1** Nueva pestaña "Pedidos web" (admin) con contador de *por revisar*. Los pedidos `origen: web` *por revisar* **no** aparecen en Armado, Facturación, Orden de entrega, Reportes ni Comisiones hasta ser aceptados, y **no** mueven stock.
+- **AC-WEB-2** Cada pedido muestra los datos de contacto, la fecha, el vendedor del link, los renglones (con unidades y bultos) y el total. El admin puede editar renglones antes de aceptar (mismas reglas que Facturación, incluida AC-VTA-3).
+- **AC-WEB-3** Vincular cliente: la app sugiere clientes existentes por CUIT, teléfono y nombre normalizado (función pura con tests, ordenada por coincidencia). El admin elige uno o **crea un cliente nuevo** con el formulario de REQ-CLI precargado con los datos del pedido (código obligatorio, como siempre).
+- **AC-WEB-4** **Aceptar**: el pedido queda vinculado (`clienteId`, `clienteNombre`, zona de la ficha), `webEstado: 'aceptado'` (con quién y cuándo) y entra al flujo normal como pendiente. Vendedor: el del link; si vino sin vendedor, el de la ficha del cliente; si la ficha tampoco tiene, el admin lo elige.
+- **AC-WEB-5** **Rechazar** con motivo obligatorio: queda registrado (quién, cuándo, motivo), no se borra y se ve en un historial filtrable (por revisar / aceptados / rechazados).
+- **AC-WEB-6** Los pedidos web llegan a la app interna por el sync existente (pull) sin romper el modelo offline-first; aceptar/rechazar offline queda `pendingSync` y se sube después. Dos admins aceptando el mismo pedido desde dos dispositivos no lo duplican ni lo vinculan a dos clientes (resolver en el servidor).
+- **AC-WEB-7** Links por vendedor: en Configuración → Vendedores, el admin genera, copia y **regenera** el link de tienda de cada vendedor (`token` aleatorio, no el nombre ni el id). Regenerar invalida el anterior. Un token inválido o de un vendedor borrado → la tienda funciona igual, como link general.
+
+### Supabase (REQ-TIE + REQ-WEB)
+
+Migración `supabase/migrations/008_tienda.sql` (se aplica a mano; la 006 ya es `006_unidad_venta.sql` y la 007 `007_productos_escritura_admin.sql`). Lo de REQ-POR (`tienda_banners`, `tienda_ofertas`, bucket `tienda`, RPC `tienda_portada`) queda para su corrida; si el arquitecto deja la oferta vigente preparada en `tienda_catalogo`/`tienda_crear_pedido`, debe tolerar que la tabla no exista todavía.
+- columnas nuevas de `pedidos` (`origen`, `web_estado`, `web_contacto` jsonb, `web_revisado_por`, `web_revisado_at`, `web_motivo_rechazo`, `idempotencia` único);
+- `tienda_config` (mínima: permitir sin stock, límite por hora), `vendedores_tienda_tokens`, `tienda_intentos` (antiabuso, sin guardar la IP en claro: hash con sal);
+- RPC `tienda_catalogo`, `tienda_crear_pedido` y las que necesite la bandeja para aceptar/rechazar de forma atómica (AC-WEB-6) (`security definer`, `search_path` fijo, `grant execute` solo lo necesario a `anon`);
+- RLS: `anon` sin acceso directo a ninguna tabla; admin lee/escribe la config y los tokens.
+
+### Tests y revisión (OBLIGATORIO)
+
+1. **Trazabilidad:** cada AC de los REQ de la corrida tiene al menos un test que lo nombra. El revisor arma la tabla AC → test → resultado.
+2. **Dominio (`src/domain/tienda.js`, unidad de venta, sugerencia de clientes):** el caso **Dos Corazones** (1 → 16 u. / $14.400; 3 → 48 u. / $43.200), `ambos`, `minimoVenta`, múltiplos, precios con centavos y redondeo, oferta vigente/vencida/en el borde del día, totales grandes, entradas inválidas (NaN, negativos, texto, null).
+3. **Búsqueda y filtros:** tildes, mayúsculas, orden de palabras, combinación búsqueda + rubro + marca, filtros en la URL.
+4. **UI (Testing Library):** catálogo, filtros en mobile, carrito (agregar/cambiar/quitar/persistencia), checkout con errores por campo, carrito corregido por cambio de precio, confirmación, error de red sin perder el carrito, bandeja de pedidos web (vincular, crear cliente, aceptar, rechazar).
+5. **Aislamiento:** test que verifica que el entry de la tienda no importa `src/db`, `src/sync` ni `src/services/sesion`; que un host de tienda nunca renderiza la app interna.
+6. **Servidor/seguridad:** el auditor revisa la migración y las RPC: precios recalculados en el servidor (un carrito con precio manipulado no se acepta), idempotencia, límite por hora, honeypot, `anon` sin acceso a tablas que `tienda_catalogo` no filtre costo/ganancia/stock exacto, y que el token de vendedor no se pueda enumerar. Escribe sus tests de seguridad.
+7. **Regresión:** pedidos viejos y productos viejos (sin campos nuevos) siguen funcionando en todas las pantallas; los pedidos web por revisar no aparecen en Armado/Facturación/Comisiones ni mueven stock. Ningún test existente se borra ni se saltea.
+8. **Gates:** `CI=true npx react-scripts test --watchAll=false`, `npx react-scripts build` y `node harness/gates/run-gates.mjs` en verde, con el resumen en el reporte final, más la lista de pasos manuales (migración SQL, variable `REACT_APP_TIENDA_HOSTS`, DNS del dominio de la tienda).
+
+### Fuera de alcance
+- Pago online, cuentas de cliente con contraseña, historial de pedidos del cliente, notificaciones por WhatsApp/email automáticas.
+- Precio venta 2 o listas de precios por cliente en la tienda.
+- REQ-POR (portada, banners, ofertas, Configuración → Tienda, bucket de imágenes): corrida siguiente.
+
+### A confirmar con el dueño (no bloquea, el arquitecto lo deja anotado)
+- ¿Los vendedores también ven/aceptan los pedidos web de su propio link, o solo el admin? (por ahora: solo admin).
+- ¿Se manda un aviso (WhatsApp/notificación) al admin cuando entra un pedido web? (por ahora: solo el contador en la pestaña).
+

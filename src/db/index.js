@@ -6,7 +6,7 @@ import { huellaProductoSync } from '../domain/productosRpc';
 const DB_NAME = 'distribuidoraDB';
 // v6 — S-COM-13: se quita el PIN en texto plano de los vendedores locales.
 // v7 — REQ-COMR: store comisionesRubro (% por vendedor y rubro). Solo se agrega.
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let db = null;
 
@@ -85,6 +85,17 @@ export const initDB = () => new Promise((resolve, reject) => {
     }
     if (!d.objectStoreNames.contains('comisionesBorradores')) {
       d.createObjectStore('comisionesBorradores', { keyPath: 'id' });
+    }
+
+    // v8 — REQ-WEB (AC-WEB-6): cola de aceptar/rechazar pedidos web (offline).
+    // Solo se AGREGA el store (clave UUID). Los pedidos no se migran: sin campo
+    // `origen` un pedido es interno. Va aparte del pedido para no marcarlo
+    // synced:false (el push generico subiria la fila entera).
+    if (!d.objectStoreNames.contains('pedidosWebAcciones')) {
+      const pw = d.createObjectStore('pedidosWebAcciones', { keyPath: 'id' });
+      if (pw && typeof pw.createIndex === 'function') {
+        pw.createIndex('pedidoRemoteId', 'pedidoRemoteId', { unique: false });
+      }
     }
 
     // v7 — REQ-COMR (AC-COMR-7): % de comisión por vendedor y rubro. Solo se
@@ -806,3 +817,13 @@ export const putComisionesRubroLocal = (rows) =>
 // Escritura "neutral" (respuesta del servidor / pull / marcas): guarda tal cual.
 export const putComisionesRubroRemotos = (rows) => putManyInto('comisionesRubro', rows);
 export const clearComisionesRubroPendingSync = (ids) => clearPendingIn('comisionesRubro', ids);
+
+// ---- PEDIDOS WEB (REQ-WEB, AC-WEB-6) ----
+// Acciones aceptar/rechazar con id UUID. Quedan pendingSync hasta que la RPC del
+// servidor responde; se limpian SOLO los ids resueltos. El PIN nunca se guarda.
+export const getPedidosWebAcciones = () => getAllFrom('pedidosWebAcciones');
+export const putPedidoWebAccion = (a) =>
+  putManyInto('pedidosWebAcciones', [{ ...a, pendingSync: a.pendingSync !== false, updatedAt: Date.now() }]);
+// Escritura "neutral" (resultado del servidor): guarda tal cual.
+export const putPedidosWebAccionesRaw = (rows) => putManyInto('pedidosWebAcciones', rows);
+export const clearPedidosWebAccionesPendingSync = (ids) => clearPendingIn('pedidosWebAcciones', ids);

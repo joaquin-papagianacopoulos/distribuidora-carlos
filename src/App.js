@@ -13,6 +13,8 @@ import OrdenEntrega from './pages/OrdenEntrega';
 import Armado from './pages/Armado';
 import Stock from './pages/Stock';
 import Comisiones from './pages/Comisiones';
+import PedidosWeb from './pages/PedidosWeb';
+import { contarPorRevisar } from './domain/pedidosWeb';
 import SelectorVendedor from './components/SelectorVendedor';
 import { useSync } from './sync/useSync';
 import { esAdmin, esArmador } from './domain/permisos';
@@ -30,13 +32,14 @@ const TABS = [
   { id: 'ordenentrega', label: 'Orden', icon: '\u{1F5FA}️' }, // 🗺️
   { id: 'resumen', label: 'Resumen', icon: '\u{1F4CA}' }, // 📊
   { id: 'comisiones', label: 'Comisiones', icon: '\u{1F4B5}' }, // solo admin (REQ-COM)
+  { id: 'pedidosweb', label: 'Web', icon: '\u{1F6D2}' }, // carrito, solo admin (REQ-WEB)
   { id: 'reportes', label: 'Reportes', icon: '\u{1F4C8}' }, // 📈
   { id: 'config', label: 'Config', icon: '\u2699\uFE0F' }, // ⚙️
 ];
 
 const AppContent = () => {
   const [tab, setTab] = useState('nuevo');
-  const { vendedorActual, online, faltantes, seleccionarVendedor } = useApp();
+  const { vendedorActual, online, faltantes, pedidos, seleccionarVendedor } = useApp();
   const { syncing, lastSync, error, syncNote, syncNow } = useSync();
   // S-COM-11: permiso entero validado (src/domain/permisos). Un "1" en texto o
   // cualquier valor raro no habilita admin/armador: cae en las pestañas de vendedor.
@@ -56,6 +59,9 @@ const AppContent = () => {
   const faltantesMes = isArmador
     ? (faltantes || []).filter(f => f.fecha === hoyStr).length
     : (faltantes || []).filter(f => f.mes === mesActual).length;
+
+  // REQ-WEB (AC-WEB-1): contador de pedidos web por revisar (solo se muestra al admin).
+  const webPorRevisar = isAdmin ? contarPorRevisar(pedidos) : 0;
 
   // "Orden de entrega" lo puede ver cualquier usuario, sea cual sea su rol.
   const visibleTabs = isAdmin
@@ -166,6 +172,18 @@ const AppContent = () => {
           >
             <span className="nav-icon" style={{ position: 'relative' }}>
               {t.icon}
+              {t.id === 'pedidosweb' && webPorRevisar > 0 && (
+                <span data-testid="badge-web" style={{
+                  position: 'absolute', top: -2, right: -2,
+                  background: 'var(--danger)', color: 'white',
+                  borderRadius: '50%', width: 14, height: 14,
+                  fontSize: 9, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  lineHeight: 1,
+                }}>
+                  {webPorRevisar > 99 ? '99+' : webPorRevisar}
+                </span>
+              )}
               {t.id === 'faltantes' && faltantesMes > 0 && (
                 <span style={{
                   position: 'absolute', top: -2, right: -2,
@@ -196,6 +214,7 @@ const AppContent = () => {
         {tab === 'resumen' && <ResumenDia />}
         {tab === 'reportes' && <ReportesVentas />}
         {tab === 'comisiones' && isAdmin && <Comisiones />}
+        {tab === 'pedidosweb' && isAdmin && <PedidosWeb />}
         {tab === 'config' && <Configuracion />}
       </main>
     </div>

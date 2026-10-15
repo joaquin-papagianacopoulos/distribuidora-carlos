@@ -44,6 +44,8 @@ export const previsualizarStockPedido = async (pedido, productos = [], policy = 
  */
 export const aplicarStockPedido = async (pedido, { usuario = '', iniciar = false } = {}) => {
   if (!pedido) return [];
+  // REQ-WEB (AC-WEB-1): un pedido web sin aceptar nunca mueve stock.
+  if (pedido.origen === 'web' && pedido.webEstado !== 'aceptado') return [];
   if (pedido.remoteId && pedido.id !== undefined && pedido.id !== null) {
     await rekeyMovimientosRef(`pedido-local:${pedido.id}`, `pedido:${pedido.remoteId}`);
   }
