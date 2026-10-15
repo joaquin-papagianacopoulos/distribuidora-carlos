@@ -45,13 +45,13 @@ const errorDe = (key) => container.querySelector(`[data-error-for="${key}"]`);
 const PROVEEDORES = [{ id: 'prov-1', codigo: 'P1', descripcion: 'Arcor' }];
 
 describe('ProductoForm', () => {
-  it('AC-PROD-1 muestra las etiquetas del SPEC (AC-VTA-1 suma 4)', async () => {
+  it('AC-PROD-1 muestra las etiquetas del SPEC (AC-VTA-1 suma 4; REQ-STB suma Stock mínimo)', async () => {
     await render({ onGuardar: jest.fn() });
     const labels = [...container.querySelectorAll('label.input-label')]
       .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, ''));
     expect(labels).toEqual([
       'Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock',
+      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock',
     ]);
   });
 

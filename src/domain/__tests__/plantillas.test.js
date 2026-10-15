@@ -40,7 +40,7 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
     expect(COLUMNAS_PLANTILLA.productos.map(c => c.label)).toEqual(LABELS_P);
     expect(COLUMNAS_PLANTILLA.productos.map(c => c.key)).toEqual(CAMPOS_PRODUCTO.map(c => c.key));
     expect(LABELS_P).toEqual(['Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']);
+      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock']);
     expect(NOMBRE_ARCHIVO_PLANTILLA.productos).toBe('plantilla_productos.xlsx');
   });
 

@@ -16,6 +16,7 @@ import ProveedorForm from '../components/ProveedorForm';
 import ComisionRubroGrid from '../components/ComisionRubroGrid';
 import CambiosPrecio from './CambiosPrecio';
 import { listarRubros } from '../domain/rubros';
+import { conservarCostosDesconocidos } from '../domain/productos';
 import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
@@ -73,7 +74,8 @@ const importarProductos = async (rows, { proveedores, usuario, origen }) => {
         id = await addProductoLocal({ ...p, marca: marcaDe(p, ''), ...extras }, { usuario });
       } else if (e.accion === 'actualizar') {
         const p = e.valor.producto;
-        await updateProducto({ ...e.existente, ...p, marca: marcaDe(p, e.existente.marca), ...extras }, { usuario });
+        // S-012-01: un costo que este dispositivo no conoce no se pisa con el 0 por defecto.
+        await updateProducto({ ...e.existente, ...conservarCostosDesconocidos(e.existente, p), marca: marcaDe(p, e.existente.marca), ...extras }, { usuario });
       }
     } catch (err) {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
@@ -243,7 +245,7 @@ const Configuracion = () => {
   const guardarProducto = async (data, stock, stockMostrado, { pin = '' } = {}) => {
     try {
       if (editItem) {
-        await updateProducto({ ...editItem, ...data, marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true }, { usuario: usuarioCambio });
+        await updateProducto({ ...editItem, ...conservarCostosDesconocidos(editItem, data), marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true }, { usuario: usuarioCambio });
         if (stock !== null && stock !== undefined) await ajustarStock(editItem.id, stock, { usuario: usuarioActual, base: stockMostrado });
       } else {
         const id = await addProductoLocal({ ...data, unidad: 'unidad', marca: marcaParaGuardar({ marcaForm: data.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true }, { usuario: usuarioCambio });

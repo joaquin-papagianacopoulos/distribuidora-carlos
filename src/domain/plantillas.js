@@ -46,6 +46,7 @@ const INFO_PRODUCTO = {
   bultoNombre: { obligatorio: 'No (vacío = Bulto)', formato: 'Bulto, Display, Caja o Pack', ejemplo: 'Display' },
   visibleTienda: { obligatorio: 'No (vacío = Sí)', formato: 'Sí o No. Si se muestra en la tienda online', ejemplo: 'Sí' },
   minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
+  stockMinimo: { obligatorio: 'No (vacío = usa Mínimo venta)', formato: 'Entero ≥ 0. Punto de reposición: con stock igual o menor se avisa. Vacío o "-" = se usa Mínimo venta; en productos existentes se conserva', ejemplo: '10' },
   stock: { obligatorio: 'No', formato: 'Entero ≥ 0. Solo para productos NUEVOS (stock inicial). En productos que ya existen se ignora: usá Stock → Ingreso de mercadería', ejemplo: '24' },
 };
 
@@ -132,6 +133,7 @@ const ALIAS = {
     etiquetadelbulto: 'bultoNombre', tipobulto: 'bultoNombre',
     mostrarentienda: 'visibleTienda', tienda: 'visibleTienda', visible: 'visibleTienda',
     minimo: 'minimoVenta', minimodeventa: 'minimoVenta',
+    stockminimo: 'stockMinimo', puntodereposicion: 'stockMinimo',
     stockinicial: 'stock',
   },
   clientes: {
@@ -158,7 +160,7 @@ const PARCIALES_PRODUCTO = [
 ];
 
 // Columnas que solo trae la plantilla nueva (no los archivos viejos).
-const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stock'];
+const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stockMinimo', 'stock'];
 
 /**
  * Mapea los encabezados de un archivo a campos.
@@ -212,7 +214,7 @@ const sinPorcentaje = (v) => celda(v).replace(/%$/, '').trim();
 const strOr = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
 // AC-PLA-3b: en los campos opcionales de productos, "-" o "–" (o "—") es "sin dato".
-export const CAMPOS_OPCIONALES_PRODUCTO = Object.freeze(['descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'minimoVenta']);
+export const CAMPOS_OPCIONALES_PRODUCTO = Object.freeze(['descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'minimoVenta', 'stockMinimo']);
 const SIN_DATO = new Set(['', '-', '–', '—']);
 export const celdaSinDato = (v) => SIN_DATO.has(celda(v).replace(/\s+/g, ''));
 
@@ -303,6 +305,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     precioVenta2: strOr(existente?.precioVenta2),
     bultoX: strOr(existente?.bultoX, '1'),
     minimoVenta: strOr(existente?.minimoVenta, '1'),
+    stockMinimo: strOr(existente?.stockMinimo),
     // AC-VTA-1: columna ausente o vacía => se conserva lo del existente o el default.
     ventaPor: strOr(existente?.ventaPor),
     bultoNombre: strOr(existente?.bultoNombre),
@@ -320,7 +323,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     if (vt === null) errores.push('Mostrar en tienda: poné Sí o No');
     else form.visibleTienda = vt;
   }
-  for (const k of ['costoFinal', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta']) if (tiene(k)) form[k] = celda(valores[k]);
+  for (const k of ['costoFinal', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stockMinimo']) if (tiene(k)) form[k] = celda(valores[k]);
   for (const k of PCT_PRODUCTO) if (tiene(k)) form[k] = sinPorcentaje(valores[k]);
   // AC-PLA-3b: minimo venta 0 = sin minimo (1).
   if (tiene('minimoVenta') && /^0+([.,]0*)?$/.test(celda(valores.minimoVenta))) form.minimoVenta = '1';

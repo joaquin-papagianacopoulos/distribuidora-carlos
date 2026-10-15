@@ -32,6 +32,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     bultoNombre: normalizarBultoNombre(inicial?.bultoNombre),
     visibleTienda: inicial?.visibleTienda !== false,
     minimoVenta: str(inicial?.minimoVenta, '1'),
+    stockMinimo: str(inicial?.stockMinimo),
     stock: inicial ? String(stockActual) : '',
   }));
   // Si el usuario escribe el precio a mano, deja de recalcularse solo.

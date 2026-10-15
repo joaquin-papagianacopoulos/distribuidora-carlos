@@ -28,6 +28,8 @@ export const CAMPOS_PRODUCTO = [
   { key: 'bultoNombre', label: 'Etiqueta del bulto', opciones: BULTO_NOMBRES, tipo: 'bultoNombre' },
   { key: 'visibleTienda', label: 'Mostrar en tienda', tipo: 'booleano' },
   { key: 'minimoVenta', label: 'Mínimo venta', tipo: 'number' },
+  // AC-STB-1: punto de reposición. Vacío = se usa el mínimo de venta.
+  { key: 'stockMinimo', label: 'Stock mínimo', tipo: 'number' },
   { key: 'stock', label: 'Stock', tipo: 'number' },
 ];
 
@@ -113,6 +115,14 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   p.bultoX = entero(form.bultoX, 'bultoX', 'Bulto x');
   p.minimoVenta = entero(form.minimoVenta, 'minimoVenta', 'Mínimo venta');
 
+  // AC-STB-1: stock mínimo opcional (entero >= 0). Vacío => null (se usa minimoVenta).
+  p.stockMinimo = null;
+  if (form.stockMinimo !== '' && form.stockMinimo != null) {
+    const sm = toInt(form.stockMinimo);
+    if (sm === null || sm < 0 || sm > 1_000_000) errores.stockMinimo = 'Stock mínimo: entero entre 0 y 1.000.000 (o vacío)';
+    else p.stockMinimo = sm;
+  }
+
   // AC-VTA-1: "bulto" exige bultoX > 1 (error en el campo Se vende por).
   const uv = validarUnidadVenta({ ventaPor: form.ventaPor, bultoX: p.bultoX, bultoNombre: form.bultoNombre, visibleTienda: form.visibleTienda });
   if (uv.errores.ventaPor) errores.ventaPor = uv.errores.ventaPor;
@@ -129,20 +139,94 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   return { ok: Object.keys(errores).length === 0, errores, producto: p, stock };
 };
 
-export const productoExtraToRemote = (p = {}) => ({
-  proveedor_id: p.proveedorId || null,
-  costo_final: Number(p.costoFinal) || 0,
-  descuento1: Number(p.descuento1) || 0,
-  descuento2: Number(p.descuento2) || 0,
-  ganancia: Number(p.ganancia) || 0,
-  precio_venta2: Number(p.precioVenta2) || 0,
-  bulto_x: Number(p.bultoX) || 1,
-  minimo_venta: Number(p.minimoVenta) || 1,
-});
+// S-012-01 (migracion 013): columnas internas de productos. No se leen con la anon key;
+// solo bajan por la RPC admin_productos_costos (PIN de admin). precio_venta2 tambien es
+// interna: es una lista de precios comercial que no usa la venta ni la tienda.
+export const COSTOS_PRODUCTO = Object.freeze([
+  ['costo_final', 'costoFinal'],
+  ['descuento1', 'descuento1'],
+  ['descuento2', 'descuento2'],
+  ['ganancia', 'ganancia'],
+  ['precio_venta2', 'precioVenta2'],
+]);
+
+// S-012-01: columnas que se leen de public.productos con la anon key (sin costos).
+// Ordenadas de la mas vieja a la mas nueva: si falta una migracion se descarta la que nombra el error.
+export const COLUMNAS_PRODUCTO_PUBLICAS = Object.freeze([
+  'id', 'nombre', 'codigo', 'precio', 'unidad', 'categoria', 'imagen_url',
+  'proveedor_id', 'bulto_x', 'minimo_venta',
+  'marca', 'venta_por', 'bulto_nombre', 'visible_tienda',
+  'precio_bulto', 'stock_minimo',
+]);
+
+/**
+ * S-012-01: si el error de PostgREST nombra una columna inexistente de la lista, devuelve la
+ * lista sin esa columna (para reintentar). Si no se puede identificar, null.
+ */
+export const columnasSinFaltante = (columnas = [], error) => {
+  const msg = String(error?.message || '');
+  const m = msg.match(/column\s+"?(?:[a-z_]+\.)?([a-z0-9_]+)"?\s+does not exist/i)
+    || msg.match(/could not find the '([a-z0-9_]+)' column/i);
+  if (!m) return null;
+  const col = m[1].toLowerCase();
+  if (col === 'id' || col === 'nombre' || !columnas.includes(col)) return null;
+  return columnas.filter(c => c !== col);
+};
+
+/**
+ * S-012-01: un costo que este dispositivo nunca bajo (undefined) y que el form/plantilla deja en
+ * 0 por defecto NO se manda: asi no se pisa el costo del servidor con vacio.
+ */
+export const conservarCostosDesconocidos = (previo = {}, nuevo = {}) => {
+  const out = { ...nuevo };
+  for (const [, key] of COSTOS_PRODUCTO) {
+    if (previo?.[key] === undefined && (out[key] === undefined || out[key] === null || out[key] === '' || Number(out[key]) === 0)) {
+      out[key] = undefined;
+    }
+  }
+  return out;
+};
+
+export const productoExtraToRemote = (p = {}) => {
+  const out = { proveedor_id: p.proveedorId || null };
+  // S-012-01: un costo desconocido (undefined) no viaja; el servidor conserva el suyo.
+  for (const [col, key] of COSTOS_PRODUCTO) {
+    if (p[key] !== undefined) out[col] = Number(p[key]) || 0;
+  }
+  out.bulto_x = Number(p.bultoX) || 1;
+  out.minimo_venta = Number(p.minimoVenta) || 1;
+  return out;
+};
+
+/**
+ * S-012-01: aplica los costos bajados con PIN sobre los productos locales. No toca productos con
+ * cambios locales sin subir. Devuelve solo los que cambian.
+ */
+export const aplicarCostosRemotos = (locales = [], remotos = []) => {
+  const porId = new Map((Array.isArray(locales) ? locales : []).filter(Boolean).map(p => [String(p.id), p]));
+  const out = [];
+  for (const r of Array.isArray(remotos) ? remotos : []) {
+    const local = r ? porId.get(String(r.id)) : null;
+    if (!local || local.pendingSync || local.extrasDirty || local.extrasPendientes) continue;
+    const parche = {};
+    let cambia = false;
+    for (const [col, key] of COSTOS_PRODUCTO) {
+      if (r[col] === undefined) continue;
+      const n = Number(r[col]);
+      const v = Number.isFinite(n) && n >= 0 ? n : 0;
+      parche[key] = v;
+      if (local[key] !== v) cambia = true;
+    }
+    if (cambia) out.push({ ...local, ...parche });
+  }
+  return out;
+};
 
 // AC-PBU: columna de la migración 010 (aparte para poder escalonar el sync si falta).
 export const productoPreciosToRemote = (p = {}) => ({
   precio_bulto: Number(p.precioBulto) > 0 ? Number(p.precioBulto) : 0,
+  // AC-STB-1 (migración 012): si el producto nunca tuvo el dato, la clave no viaja y el servidor conserva el suyo.
+  ...(p.stockMinimo !== undefined ? { stock_minimo: stockMinimoValido(p.stockMinimo) } : {}),
 });
 
 // AC-VTA-5: columnas de la migración 006 (aparte de las de la 001 para poder escalonar el sync).
@@ -152,18 +236,30 @@ export const productoVentaToRemote = (p = {}) => ({
   visible_tienda: parsearBooleano(p.visibleTienda) === false ? false : true,
 });
 
+// AC-STB-1: null si está vacío o es inválido.
+export const stockMinimoValido = (v) => {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+};
+
 export const productoExtraFromRemote = (r = {}, local = {}) => {
+  r = r || {};
   const pick = (col, key, def) => (r[col] !== undefined ? (r[col] ?? def) : (local?.[key] ?? def));
+  // S-012-01: con la 013 los costos no vienen en el select anon. Columna ausente => se conserva
+  // lo local; si tampoco hay local queda undefined (desconocido: nunca se manda como 0).
+  const costo = (col, key) => (r[col] === undefined && local?.[key] === undefined ? undefined : Number(pick(col, key, 0)));
   return {
     proveedorId: pick('proveedor_id', 'proveedorId', null),
-    costoFinal: Number(pick('costo_final', 'costoFinal', 0)),
-    descuento1: Number(pick('descuento1', 'descuento1', 0)),
-    descuento2: Number(pick('descuento2', 'descuento2', 0)),
-    ganancia: Number(pick('ganancia', 'ganancia', 0)),
-    precioVenta2: Number(pick('precio_venta2', 'precioVenta2', 0)),
+    costoFinal: costo('costo_final', 'costoFinal'),
+    descuento1: costo('descuento1', 'descuento1'),
+    descuento2: costo('descuento2', 'descuento2'),
+    ganancia: costo('ganancia', 'ganancia'),
+    precioVenta2: costo('precio_venta2', 'precioVenta2'),
     bultoX: Number(pick('bulto_x', 'bultoX', 1)),
     minimoVenta: Number(pick('minimo_venta', 'minimoVenta', 1)),
     precioBulto: Number(pick('precio_bulto', 'precioBulto', 0)) || 0,
+    stockMinimo: stockMinimoValido(pick('stock_minimo', 'stockMinimo', null)),
     // AC-VTA-5: columna ausente (sin 006) => valor local => default derivado.
     ventaPor: pick('venta_por', 'ventaPor', undefined),
     bultoNombre: normalizarBultoNombre(pick('bulto_nombre', 'bultoNombre', 'Bulto')),

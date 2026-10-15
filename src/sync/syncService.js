@@ -4,7 +4,7 @@ import { isPedidoOculto, makePedidoEliminado, normalizePedidoFecha } from '../ut
 import { fetchProductImage, isImageSearchConfigured, ImageSearchQuotaError } from '../services/imageSearch';
 import { detectarMarca } from '../utils/brands';
 import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
-import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote } from '../domain/productos';
+import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote, COLUMNAS_PRODUCTO_PUBLICAS, columnasSinFaltante } from '../domain/productos';
 import { bajarCambiosPrecio } from '../services/cambiosPrecioService';
 import { normalizarBultoNombre } from '../domain/unidadVenta';
 import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
@@ -1058,15 +1058,24 @@ export const uploadSeedToSupabase = async () => {
 
 export const downloadMaestros = async () => {
   const PAGE = 1000;
-  const fetchAll = async (table) => {
+  // S-012-01: productos se lee con lista explicita de columnas publicas (los costos no; con la
+  // 013 la anon key no puede leerlos). Si falta una columna nueva (migracion sin aplicar) se
+  // descarta esa columna y se reintenta, como antes hacia select('*').
+  const fetchAll = async (table, columnasIniciales = '*') => {
+    let columnas = columnasIniciales;
     let out = [];
     let from = 0;
     while (true) {
+      const sel = Array.isArray(columnas) ? columnas.join(',') : columnas;
       const { data, error } = await supabase
         .from(table)
-        .select('*')
+        .select(sel)
         .range(from, from + PAGE - 1);
-      if (error) throw error;
+      if (error) {
+        const menos = Array.isArray(columnas) && esColumnaInexistente(error) ? columnasSinFaltante(columnas, error) : null;
+        if (menos) { columnas = menos; continue; }
+        throw error;
+      }
       out = out.concat(data || []);
       if (!data || data.length < PAGE) break;
       from += PAGE;
@@ -1077,7 +1086,7 @@ export const downloadMaestros = async () => {
   };
 
   const [productosRemoto, clientesRemoto, vendedoresRemoto] = await Promise.all([
-    fetchAll('productos'),
+    fetchAll('productos', COLUMNAS_PRODUCTO_PUBLICAS),
     fetchAll('clientes'),
     fetchVendedoresRemotos(),
   ]);

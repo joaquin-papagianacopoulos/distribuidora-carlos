@@ -19,6 +19,7 @@ PWA React 18 (Create React App) **offline-first**: IndexedDB local (`src/db/inde
 5. IDs nuevos: `crypto.randomUUID()` (no autoIncrement) para tablas nuevas.
 6. Nunca leer/imprimir `.env`, nunca loguear claves, nunca `git push`, nunca borrar datos de usuario.
 7. Comentarios y textos de UI en español rioplatense, sin tildes rotas (archivo UTF-8).
+8. `productos` tiene select **por columnas** para anon (migración 013): toda columna nueva pública necesita `grant select (col) on public.productos to anon, authenticated` en su migración y sumarse a `COLUMNAS_PRODUCTO_PUBLICAS`; costos/descuentos/ganancia nunca se exponen (se leen por RPC con PIN).
 
 ## Comandos
 - Tests: `CI=true npx react-scripts test --watchAll=false`

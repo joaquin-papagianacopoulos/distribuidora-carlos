@@ -7,6 +7,7 @@ import { esAdmin, validarPinIngresado } from '../domain/permisos';
 import { argsAdminProductos, interpretarBajaProducto } from '../domain/productosRpc';
 import { syncProductos } from '../sync/syncService';
 import { subirCambiosPrecio, sondearMigracion010 } from './cambiosPrecioService';
+import { bajarCostosProductos } from './costosProductosService';
 import { getUsuarioSesion } from './sesion';
 
 const MSG_SIN_ID_ADMIN = 'Tu usuario de admin todavia no esta sincronizado con el servidor: sincroniza y volve a intentar.';
@@ -64,9 +65,13 @@ export const subirProductosConPin = async (pin) => {
         }
       } catch { /* el historial se reintenta en la proxima subida */ }
     }
+    // S-012-01: con el PIN ya validado se bajan los costos (la anon key no los lee desde la 013).
+    // Sin la 013 o con error no pasa nada: se conservan los costos locales.
+    const costos = r.ok ? await bajarCostosProductos(cr.cred) : null;
     return {
       ...r,
       cambiosPrecio: cambios,
+      costosBajados: costos?.ok ? costos.actualizados : 0,
       ...(falta010 ? { avisoMigracion: MSG_FALTA_010 } : {}),
       pendientes: r.ok ? await contarProductosPendientes() : r.pendientes,
     };

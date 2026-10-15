@@ -115,7 +115,7 @@ describe('AC-SEC-3 AC-PLA-6 formula injection en la plantilla exportada', () => 
 describe('AC-PROD-3 AC-STK-8 regla dura 4: la importacion no escribe stock', () => {
   test('AC-PROD-3 un producto existente con columna Stock no genera stock (stockIgnorado)', () => {
     const existentes = [{ id: 'p1', codigo: 'A1', nombre: 'Prod', precio: 10, unidad: 'unidad' }];
-    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '', '10', '', '', '', '', '', '', '', '999']];
+    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '', '10', '', '', '', '', '', '', '', '', '999']];
     const plan = planificarImportacion(rows, 'productos', { existentes, proveedores: [] });
     expect(plan.entradas[0].accion).toBe('actualizar');
     expect(plan.entradas[0].valor.stock).toBeNull();

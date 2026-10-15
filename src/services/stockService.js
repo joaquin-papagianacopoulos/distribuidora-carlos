@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import {
   getMovimientosStock, addMovimientosStock, putMovimientosRemotos, clearMovimientosPendingSync,
   rekeyMovimientosRef, getIngresos, putIngresosRemotos, clearIngresosPendingSync,
-  addIngresoConMovimientos, getProveedores, putProveedoresRemotos, clearProveedoresPendingSync, deleteProveedor,
+  addIngresoConMovimientos, addIngresoCompleto, updateProducto, getProveedores, putProveedoresRemotos, clearProveedoresPendingSync, deleteProveedor,
 } from '../db';
 import {
   calcularStock, revisarMovimientosPedido, mensajeMovimientosInvalidos, verificarStock, decidirFacturacion, movimientoAjuste,
@@ -12,6 +12,7 @@ import {
   movimientoToRemote, movimientoFromRemote, ingresoToRemote, ingresoFromRemote,
 } from '../domain/stock';
 import { proveedorToRemote, proveedorFromRemote } from '../domain/proveedores';
+import { validarCostosIngreso, costoProductoDesdeIngreso } from '../domain/compras';
 
 export const getStockMap = async () => calcularStock(await getMovimientosStock());
 
@@ -71,14 +72,46 @@ export const ajustarStock = async (productoId, stockNuevo, { usuario = '', inici
 };
 
 // REQ-ING: valida y graba atómicamente cabecera + movimientos.
+// REQ-INA: `form.costos` (opcional) trae costo unitario y Factura A/B por renglón:
+//   { tipoCabecera, facturaA, facturaB, actualizarCosto (default true), items: [{ productoId, costoUnitario, tipoFactura }] }
+// Los costos se guardan APARTE (ingresosCostos, pendientes de subir con PIN); el ingreso y los
+// movimientos quedan idénticos con o sin costos (AC-INA-5 / AC-ING-5).
 export const registrarIngreso = async (form, { productos, usuario = '' }) => {
   const [proveedores, ingresosExistentes, movs] = await Promise.all([getProveedores(), getIngresos(), getMovimientosStock()]);
   const r = validarIngreso(form, {
     productos, proveedores, ingresosExistentes, stockMap: calcularStock(movs), usuario,
   });
   if (!r.ok) return r;
-  await addIngresoConMovimientos(r.ingreso, r.movimientos);
-  return r;
+
+  // Se valida TODO antes de grabar: un costo inválido no deja un ingreso a medias.
+  let costos = null;
+  if (form?.costos) {
+    const c = validarCostosIngreso(form.costos, { ingreso: r.ingreso });
+    if (!c.ok) return { ok: false, errores: c.errores };
+    costos = c.costos;
+  }
+  if (costos) await addIngresoCompleto(r.ingreso, costos, r.movimientos);
+  else await addIngresoConMovimientos(r.ingreso, r.movimientos);
+
+  // AC-INA-4: con el tilde (default sí) el costo del ingreso pasa a "Costo final" del producto.
+  // updateProducto registra el cambio de precio (REQ-HPR) y deja el producto pendiente de sync.
+  const productosActualizados = [];
+  const erroresProducto = [];
+  if (costos && form.costos.actualizarCosto !== false) {
+    const porId = new Map((productos || []).map(p => [String(p.id), p]));
+    for (const ren of costos.renglones) {
+      const prod = porId.get(String(ren.productoId));
+      const nuevo = prod ? costoProductoDesdeIngreso(prod, ren.costoUnitario) : null;
+      if (!nuevo) continue;
+      try {
+        await updateProducto({ ...prod, costoFinal: nuevo.costoFinal, precio: nuevo.precio, extrasDirty: true }, { usuario });
+        productosActualizados.push(String(prod.id));
+      } catch (e) {
+        erroresProducto.push({ productoId: String(prod.id), error: e?.message || String(e) });
+      }
+    }
+  }
+  return { ...r, costos, productosActualizados, erroresProducto };
 };
 
 // ---------------- Sync con Supabase ----------------

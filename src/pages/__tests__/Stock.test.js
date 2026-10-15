@@ -7,6 +7,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mockApp = {};
 jest.mock('../../hooks/useAppContext', () => ({ useApp: () => mockApp }));
 jest.mock('../../services/stockService', () => ({ registrarIngreso: jest.fn() }));
+// RUN 20261015-1541 (REQ-INA/REQ-STB): la pantalla ahora importa el servicio local de compras.
+jest.mock('../../services/comprasLocalService', () => ({ vincularPedidoConIngreso: jest.fn(), agregarAlBorradorProveedor: jest.fn() }));
 
 import Stock, { IngresoMercaderia } from '../Stock';
 import { registrarIngreso } from '../../services/stockService';
@@ -166,7 +168,8 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
     expect(sugeridos()[0].textContent).toContain('Stock 4');
     await click(sugeridos()[0]);
     const ths = [...container.querySelectorAll('thead th')].map(t => t.textContent).filter(Boolean);
-    expect(ths).toEqual(['Código', 'Descripción', 'Stock actual', 'Ingreso', 'Stock total']);
+    // MOD (RUN 20261015-1541, REQ-INA): se suman Costo unit. y Factura A/B al final del renglón.
+    expect(ths).toEqual(['Código', 'Descripción', 'Stock actual', 'Ingreso', 'Stock total', 'Costo unit.', 'Factura']);
     expect(renglones()).toHaveLength(1);
     expect(celdas(renglones()[0]).slice(0, 5)).toEqual(['A1', 'Alfajor Jorgito', '4', '', '4']);
     await setValue(container.querySelector('input[aria-label="Ingreso Alfajor Jorgito"]'), '20');

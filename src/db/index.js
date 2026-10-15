@@ -8,7 +8,9 @@ const DB_NAME = 'distribuidoraDB';
 // v6 — S-COM-13: se quita el PIN en texto plano de los vendedores locales.
 // v7 — REQ-COMR: store comisionesRubro (% por vendedor y rubro). Solo se agrega.
 // v9 — REQ-HPR: store cambiosPrecio (historial de cambios de precio). Solo se agrega.
-const DB_VERSION = 9;
+// v10 — REQ-INA/REQ-CPR: ingresosCostos, cuentaProveedores, comprobantesPendientes y
+//       pedidosProveedor. Solo se AGREGAN stores; no se migra ni se borra nada.
+const DB_VERSION = 10;
 
 let db = null;
 
@@ -120,6 +122,34 @@ export const initDB = () => new Promise((resolve, reject) => {
       if (cp && typeof cp.createIndex === 'function') {
         cp.createIndex('productoId', 'productoId', { unique: false });
         cp.createIndex('fecha', 'fecha', { unique: false });
+      }
+    }
+
+    // v10 — REQ-INA / REQ-CPR. Solo se AGREGAN stores (clave UUID o id del ingreso).
+    // ingresosCostos: 1:1 con ingresos (id = id del ingreso). cuentaProveedores: pagos y cargos.
+    // comprobantesPendientes: cola local de adjuntos aun no subidos. pedidosProveedor: listas de reposicion.
+    if (!d.objectStoreNames.contains('ingresosCostos')) {
+      const ic = d.createObjectStore('ingresosCostos', { keyPath: 'id' });
+      if (ic && typeof ic.createIndex === 'function') {
+        ic.createIndex('proveedorId', 'proveedorId', { unique: false });
+        ic.createIndex('fecha', 'fecha', { unique: false });
+      }
+    }
+    if (!d.objectStoreNames.contains('cuentaProveedores')) {
+      const cu = d.createObjectStore('cuentaProveedores', { keyPath: 'id' });
+      if (cu && typeof cu.createIndex === 'function') {
+        cu.createIndex('proveedorId', 'proveedorId', { unique: false });
+        cu.createIndex('fecha', 'fecha', { unique: false });
+      }
+    }
+    if (!d.objectStoreNames.contains('comprobantesPendientes')) {
+      d.createObjectStore('comprobantesPendientes', { keyPath: 'id' });
+    }
+    if (!d.objectStoreNames.contains('pedidosProveedor')) {
+      const pp = d.createObjectStore('pedidosProveedor', { keyPath: 'id' });
+      if (pp && typeof pp.createIndex === 'function') {
+        pp.createIndex('proveedorId', 'proveedorId', { unique: false });
+        pp.createIndex('estado', 'estado', { unique: false });
       }
     }
 
@@ -820,6 +850,56 @@ export const addIngresoConMovimientos = async (ingreso, movimientos) => {
     t.onabort = () => rej(t.error);
   });
 };
+
+// REQ-INA AC-INA-1: ingreso + costos A/B + movimientos en UNA transaccion. Los costos son
+// opcionales (null = ingreso sin dato). Los movimientos y el ingreso quedan IGUALES con o sin costos.
+export const addIngresoCompleto = async (ingreso, costos, movimientos) => {
+  const d = await getDB();
+  const now = Date.now();
+  return new Promise((res, rej) => {
+    const stores = costos ? ['ingresos', 'ingresosCostos', 'movimientosStock'] : ['ingresos', 'movimientosStock'];
+    const t = d.transaction(stores, 'readwrite');
+    t.objectStore('ingresos').add({ ...ingreso, pendingSync: true, createdAt: now });
+    if (costos) t.objectStore('ingresosCostos').put({ ...costos, id: ingreso.id, pendingSync: true });
+    const ms = t.objectStore('movimientosStock');
+    for (const m of movimientos) ms.add({ ...m, pendingSync: true, createdAt: now });
+    t.oncomplete = () => res({ ok: true });
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+};
+
+// ---- COSTOS DE INGRESO, CUENTA CON PROVEEDORES Y PEDIDOS AL PROVEEDOR (REQ-INA / REQ-CPR) ----
+// Datos financieros: suben solo con PIN de admin (RPC). pendingSync hasta que el servidor confirma;
+// se limpia SOLO de los ids confirmados.
+// Limpia pendingSync de los ids confirmados SOLO si la fila no cambio durante la subida
+// (mismo updatedAt que se envio). Una edicion hecha mientras subia sigue pendiente.
+const clearPendingSiNoCambio = async (storeName, enviados) => {
+  if (!enviados || enviados.length === 0) return;
+  const enviadoPor = new Map(enviados.map(x => [x.id, x.updatedAt]));
+  const all = await getAllFrom(storeName);
+  const rows = all
+    .filter(r => enviadoPor.has(r.id) && r.pendingSync && (r.updatedAt || 0) === (enviadoPor.get(r.id) || 0))
+    .map(r => ({ ...r, pendingSync: false }));
+  await putManyInto(storeName, rows);
+};
+
+export const getIngresosCostos = () => getAllFrom('ingresosCostos');
+export const putIngresosCostosRaw = (rows) => putManyInto('ingresosCostos', rows);
+export const clearIngresosCostosPendingSync = (enviados) => clearPendingSiNoCambio('ingresosCostos', enviados);
+
+export const getCuentaProveedores = () => getAllFrom('cuentaProveedores');
+export const putCuentaProveedoresRaw = (rows) => putManyInto('cuentaProveedores', rows);
+export const clearCuentaProveedoresPendingSync = (enviados) => clearPendingSiNoCambio('cuentaProveedores', enviados);
+
+export const getPedidosProveedor = () => getAllFrom('pedidosProveedor');
+export const putPedidosProveedorRaw = (rows) => putManyInto('pedidosProveedor', rows);
+export const clearPedidosProveedorPendingSync = (enviados) => clearPendingSiNoCambio('pedidosProveedor', enviados);
+
+// Adjuntos de pagos aun no subidos a Storage: { id (= id del pago), blob, mime, size }.
+export const getComprobantesPendientes = () => getAllFrom('comprobantesPendientes');
+export const putComprobantePendiente = (c) => putManyInto('comprobantesPendientes', [c]);
+export const deleteComprobantePendiente = (id) => deleteFrom('comprobantesPendientes', id);
 
 // ---- COMISIONES (REQ-COM) ----
 // Cierres: documento inmutable con id UUID. Se guardan locales con pendingSync

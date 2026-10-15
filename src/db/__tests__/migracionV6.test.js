@@ -62,7 +62,7 @@ describe('AC-SEC-4 S-COM-13 DB_VERSION 6 quita el PIN local sin borrar datos', (
       ],
     });
     // MOD (RUN 20261014-1449, AC-COMR-7): la versión actual pasó a 7.
-    expect(r.version).toBe(9); // MOD (RUN 20261015-0043, REQ-HPR)
+    expect(r.version).toBe(10); // MOD (RUN 20261015-0043, REQ-HPR)
     expect(r.filas).toEqual([
       { id: 1, remoteId: 7, nombre: 'Jorge', permiso: 1, zona: '', tienePin: true },
       { id: 2, remoteId: 8, nombre: 'Carlos', permiso: 2, tienePin: false },

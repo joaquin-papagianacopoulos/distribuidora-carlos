@@ -551,3 +551,153 @@ export const generarFacturasAEmitirFile = async (reporte, { desde, hasta, filtro
   const blob = doc.output('blob');
   return new File([blob], filename, { type: 'application/pdf' });
 };
+
+// ---- REQ-INA / REQ-CPR: PDFs de compras (importes en centavos enteros) ----
+const fmtCentPdf = (c) => {
+  const n = Math.round(Number(c) || 0);
+  const abs = Math.abs(n);
+  const ent = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${n < 0 ? '-' : ''}$${ent},${String(abs % 100).padStart(2, '0')}`;
+};
+const fmtDiaPdf = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fmtFechaPdf(iso);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+const sufijoPeriodo = (desde, hasta) =>
+  `${String(desde || '').replace(/[^0-9-]/g, '')}${hasta && hasta !== desde ? `_${String(hasta).replace(/[^0-9-]/g, '')}` : ''}`;
+
+const nuevoDocConTabla = async (opciones) => {
+  const { jsPDF } = await import('jspdf');
+  const { applyPlugin } = await import('jspdf-autotable');
+  applyPlugin(jsPDF);
+  return new jsPDF(opciones);
+};
+
+const filaSubtotales = (s) => [
+  ['Factura A', s.A.unidades, fmtCentPdf(s.A.costoCentavos)],
+  ['Factura B', s.B.unidades, fmtCentPdf(s.B.costoCentavos)],
+  ['Sin dato', s.sinDato.unidades, ''],
+];
+
+// AC-INA-2: comprobante de UN ingreso con subtotales de unidades y costo por Factura A, B y total.
+export const generarComprobanteIngresoFile = async (ingreso, subtotales) => {
+  const doc = await nuevoDocConTabla();
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('Ingreso de mercadería', 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`${ingreso?.proveedorNombre || ''} · Factura ${ingreso?.facturaProveedor || ''} · ${fmtDiaPdf(ingreso?.fecha)}`, 14, 20);
+  doc.autoTable({
+    startY: 25,
+    head: [['Código', 'Producto', 'Ingreso']],
+    body: (ingreso?.items || []).map(i => [i.codigo || '', i.descripcion || '', i.ingreso]),
+    theme: 'grid', styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [40, 40, 40] },
+  });
+  if (subtotales) {
+    doc.autoTable({
+      startY: (doc.lastAutoTable?.finalY || 25) + 6,
+      head: [['Subtotales', 'Unidades', 'Costo']],
+      body: filaSubtotales(subtotales),
+      foot: [['TOTAL', subtotales.total.unidades, fmtCentPdf(subtotales.total.costoCentavos)]],
+      theme: 'grid', styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [40, 40, 40] },
+      footStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
+    });
+  }
+  const blob = doc.output('blob');
+  return new File([blob], `ingreso_${String(ingreso?.id || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 12)}.pdf`, { type: 'application/pdf' });
+};
+
+// AC-INA-3: historial de ingresos filtrado, con totales A vs B. filas = filtrarHistorial, totales = totalesHistorial.
+export const generarIngresosFile = async (filas, totales, { desde, hasta, tipo = 'todas', proveedor = '' } = {}) => {
+  const doc = await nuevoDocConTabla({ orientation: 'landscape' });
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('Ingresos de mercadería', 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const periodo = !desde && !hasta ? 'todo el historial' : (!desde || desde === hasta ? fmtFechaPdf(desde || hasta) : `${fmtFechaPdf(desde)} a ${fmtFechaPdf(hasta)}`);
+  doc.text(`Período: ${periodo} · Tipo: ${tipo === 'todas' ? 'A y B' : tipo === 'sinDato' ? 'Sin dato' : `Factura ${tipo}`}${proveedor ? ` · Proveedor: ${proveedor}` : ''} · Ingresos: ${(filas || []).length}`, 14, 20);
+  doc.autoTable({
+    startY: 25,
+    head: [['Fecha', 'Proveedor', 'Factura', 'Fact. A', 'Fact. B', 'Un. A', 'Costo A', 'Un. B', 'Costo B', 'Sin dato', 'Total un.']],
+    body: (filas || []).map(f => [
+      fmtDiaPdf(f.fecha), f.proveedorNombre, f.factura, f.facturaA || '-', f.facturaB || '-',
+      f.subtotales.A.unidades, fmtCentPdf(f.subtotales.A.costoCentavos),
+      f.subtotales.B.unidades, fmtCentPdf(f.subtotales.B.costoCentavos),
+      f.subtotales.sinDato.unidades, f.subtotales.total.unidades,
+    ]),
+    foot: totales ? [['TOTAL', '', '', '', '', totales.A.unidades, fmtCentPdf(totales.A.costoCentavos), totales.B.unidades, fmtCentPdf(totales.B.costoCentavos), totales.sinDato.unidades, totales.total.unidades]] : undefined,
+    theme: 'grid', styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [40, 40, 40] },
+    footStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
+  });
+  const blob = doc.output('blob');
+  return new File([blob], `ingresos_${sufijoPeriodo(desde, hasta) || 'historial'}.pdf`, { type: 'application/pdf' });
+};
+
+// AC-CPR-3: estado de cuenta de un proveedor. `estado` viene de estadoDeCuenta (centavos enteros).
+export const generarEstadoCuentaFile = async (estado, { proveedor = '', desde, hasta } = {}) => {
+  const doc = await nuevoDocConTabla();
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(`Estado de cuenta${proveedor ? ` - ${proveedor}` : ''}`, 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const periodo = !desde && !hasta ? 'todo el historial' : `${fmtFechaPdf(desde) || 'inicio'} a ${fmtFechaPdf(hasta) || 'hoy'}`;
+  doc.text(`Período: ${periodo} · Saldo inicial: ${fmtCentPdf(estado?.saldoInicial)}`, 14, 20);
+  const etiqueta = { compra: 'Compra', cargo: 'Cargo', pago: 'Pago' };
+  const medios = { efectivo: 'Efectivo', transferencia: 'Transferencia', directa: 'Transf. directa del cliente' };
+  doc.autoTable({
+    startY: 25,
+    head: [['Fecha', 'Concepto', 'Medio', 'Detalle', 'Importe', 'Saldo']],
+    body: (estado?.filas || []).map(f => [
+      fmtFechaPdf(f.fecha),
+      `${etiqueta[f.tipo] || f.tipo}${f.anulado ? ' (ANULADO)' : ''}`,
+      medios[f.medio] || '',
+      f.anulado ? `Anulado: ${f.anulado.motivo}` : (f.referencia || ''),
+      `${f.tipo === 'pago' ? '-' : ''}${fmtCentPdf(f.montoCentavos)}`,
+      fmtCentPdf(f.saldoAcumulado),
+    ]),
+    theme: 'grid', styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [40, 40, 40] },
+    columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+  });
+  const t = estado?.totalesPorMedio || { efectivo: 0, transferencia: 0, directa: 0, total: 0 };
+  doc.autoTable({
+    startY: (doc.lastAutoTable?.finalY || 25) + 6,
+    head: [['Pagos por medio', 'Total']],
+    body: [['Efectivo', fmtCentPdf(t.efectivo)], ['Transferencia', fmtCentPdf(t.transferencia)], ['Transf. directa del cliente', fmtCentPdf(t.directa)]],
+    foot: [['Total pagos', fmtCentPdf(t.total)]],
+    theme: 'grid', styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [40, 40, 40] },
+    footStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
+  });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(`SALDO: ${fmtCentPdf(estado?.saldoFinal)}`, 14, (doc.lastAutoTable?.finalY || 25) + 10);
+  const blob = doc.output('blob');
+  return new File([blob], `estado_cuenta_${sufijoPeriodo(desde, hasta) || 'completo'}.pdf`, { type: 'application/pdf' });
+};
+
+// AC-CPR-4: pedido al proveedor (sin precios ni costos). items = [{ codigo, nombre, cantidad, unidad, unidades }].
+export const generarPedidoProveedorFile = async (items, { proveedor = '', fecha = '' } = {}) => {
+  const doc = await nuevoDocConTabla();
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(`Pedido${proveedor ? ` para ${proveedor}` : ''}`, 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`${fecha ? `${fmtDiaPdf(fecha)} · ` : ''}Productos: ${(items || []).length}`, 14, 20);
+  doc.autoTable({
+    startY: 25,
+    head: [['Código', 'Producto', 'Cantidad', 'Unidades']],
+    body: (items || []).map(i => [i.codigo || '', i.nombre || '', i.unidad === 'bulto' ? `${i.cantidad} ${i.cantidad === 1 ? 'bulto' : 'bultos'}` : `${i.cantidad} u.`, i.unidades]),
+    theme: 'grid', styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [40, 40, 40] },
+  });
+  const blob = doc.output('blob');
+  return new File([blob], `pedido_proveedor_${String(proveedor).replace(/[^0-9a-zA-Z]/g, '').slice(0, 20) || 'sin_nombre'}.pdf`, { type: 'application/pdf' });
+};

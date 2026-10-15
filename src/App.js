@@ -15,7 +15,9 @@ import Stock from './pages/Stock';
 import Comisiones from './pages/Comisiones';
 import FacturasAEmitir from './pages/FacturasAEmitir';
 import PedidosWeb from './pages/PedidosWeb';
+import Proveedores from './pages/Proveedores';
 import { contarPorRevisar } from './domain/pedidosWeb';
+import { contarStockBajo } from './domain/stockBajo';
 import SelectorVendedor from './components/SelectorVendedor';
 import { useSync } from './sync/useSync';
 import { esAdmin, esArmador } from './domain/permisos';
@@ -28,6 +30,7 @@ const TABS = [
   { id: 'armado', label: 'Armado', icon: '\u{1F4E6}' }, // 📦
   { id: 'facturacion', label: 'Facturar', icon: '\u{1F9FE}' }, // 🧾
   { id: 'stock', label: 'Stock', icon: '\u{1F3F7}\uFE0F' }, // 🏷️ (solo admin)
+  { id: 'proveedores', label: 'Proveedores', icon: '\u{1F69A}' }, // 🚚 solo admin (REQ-CPR)
   { id: 'faltantes', label: 'Faltantes', icon: '\u26A0\uFE0F' }, // ⚠️
   { id: 'deudas', label: 'Deudas', icon: '\u{1F4B0}' }, // 💰
   { id: 'ordenentrega', label: 'Orden', icon: '\u{1F5FA}️' }, // 🗺️
@@ -41,7 +44,9 @@ const TABS = [
 
 const AppContent = () => {
   const [tab, setTab] = useState('nuevo');
-  const { vendedorActual, online, faltantes, pedidos, seleccionarVendedor } = useApp();
+  const { vendedorActual, online, faltantes, pedidos, seleccionarVendedor, productos, stockMap } = useApp();
+  // REQ-CPR (AC-CPR-4): al marcar recibido un pedido al proveedor se abre Stock -> Ingreso precargado.
+  const [ingresoPrecargado, setIngresoPrecargado] = useState(null);
   const { syncing, lastSync, error, syncNote, syncNow } = useSync();
   // S-COM-11: permiso entero validado (src/domain/permisos). Un "1" en texto o
   // cualquier valor raro no habilita admin/armador: cae en las pestañas de vendedor.
@@ -64,6 +69,9 @@ const AppContent = () => {
 
   // REQ-WEB (AC-WEB-1): contador de pedidos web por revisar (solo se muestra al admin).
   const webPorRevisar = isAdmin ? contarPorRevisar(pedidos) : 0;
+
+  // REQ-STB (AC-STB-3): contador de productos con stock bajo en la pestaña Stock (solo admin, AC-SEC-4).
+  const stockBajo = isAdmin ? contarStockBajo(productos || [], stockMap) : 0;
 
   // "Orden de entrega" lo puede ver cualquier usuario, sea cual sea su rol.
   const visibleTabs = isAdmin
@@ -186,6 +194,18 @@ const AppContent = () => {
                   {webPorRevisar > 99 ? '99+' : webPorRevisar}
                 </span>
               )}
+              {t.id === 'stock' && stockBajo > 0 && (
+                <span data-testid="badge-stock" style={{
+                  position: 'absolute', top: -2, right: -2,
+                  background: 'var(--danger)', color: 'white',
+                  borderRadius: '50%', minWidth: 14, height: 14,
+                  fontSize: 9, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  lineHeight: 1,
+                }}>
+                  {stockBajo > 99 ? '99+' : stockBajo}
+                </span>
+              )}
               {t.id === 'faltantes' && faltantesMes > 0 && (
                 <span style={{
                   position: 'absolute', top: -2, right: -2,
@@ -209,7 +229,8 @@ const AppContent = () => {
         {tab === 'lista' && <ListaPedidos />}
         {tab === 'armado' && <Armado />}
         {tab === 'facturacion' && <Facturacion />}
-        {tab === 'stock' && isAdmin && <Stock />}
+        {tab === 'stock' && isAdmin && <Stock precarga={ingresoPrecargado} onPrecargaUsada={() => setIngresoPrecargado(null)} />}
+        {tab === 'proveedores' && isAdmin && <Proveedores onAbrirIngreso={(form) => { setIngresoPrecargado(form); setTab('stock'); }} />}
         {tab === 'faltantes' && <Faltantes />}
         {tab === 'deudas' && <Deudas />}
         {tab === 'ordenentrega' && <OrdenEntrega />}

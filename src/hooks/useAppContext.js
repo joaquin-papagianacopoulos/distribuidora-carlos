@@ -12,6 +12,9 @@ import {
   getMovimientosStock,
   getIngresos,
   getComisionesCierres,
+  getIngresosCostos,
+  getCuentaProveedores,
+  getPedidosProveedor,
 } from '../db';
 import { calcularStock } from '../domain/stock';
 import { tienePin, estaActivo } from '../domain/vendedores';
@@ -50,6 +53,10 @@ export const AppProvider = ({ children }) => {
   const [stockMap, setStockMap] = useState(() => new Map());
   // REQ-COM: cierres de comisiones locales (para el badge "Cerrado" en Facturacion).
   const [comisionesCierres, setComisionesCierres] = useState([]);
+  // REQ-INA / REQ-CPR: costos de ingresos, cuenta con proveedores y pedidos al proveedor (solo locales; suben con PIN).
+  const [ingresosCostos, setIngresosCostos] = useState([]);
+  const [cuentaProveedores, setCuentaProveedores] = useState([]);
+  const [pedidosProveedor, setPedidosProveedor] = useState([]);
   const [vendedorActual, setVendedorActual] = useState(null);
   const [loading, setLoading] = useState(true);
   const [online, setOnline] = useState(navigator.onLine);
@@ -102,6 +109,17 @@ export const AppProvider = ({ children }) => {
       setComisionesCierres((await getComisionesCierres()) || []);
     } catch (e) {
       setComisionesCierres([]);
+    }
+    // Tolerante igual que arriba: si faltan los stores v10 no se rompe el resto.
+    try {
+      const [ic, cp, pp] = await Promise.all([getIngresosCostos(), getCuentaProveedores(), getPedidosProveedor()]);
+      setIngresosCostos(ic || []);
+      setCuentaProveedores(cp || []);
+      setPedidosProveedor(pp || []);
+    } catch (e) {
+      setIngresosCostos([]);
+      setCuentaProveedores([]);
+      setPedidosProveedor([]);
     }
   }, []);
 
@@ -466,6 +484,9 @@ export const AppProvider = ({ children }) => {
       ingresos,
       stockMap,
       comisionesCierres,
+      ingresosCostos,
+      cuentaProveedores,
+      pedidosProveedor,
       vendedorActual,
       seleccionarVendedor,
       loading,

@@ -227,11 +227,23 @@ export const validarIngreso = (form = {}, { productos = [], proveedores = [], in
   return { ok: true, errores: {}, ingreso: cabecera, movimientos };
 };
 
-// AC-STK-7: productos con stock bajo (≤ mínimo de venta).
+// AC-STB-1: umbral de reposición. "Stock mínimo" si está cargado (entero >= 0, 0 incluido);
+// si está vacío, "Mínimo venta" como hoy (AC-STK-7). stockBajo.js lo re-exporta.
+export const umbralStock = (producto) => {
+  const p = producto && typeof producto === 'object' ? producto : {};
+  const sm = p.stockMinimo;
+  if (sm !== null && sm !== undefined && sm !== '') {
+    const n = toInt(sm);
+    if (n !== null && n >= 0) return n;
+  }
+  return Number(p.minimoVenta) || 0;
+};
+
+// AC-STK-7: productos con stock bajo (≤ umbral: "Stock mínimo" o, si falta, mínimo de venta).
 export const productosStockBajo = (productos = [], stockMap = new Map()) =>
   productos
     .map(p => ({ ...p, stock: stockDe(stockMap, p.id) }))
-    .filter(p => p.stock <= (Number(p.minimoVenta) || 0));
+    .filter(p => p.stock <= umbralStock(p));
 
 export const movimientoToRemote = (m) => ({
   id: m.id, producto_id: String(m.productoId), cantidad: Number(m.cantidad), tipo: m.tipo,
@@ -241,9 +253,18 @@ export const movimientoFromRemote = (r) => ({
   id: r.id, productoId: String(r.producto_id), cantidad: Number(r.cantidad), tipo: r.tipo,
   ref: r.ref, fecha: r.fecha, usuario: r.usuario || '', nota: r.nota || '', pendingSync: false,
 });
+// D2 (REQ-INA): ingresos_mercaderia es legible con la anon key. Los renglones se whitelistean
+// para que NUNCA salgan costos ni tipo A/B por ahi (viajan por ingresos_costos, con PIN).
+export const CAMPOS_ITEM_INGRESO_REMOTO = Object.freeze(['productoId', 'codigo', 'descripcion', 'stockActual', 'ingreso', 'stockTotal']);
+export const itemIngresoToRemote = (it) => {
+  const out = {};
+  for (const k of CAMPOS_ITEM_INGRESO_REMOTO) if (it && it[k] !== undefined) out[k] = it[k];
+  return out;
+};
 export const ingresoToRemote = (i) => ({
   id: i.id, factura_proveedor: i.facturaProveedor, proveedor_id: i.proveedorId,
-  proveedor_nombre: i.proveedorNombre, fecha: i.fecha, usuario: i.usuario || null, items: i.items,
+  proveedor_nombre: i.proveedorNombre, fecha: i.fecha, usuario: i.usuario || null,
+  items: (Array.isArray(i.items) ? i.items : []).map(itemIngresoToRemote),
 });
 export const ingresoFromRemote = (r) => ({
   id: r.id, facturaProveedor: r.factura_proveedor, proveedorId: r.proveedor_id,

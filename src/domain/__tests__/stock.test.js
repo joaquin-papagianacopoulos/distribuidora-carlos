@@ -241,3 +241,19 @@ describe('AC-SEC-2 toNum con separadores de miles (iter 3)', () => {
     expect(toNum('consultar')).toBeNull();
   });
 });
+
+describe('AC-INA-1 / D2 ingresoToRemote no emite costos ni tipo A/B', () => {
+  const { ingresoToRemote } = require('../stock');
+  it('AC-INA-1 whitelistea los renglones: costoUnitario y tipoFactura nunca salen por anon', () => {
+    const r = ingresoToRemote({
+      id: 'i1', facturaProveedor: 'F-1', proveedorId: 'p1', proveedorNombre: 'Prov', fecha: '2026-10-15T10:00:00.000Z', usuario: 'ana',
+      items: [{ productoId: '7', codigo: 'A', descripcion: 'Algo', stockActual: 2, ingreso: 5, stockTotal: 7, costoUnitario: 99.5, tipoFactura: 'A', costo: 1 }],
+    });
+    expect(r.items).toEqual([{ productoId: '7', codigo: 'A', descripcion: 'Algo', stockActual: 2, ingreso: 5, stockTotal: 7 }]);
+    expect(JSON.stringify(r)).not.toMatch(/costo|tipoFactura|tipo_factura/i);
+  });
+  it('AC-INA-5 ingreso viejo sin costos y items inválidos no rompen', () => {
+    expect(ingresoToRemote({ id: 'i2', items: [] }).items).toEqual([]);
+    expect(ingresoToRemote({ id: 'i3' }).items).toEqual([]);
+  });
+});

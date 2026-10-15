@@ -522,3 +522,24 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 - **AC-ZON-2** Imprimir: se eligen fecha(s) de pedido y una o varias zonas; los pedidos salen agrupados por zona y numerados sin huecos dentro de cada zona según quién tiene pedido (mismo criterio que hoy por día). El número de "ORDEN" de la boleta es el de la zona.
 - **AC-ZON-3** Migración sin pérdida: la primera vez, el orden por zona se inicializa con el orden actual (día y luego orden). `diaEntrega`/`ordenEntrega` se conservan (no se borran ni se muestran). Clientes sin zona van a "Sin zona" al final.
 - **AC-ZON-4** Funciones puras de orden por zona con tests (renumeración, empates, clientes sin zona, zonas con mayúsculas/espacios distintos se tratan como la misma).
+
+---
+
+## REQ-INA — Ingresos de mercadería con costo y Factura A/B
+- **AC-INA-1** En el ingreso de mercadería (REQ-ING) cada renglón suma **Costo unitario** (opcional, ≥ 0) y **Factura A / Factura B** (default el de la cabecera, que también se elige). Un mismo ingreso puede tener renglones A y B. Se puede cargar el número de factura A y el de B.
+- **AC-INA-2** El comprobante muestra subtotales de unidades y costo **por A y por B** y total.
+- **AC-INA-3** Historial de ingresos filtrable por proveedor, fechas y A/B, con totales A vs B; y por producto se ve qué entró en A y qué en B. Exportable a PDF.
+- **AC-INA-4** Al confirmar un ingreso con costo, opcionalmente (tilde, default sí) se actualiza el "Costo final" del producto (registra cambio de precio de venta si se recalcula, REQ-HPR).
+- **AC-INA-5** Ingresos viejos sin costo/A-B se siguen viendo ("sin dato"). Los movimientos de stock no cambian (AC-ING-5).
+
+## REQ-CPR — Cuenta con proveedores y pedidos al proveedor
+- **AC-CPR-1** Sección **"Proveedores"** (admin): por proveedor, una **cuenta corriente** con saldo = compras − pagos. Compras = ingresos con costo (se cargan solos al confirmar el ingreso) + cargos manuales (ej. factura sin ingreso). Pagos = los que carga el admin.
+- **AC-CPR-2** Cargar pago: fecha, monto, medio (**Efectivo / Transferencia / Transferencia directa del cliente al proveedor**), referencia/nota, y en "directa" el cliente/pedido opcional. Comprobante adjunto opcional (imagen/PDF máx. 5 MB a Storage privado, solo admin).
+- **AC-CPR-3** Movimientos de la cuenta en orden de fecha con saldo acumulado, filtro por fechas y medio, totales por medio. PDF de estado de cuenta.
+- **AC-CPR-4** **Pedido al proveedor**: el admin arma una lista (producto, cantidad en unidades o bultos) — con botón "Agregar los de stock bajo" (REQ-STB) —, la guarda como borrador, la comparte (PDF/WhatsApp con `share` existente) y la marca **recibida**: eso abre un Ingreso de mercadería precargado con esos productos y cantidades.
+- **AC-CPR-5** Anular un pago o cargo con motivo (no se borra; queda registrado quién/cuándo). Saldos y totales en funciones puras con tests (centavos, negativos, anulados).
+
+## REQ-STB — Sector Stock: búsqueda y avisos de stock bajo
+- **AC-STB-1** Campo nuevo de producto **"Stock mínimo"** (`stockMinimo`, punto de reposición). Si está vacío se usa "Mínimo venta" como hoy (AC-STK-7 sigue valiendo).
+- **AC-STB-2** Pantalla Stock: buscador por nombre/código/marca (sin tildes ni mayúsculas, palabras en cualquier orden) y filtros por rubro, marca, proveedor y estado (**sin stock / bajo / ok / negativo**).
+- **AC-STB-3** Avisos: contador "N productos con stock bajo" visible en la pestaña Stock y arriba de la pantalla; lista de stock bajo con botón "Agregar al pedido al proveedor" (REQ-CPR) por producto o todos los de un proveedor.

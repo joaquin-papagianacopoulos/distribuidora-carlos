@@ -42,7 +42,7 @@ describe('AC-WEB-6 DB_VERSION 8 agrega pedidosWebAcciones sin tocar datos', () =
 
   it('AC-WEB-6 desde v7 crea SOLO pedidosWebAcciones con keyPath id (UUID) e índice pedidoRemoteId', async () => {
     const r = await correr(V7);
-    expect(r.version).toBe(9);
+    expect(r.version).toBe(10);
     expect(r.creados.filter(c => c[0] === 'pedidosWebAcciones')).toEqual([['pedidosWebAcciones', { keyPath: 'id' }]]);
     expect(r.indices.filter(i => i[0] === 'pedidosWebAcciones')).toEqual([['pedidosWebAcciones', 'pedidoRemoteId', 'pedidoRemoteId', { unique: false }]]);
   });
@@ -55,7 +55,7 @@ describe('AC-WEB-6 DB_VERSION 8 agrega pedidosWebAcciones sin tocar datos', () =
   });
 
   it('AC-WEB-6 es idempotente: si el store ya existe no crea nada', async () => {
-    const r = await correr([...V7, 'pedidosWebAcciones', 'cambiosPrecio']);
+    const r = await correr([...V7, 'pedidosWebAcciones', 'cambiosPrecio', 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor']);
     expect(r.creados).toEqual([]);
   });
 
