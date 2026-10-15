@@ -10,7 +10,6 @@ import {
 import ClienteForm from '../components/ClienteForm';
 import LinksTienda from '../components/LinksTienda';
 import ConfigTienda from '../components/ConfigTienda';
-import ImportarPreciosPdf from '../components/ImportarPreciosPdf';
 import { subirImagenTienda } from '../services/tiendaConfigService';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
@@ -202,10 +201,14 @@ const Configuracion = () => {
     );
   }
 
+  // El formulario de producto se abre arriba de todo (reemplaza la lista): se vuelve al inicio.
+  const irArriba = () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* jsdom */ } };
+
   const openAdd = () => {
     setEditItem(null);
     setForm(tab === 'vendedores' ? { permiso: 2 } : {});
     setShowForm(true);
+    if (tab === 'productos') irArriba();
   };
 
   const openEdit = (item) => {
@@ -213,6 +216,7 @@ const Configuracion = () => {
     // S-COM-13: el PIN nunca se precarga (no esta en el dispositivo).
     setForm({ ...item, permiso: Number(item?.permiso || 2), pin: '', clearPin: false, adminPin: '' });
     setShowForm(true);
+    if (tab === 'productos') irArriba();
   };
 
   const cerrarForm = () => { setShowForm(false); setForm({}); setEditItem(null); };
@@ -230,7 +234,8 @@ const Configuracion = () => {
   };
 
   // REQ-PROD: el stock no se guarda en el producto; se registra como movimiento.
-  const guardarProducto = async (data, stock, stockMostrado) => {
+  // REQ-FOT: con el PIN del formulario se sube a Supabase en el momento (la tienda lee de ahí).
+  const guardarProducto = async (data, stock, stockMostrado, { pin = '' } = {}) => {
     try {
       if (editItem) {
         await updateProducto({ ...editItem, ...data, marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true });
@@ -245,23 +250,16 @@ const Configuracion = () => {
     }
     await recargar();
     cerrarForm();
-  };
-
-  // REQ-PDF (AC-PDF-3): solo actualiza precios de productos existentes. En modo
-  // "costo" cambia costo_final (columna extra) => extrasDirty como el formulario.
-  const aplicarPreciosPdf = async (cambios, modo) => {
-    const actuales = await getProductos();
-    const porId = new Map(actuales.map(p => [String(p.id), p]));
-    for (const c of cambios) {
-      const p = porId.get(String(c.id));
-      if (!p) continue;
-      await updateProducto({ ...p, ...c.cambios, ...(modo === 'costo' ? { extrasDirty: true } : {}) });
+    if (pin && navigator.onLine) {
+      const r = await subirProductosConPin(pin);
+      setProdMsg(r.ok
+        ? 'Producto guardado y subido: ya se ve en la tienda (recargala si la tenías abierta).'
+        : `Producto guardado en este dispositivo, pero no se pudo subir: ${r.mensaje || 'probá con "Subir productos".'}`);
+      await recargar();
+    } else {
+      setProdMsg('Producto guardado en este dispositivo. Para que el cambio se vea en la tienda, subilo con tu PIN en "Subir productos".');
     }
-    await recargar();
-    if (navigator.onLine) {
-      try { await syncProductos(); } catch { /* queda pendingSync: se sube en el próximo sync */ }
-      await refrescarPendientesProd();
-    }
+    await refrescarPendientesProd();
   };
 
   // REQ-PROV
@@ -449,6 +447,7 @@ const Configuracion = () => {
     await recargar();
   };
 
+  const editandoProducto = showForm && tab === 'productos';
   const listaBase = tab === 'productos' ? productos
     : tab === 'clientes' ? clientes
       : tab === 'proveedores' ? proveedores
@@ -577,6 +576,22 @@ const Configuracion = () => {
         ))}
       </div>
 
+      {/* Alta/edición de producto: arriba de todo y en lugar de la lista (no hay que scrollear). */}
+      {showForm && tab === 'productos' && (
+        <ProductoForm
+          key={editItem?.id ?? 'nuevo'}
+          inicial={editItem}
+          existentes={productos}
+          proveedores={proveedores}
+          rubros={listarRubros(productos)}
+          marcas={listarMarcas(productos)}
+          stockActual={editItem ? stockDe(stockMap, editItem.id) : 0}
+          onGuardar={guardarProducto}
+          onCancelar={cerrarForm}
+          subirFoto={subirImagenTienda}
+        />
+      )}
+
       {/* Cambiar vendedor activo */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 600 }}>
@@ -591,7 +606,7 @@ const Configuracion = () => {
       </div>
 
       {/* S-VTA-01: subir productos pendientes con el PIN del admin */}
-      {tab === 'productos' && prodPendientes > 0 && (
+      {tab === 'productos' && !editandoProducto && prodPendientes > 0 && (
         <div className="card" style={{ marginBottom: 16 }} data-testid="productos-pendientes">
           <div style={{ fontWeight: 700, marginBottom: 6 }}>{prodPendientes} producto(s) sin subir</div>
           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
@@ -650,7 +665,7 @@ const Configuracion = () => {
       )}
 
       {/* Importacion de productos (CSV/XLSX + plantilla) — solo pestaña productos */}
-      {tab === 'productos' && (
+      {tab === 'productos' && !editandoProducto && (
         <div className="card" style={{ marginBottom: 16 }} data-testid="import-productos">
           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 600 }}>
             Importar / Actualizar desde CSV
@@ -691,8 +706,6 @@ const Configuracion = () => {
             </button>
           </div>
           <ResultadoImport r={resultadoCSV} testId="resultado-productos" />
-          {/* REQ-PDF: precios desde la lista del proveedor en PDF */}
-          <ImportarPreciosPdf productos={productos} onAplicar={aplicarPreciosPdf} />
 
           {progresoImagenes && !progresoImagenes.done && (
             <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text3)' }}>
@@ -754,7 +767,7 @@ const Configuracion = () => {
       )}
 
       {/* Lista */}
-      {tab !== 'tienda' && (
+      {tab !== 'tienda' && !editandoProducto && (
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>
@@ -908,20 +921,6 @@ const Configuracion = () => {
           vendedores={vendedoresParaSelector(vendedores, editItem?.vendedor)}
           onGuardar={guardarCliente}
           onCancelar={cerrarForm}
-        />
-      )}
-      {showForm && tab === 'productos' && (
-        <ProductoForm
-          key={editItem?.id ?? 'nuevo'}
-          inicial={editItem}
-          existentes={productos}
-          proveedores={proveedores}
-          rubros={listarRubros(productos)}
-          marcas={listarMarcas(productos)}
-          stockActual={editItem ? stockDe(stockMap, editItem.id) : 0}
-          onGuardar={guardarProducto}
-          onCancelar={cerrarForm}
-          subirFoto={subirImagenTienda}
         />
       )}
       {showForm && tab === 'proveedores' && (

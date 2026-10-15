@@ -84,7 +84,10 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     const base = inicial ? stockMostrado : 0;
     const cambioStock = inicial ? String(valores.stock).trim() !== String(stockMostrado) : r.stock !== null;
     const producto = subirFoto ? { ...r.producto, imagen_url: foto || null } : r.producto;
-    try { await onGuardar(producto, cambioStock ? r.stock : null, base); } finally { setGuardando(false); }
+    // REQ-FOT: con el PIN cargado, Configuración sube el producto a Supabase al guardar
+    // (si no, queda solo en el dispositivo y la tienda no ve la foto nueva).
+    const extra = subirFoto ? [{ pin: fotoPin }] : [];
+    try { await onGuardar(producto, cambioStock ? r.stock : null, base, ...extra); } finally { setGuardando(false); }
   };
 
   const fmt = (n) => `$${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -122,14 +125,14 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
               ? <img src={foto} alt="" style={{ width: 72, height: 72, objectFit: 'contain', borderRadius: 8, background: 'var(--bg3)' }} data-testid="foto-preview" />
               : <div style={{ width: 72, height: 72, borderRadius: 8, background: 'var(--bg3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--text3)' }}>Sin foto</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 180 }}>
-              <input className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin"
+              <input className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin" aria-label="Tu PIN de admin"
                 value={fotoPin} onChange={e => setFotoPin(e.target.value)} data-testid="foto-pin" />
               <input type="file" accept="image/jpeg,image/png,image/webp" disabled={subiendoFoto} data-testid="foto-input"
                 onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) elegirFoto(f); }} />
               {foto && <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => { setFoto(''); setFotoMsg('Foto quitada. Guardá para confirmar.'); }}>Quitar foto</button>}
             </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Se ve en la tienda online.'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Con tu PIN, al guardar el producto se publica en la tienda.'}</div>
         </div>
       )}
       {precioManual && (

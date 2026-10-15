@@ -452,16 +452,6 @@ Migración `supabase/migrations/009_tienda_portada.sql` (se aplica a mano, despu
 
 > Pedido del dueño 2026-10-15: "quiero que cada producto tenga su foto". Hasta ahora la foto (`imagen_url`) solo se completaba sola con la búsqueda de Google al importar. Usa el bucket `tienda` y el permiso de subida de REQ-POR (`admin_tienda_subida`, PIN del admin): no requiere migración nueva.
 
-- **AC-FOT-1** El formulario de producto permite subir una foto (jpg/png/webp, máx. 2 MB, validado en el navegador) con el PIN del admin; se muestra la miniatura y al guardar queda en `imagen_url` (se sincroniza como hasta ahora).
+- **AC-FOT-1** El formulario de producto permite subir una foto (jpg/png/webp, máx. 2 MB, validado en el navegador) con el PIN del admin; se muestra la miniatura y al guardar queda en `imagen_url`. Con el PIN cargado, guardar **sube el producto a Supabase en el momento** (sin el PIN queda pendiente para "Subir productos" y se avisa), así la tienda muestra la foto nueva. El formulario de alta/edición se abre arriba de todo, en lugar de la lista.
 - **AC-FOT-2** Se puede quitar la foto. Editar un producto sin tocar la foto conserva la que tenía (incluidas las que encontró la búsqueda automática).
 - **AC-FOT-3** La lista de productos marca los que no tienen foto y muestra cuántos faltan.
-
-## REQ-PDF — Actualizar precios desde la lista de precios del proveedor (PDF)
-
-> Pedido del dueño 2026-10-15. Decisiones: PDF generado por sistema (con texto, no escaneado); **solo actualiza precios de productos existentes** (no crea productos ni toca stock). Lectura con `pdfjs-dist` (chunk aparte, sin `eval`).
-
-- **AC-PDF-1** Botón "Actualizar precios desde PDF" en Configuración → Productos. Acepta PDF de hasta 10 MB y 200 páginas. Un PDF escaneado (sin texto) o con contraseña muestra un mensaje claro.
-- **AC-PDF-2** De cada renglón se detecta código, descripción y precios (formatos `$ 1.234,56`, `1.234,56`, `12.500`, `1234.56`). Si la lista trae varias columnas de precio (ej. sin/con IVA) el admin elige cuál usar.
-- **AC-PDF-3** Se buscan los productos por código (sin distinguir mayúsculas ni tildes). Por nombre exacto solo como sugerencia sin tildar. Nunca se crean productos ni movimientos de stock; un producto repetido en el PDF se toma una sola vez.
-- **AC-PDF-4** Vista previa antes de guardar: producto, precio actual → nuevo, variación % y avisos. Solo se aplica lo tildado; vienen sin tildar los cambios ≥ 50 %, los encontrados por nombre y los sin cambios.
-- **AC-PDF-5** El admin indica qué trae el PDF: **Costo** (se guarda en Costo final y Precio venta 1 se recalcula con los descuentos y la ganancia de cada producto, AC-PROD-1) o **Precio de venta 1** (se guarda tal cual).
