@@ -31,7 +31,7 @@ describe('AC-VTA-1 plantilla de productos con unidad de venta', () => {
 
   it('AC-VTA-1 Dos Corazones en el Excel: Display, bulto x16, Bulto, Si', () => {
     const rows = [LABELS_P, fila({
-      'Código': 'DC1', 'Descripción': 'Dos Corazones', 'Marca': 'Dos Corazones', 'Precio venta 1': '900', 'Bulto x': '16',
+      'Código': 'DC1', 'Descripción': 'Dos Corazones', 'Marca': 'Dos Corazones', 'Precio por unidad': '900', 'Bulto x': '16',
       'Se vende por': 'Bulto', 'Etiqueta del bulto': 'display', 'Mostrar en tienda': 'Sí',
     })];
     const plan = planificarImportacion(rows, 'productos', { existentes: [], proveedores: [] });
@@ -43,7 +43,7 @@ describe('AC-VTA-1 plantilla de productos con unidad de venta', () => {
 
   it('AC-VTA-1 "Bulto" con Bulto x 1 (o vacio) rechaza la fila', () => {
     for (const bx of ['1', '']) {
-      const rows = [LABELS_P, fila({ 'Código': 'DC1', 'Descripción': 'X', 'Precio venta 1': '5', 'Bulto x': bx, 'Se vende por': 'Bulto' })];
+      const rows = [LABELS_P, fila({ 'Código': 'DC1', 'Descripción': 'X', 'Precio por unidad': '5', 'Bulto x': bx, 'Se vende por': 'Bulto' })];
       const plan = planificarImportacion(rows, 'productos', { existentes: [], proveedores: [] });
       expect(plan.entradas[0].accion).toBe('rechazar');
       expect(plan.entradas[0].errores.join(' ')).toMatch(/Bulto x/);
@@ -71,7 +71,7 @@ describe('AC-VTA-1 plantilla de productos con unidad de venta', () => {
 
   it('AC-VTA-1 columnas vacias en un producto existente conservan lo que ya tenia', () => {
     const existente = { id: 1, codigo: 'DC1', nombre: 'Dos Corazones', precio: 900, bultoX: 16, ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false, marca: 'Dos Corazones' };
-    const rows = [LABELS_P, fila({ 'Código': 'DC1', 'Descripción': 'Dos Corazones', 'Precio venta 1': '950' })];
+    const rows = [LABELS_P, fila({ 'Código': 'DC1', 'Descripción': 'Dos Corazones', 'Precio por unidad': '950' })];
     const plan = planificarImportacion(rows, 'productos', { existentes: [existente], proveedores: [] });
     expect(plan.entradas[0].accion).toBe('actualizar');
     expect(plan.entradas[0].valor.producto).toMatchObject({ ventaPor: 'bulto', bultoNombre: 'Display', visibleTienda: false, marca: 'Dos Corazones', precio: 950, bultoX: 16 });
@@ -80,9 +80,9 @@ describe('AC-VTA-1 plantilla de productos con unidad de venta', () => {
   it('AC-VTA-1 la marca se deduplica contra las existentes y contra las del propio archivo', () => {
     const existentes = [{ id: 1, codigo: 'X', nombre: 'X', precio: 1, marca: 'Arcor', createdAt: 1 }];
     const rows = [LABELS_P,
-      fila({ 'Código': 'A1', 'Descripción': 'A1', 'Precio venta 1': '5', 'Marca': 'ARCOR' }),
-      fila({ 'Código': 'A2', 'Descripción': 'A2', 'Precio venta 1': '5', 'Marca': 'bagley' }),
-      fila({ 'Código': 'A3', 'Descripción': 'A3', 'Precio venta 1': '5', 'Marca': 'BAGLEY ' }),
+      fila({ 'Código': 'A1', 'Descripción': 'A1', 'Precio por unidad': '5', 'Marca': 'ARCOR' }),
+      fila({ 'Código': 'A2', 'Descripción': 'A2', 'Precio por unidad': '5', 'Marca': 'bagley' }),
+      fila({ 'Código': 'A3', 'Descripción': 'A3', 'Precio por unidad': '5', 'Marca': 'BAGLEY ' }),
     ];
     const plan = planificarImportacion(rows, 'productos', { existentes, proveedores: [] });
     expect(plan.entradas.map(e => e.valor.producto.marca)).toEqual(['Arcor', 'bagley', 'bagley']);

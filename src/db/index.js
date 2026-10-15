@@ -3,10 +3,12 @@ import { getLocalTodayStr, normalizePedidoFecha } from '../utils/pedidos';
 import { sinPinLocal, tieneCamposSecretos } from '../domain/vendedores';
 
 import { huellaProductoSync } from '../domain/productosRpc';
+import { cambioDePrecio } from '../domain/precios';
 const DB_NAME = 'distribuidoraDB';
 // v6 — S-COM-13: se quita el PIN en texto plano de los vendedores locales.
 // v7 — REQ-COMR: store comisionesRubro (% por vendedor y rubro). Solo se agrega.
-const DB_VERSION = 8;
+// v9 — REQ-HPR: store cambiosPrecio (historial de cambios de precio). Solo se agrega.
+const DB_VERSION = 9;
 
 let db = null;
 
@@ -111,6 +113,16 @@ export const initDB = () => new Promise((resolve, reject) => {
       }
     }
 
+    // v9 — REQ-HPR (AC-HPR-1): historial inmutable de cambios de precio, id UUID.
+    // Solo se AGREGA el store; no toca productos ni pedidos.
+    if (!d.objectStoreNames.contains('cambiosPrecio')) {
+      const cp = d.createObjectStore('cambiosPrecio', { keyPath: 'id' });
+      if (cp && typeof cp.createIndex === 'function') {
+        cp.createIndex('productoId', 'productoId', { unique: false });
+        cp.createIndex('fecha', 'fecha', { unique: false });
+      }
+    }
+
     // v6 — S-COM-13 (login 100 % online). El PIN se verifica solo en el
     // servidor (rpc verificar_pin): se BORRA la propiedad "pin" de cada vendedor
     // local y queda "tienePin" (para el candado). No se borra ni se recrea
@@ -176,13 +188,22 @@ export const addProducto = async (p) => {
     req.onerror = () => rej(req.error);
   });
 };
-// Alta local (UI/CSV): marcar como pendiente para subir a Supabase
-export const addProductoLocal = async (p) => {
-  const store = await tx('productos', 'readwrite');
+// Alta local (UI/CSV): marcar como pendiente para subir a Supabase.
+// AC-HPR-1: si el alta trae precio, registra el cambio en la MISMA transaccion.
+export const addProductoLocal = async (p, { usuario = null } = {}) => {
+  const d = await getDB();
   return new Promise((res, rej) => {
-    const req = store.add({ ...p, createdAt: Date.now(), pendingSync: true });
-    req.onsuccess = () => res(req.result);
-    req.onerror = () => rej(req.error);
+    const t = d.transaction(['productos', 'cambiosPrecio'], 'readwrite');
+    let nuevoId;
+    const req = t.objectStore('productos').add({ ...p, createdAt: Date.now(), pendingSync: true });
+    req.onsuccess = () => {
+      nuevoId = req.result;
+      const cambio = cambioDePrecio(null, { ...p, id: nuevoId }, { usuario });
+      if (cambio) t.objectStore('cambiosPrecio').add(cambio);
+    };
+    t.oncomplete = () => res(nuevoId);
+    t.onerror = () => rej(t.error || req.error);
+    t.onabort = () => rej(t.error || req.error);
   });
 };
 
@@ -235,12 +256,25 @@ export const putVendedoresBatch = async (rows) => {
     t.onabort = () => rej(t.error);
   });
 };
-export const updateProducto = async (p) => {
-  const store = await tx('productos', 'readwrite');
+// AC-HPR-1: el producto anterior se lee DENTRO de la transaccion (no del estado
+// de React) y el cambio de precio se guarda junto con el producto: o ambos o ninguno.
+export const updateProducto = async (p, { usuario = null } = {}) => {
+  const d = await getDB();
   return new Promise((res, rej) => {
-    const req = store.put({ ...p, pendingSync: true }); // ← marcar pendiente
-    req.onsuccess = () => res(req.result);
-    req.onerror  = () => rej(req.error);
+    const t = d.transaction(['productos', 'cambiosPrecio'], 'readwrite');
+    const ps = t.objectStore('productos');
+    let resultado;
+    const getReq = ps.get(p.id);
+    getReq.onsuccess = () => {
+      const previo = getReq.result || null;
+      const putReq = ps.put({ ...p, pendingSync: true }); // marcar pendiente
+      putReq.onsuccess = () => { resultado = putReq.result; };
+      const cambio = cambioDePrecio(previo, p, { usuario });
+      if (cambio) t.objectStore('cambiosPrecio').add(cambio);
+    };
+    t.oncomplete = () => res(resultado);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
   });
 };
 
@@ -817,6 +851,14 @@ export const putComisionesRubroLocal = (rows) =>
 // Escritura "neutral" (respuesta del servidor / pull / marcas): guarda tal cual.
 export const putComisionesRubroRemotos = (rows) => putManyInto('comisionesRubro', rows);
 export const clearComisionesRubroPendingSync = (ids) => clearPendingIn('comisionesRubro', ids);
+
+// ---- CAMBIOS DE PRECIO (REQ-HPR) ----
+// Registros inmutables con id UUID. pendingSync hasta que la RPC del servidor
+// (con el PIN del admin) los acepta; se limpian SOLO los ids aceptados.
+export const getCambiosPrecio = () => getAllFrom('cambiosPrecio');
+// Escritura "neutral" (pull del servidor): guarda tal cual.
+export const putCambiosPrecioRemotos = (rows) => putManyInto('cambiosPrecio', rows);
+export const clearCambiosPrecioPendingSync = (ids) => clearPendingIn('cambiosPrecio', ids);
 
 // ---- PEDIDOS WEB (REQ-WEB, AC-WEB-6) ----
 // Acciones aceptar/rechazar con id UUID. Quedan pendingSync hasta que la RPC del

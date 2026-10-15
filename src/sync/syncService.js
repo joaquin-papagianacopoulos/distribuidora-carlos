@@ -4,7 +4,8 @@ import { isPedidoOculto, makePedidoEliminado, normalizePedidoFecha } from '../ut
 import { fetchProductImage, isImageSearchConfigured, ImageSearchQuotaError } from '../services/imageSearch';
 import { detectarMarca } from '../utils/brands';
 import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
-import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote } from '../domain/productos';
+import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote } from '../domain/productos';
+import { bajarCambiosPrecio } from '../services/cambiosPrecioService';
 import { normalizarBultoNombre } from '../domain/unidadVenta';
 import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
 
@@ -36,6 +37,8 @@ export const upsertTolerante = async (table, rowsCompletas, rowsLegacy) => {
 // pasa al escalon 001; cualquier otra columna faltante cae al basico. Asi, si
 // falta solo la 006, las columnas de la 001 (bulto_x, costo_final...) igual suben.
 const COLUMNAS_006 = /venta_por|bulto_nombre|visible_tienda/;
+// REQ-PBU: con 4 escalones el primero suma precio_bulto (migracion 010).
+const COLUMNAS_010 = /precio_bulto/;
 const avisosEscalon = new Set();
 export const upsertEscalonado = async (table, variantes) => {
   let i = 0;
@@ -43,10 +46,16 @@ export const upsertEscalonado = async (table, variantes) => {
     const { error } = await supabase.from(table).upsert(variantes[i], { onConflict: 'id' });
     if (!error) return { error: null, nivel: i };
     if (!esColumnaInexistente(error) || i >= variantes.length - 1) return { error, nivel: i };
-    const siguiente = i === 0 && variantes.length > 2 && COLUMNAS_006.test(String(error.message || '')) ? 1 : variantes.length - 1;
+    const msg = String(error.message || '');
+    const con010 = variantes.length > 3;
+    const idx006 = con010 ? 1 : 0;
+    let siguiente = variantes.length - 1;
+    if (con010 && i === 0 && COLUMNAS_010.test(msg)) siguiente = 1;
+    else if (i <= idx006 && variantes.length > 2 && COLUMNAS_006.test(msg)) siguiente = idx006 + 1;
     if (!avisosEscalon.has(siguiente)) {
       avisosEscalon.add(siguiente);
-      console.warn(`Supabase: faltan columnas nuevas en "${table}". Correr supabase/migrations/${siguiente === 1 ? '006_unidad_venta' : '001_altas_y_stock'}.sql. Se sube solo lo que existe.`);
+      const archivo = con010 && siguiente === 1 ? '010_lote_operacion_precios' : (siguiente === idx006 + 1 && siguiente < variantes.length - 1 ? '006_unidad_venta' : '001_altas_y_stock');
+      console.warn(`Supabase: faltan columnas nuevas en "${table}". Correr supabase/migrations/${archivo}.sql. Se sube solo lo que existe.`);
     }
     i = siguiente;
   }
@@ -258,11 +267,14 @@ const subirProductosDirecto = async (pendientes) => {
     let legacy = false;
     if (idxExtras.length) {
       const r = await upsertEscalonado('productos', [
+        idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]), ...productoVentaToRemote(slice[i]), ...productoPreciosToRemote(slice[i]) })),
         idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]), ...productoVentaToRemote(slice[i]) })),
         idxExtras.map(i => ({ ...batch[i], ...productoExtraToRemote(slice[i]) })),
         idxExtras.map(i => batch[i]),
       ]);
-      error = r.error; legacy = r.nivel > 0;
+      error = r.error;
+      // Nivel 1 = solo falta la 010: es "legacy" solo si algun producto tiene precio por bulto que se perderia.
+      legacy = r.nivel > 1 || (r.nivel === 1 && idxExtras.some(i => Number(slice[i].precioBulto) > 0));
     }
     if (!error && idxBasico.length) {
       const r = await supabase.from('productos').upsert(idxBasico.map(i => batch[i]), { onConflict: 'id' });
@@ -1068,7 +1080,7 @@ export const downloadMaestros = async () => {
         String(local.marca || '') === String(r.marca ?? local.marca ?? '') &&
         // AC-VTA-5: defaults aplicados en ambos lados (undefined vs true no es diferencia).
         Object.entries(productoExtraFromRemote(r, local)).every(([k, v]) => {
-          const l = k === 'bultoNombre' ? normalizarBultoNombre(local[k]) : (k === 'visibleTienda' ? local[k] !== false : local[k]);
+          const l = k === 'bultoNombre' ? normalizarBultoNombre(local[k]) : (k === 'visibleTienda' ? local[k] !== false : (k === 'precioBulto' ? Number(local[k]) || 0 : local[k]));
           return String(l ?? '') === String(v ?? '');
         });
       if (!same) continue;
@@ -1129,6 +1141,9 @@ export const downloadMaestros = async () => {
   for (let i = 0; i < vendedoresUpserts.length; i += 500) {
     await putVendedoresBatch(vendedoresUpserts.slice(i, i + 500));
   }
+
+  // REQ-HPR: historial de cambios de precio (tolerante: sin la 010 no rompe el pull).
+  await bajarCambiosPrecio();
 
   return { ok: true };
 };

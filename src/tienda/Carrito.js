@@ -48,7 +48,7 @@ const Carrito = ({ lineas, catalogoById, config, onCambiar, onQuitar, navegar, s
                 {prod ? (
                   <>
                     <div className="t-linea-detalle">
-                      {textoEquivalencia(l.unidades, prod)} · {formatearPesos(prod.precio)} c/u
+                      {textoEquivalencia(l.unidades, prod)} · {formatearPesos(ren ? ren.precio : prod.precio)} c/u
                     </div>
                     <div className="t-cantidad">
                       <button type="button" className="t-btn t-btn-sec" aria-label={`Menos ${prod.nombre}`}

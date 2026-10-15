@@ -2,6 +2,8 @@
 import { texto, toNum, toInt, redondear2, claveUnica } from './validacion';
 import { normalizarRubro, resolverRubro } from './rubros';
 import { resolverMarca, normalizarMarca } from './marcas';
+import { avisoSinStock } from './stock';
+import { minimoEfectivo } from './minimos';
 import { validarUnidadVenta, VENTA_POR, BULTO_NOMBRES, ventaPorEfectivo, normalizarBultoNombre, parsearBooleano } from './unidadVenta';
 
 export const CAMPOS_PRODUCTO = [
@@ -16,7 +18,9 @@ export const CAMPOS_PRODUCTO = [
   { key: 'descuento1', label: 'Descuento 1', tipo: 'number', sufijo: '%' },
   { key: 'descuento2', label: 'Descuento 2', tipo: 'number', sufijo: '%' },
   { key: 'ganancia', label: '% Ganancia', tipo: 'number', sufijo: '%' },
-  { key: 'precio', label: 'Precio venta 1', tipo: 'number', prefijo: '$' },
+  // AC-PBU-1: el campo interno sigue siendo `precio`; se muestra como "Precio por unidad".
+  { key: 'precio', label: 'Precio por unidad', tipo: 'number', prefijo: '$' },
+  { key: 'precioBulto', label: 'Precio por unidad llevando bulto', tipo: 'number', prefijo: '$' },
   { key: 'precioVenta2', label: 'Precio venta 2', tipo: 'number', prefijo: '$' },
   { key: 'bultoX', label: 'Bulto x', tipo: 'number' },
   // AC-VTA-1: unidad de venta. El precio cargado es siempre por unidad.
@@ -84,12 +88,17 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   p.ganancia = gan !== null && gan >= 0 ? gan : 0;
 
   const calculado = calcularPrecioVenta(p).precioVenta1;
-  if (calculado > MAX_IMPORTE) errores.precio = 'Precio venta 1 demasiado alto';
+  if (calculado > MAX_IMPORTE) errores.precio = 'Precio por unidad demasiado alto';
   const precioManual = form.precio === '' || form.precio == null ? null : toNum(form.precio);
   if (form.precio !== '' && form.precio != null && (precioManual === null || precioManual < 0 || precioManual > MAX_IMPORTE)) {
-    errores.precio = 'Precio venta 1 inválido';
+    errores.precio = 'Precio por unidad inválido';
   }
   p.precio = precioManual !== null && precioManual >= 0 ? redondear2(precioManual) : calculado;
+
+  // AC-PBU-1: vacío/0 = no hay precio por bulto. Si supera al unitario no se bloquea (solo aviso en el form).
+  const pb = form.precioBulto === '' || form.precioBulto == null ? 0 : toNum(form.precioBulto);
+  if (pb === null || pb < 0 || pb > MAX_IMPORTE) errores.precioBulto = 'Precio por unidad llevando bulto inválido';
+  p.precioBulto = pb !== null && pb >= 0 ? redondear2(pb) : 0;
 
   const pv2 = form.precioVenta2 === '' || form.precioVenta2 == null ? 0 : toNum(form.precioVenta2);
   if (pv2 === null || pv2 < 0 || pv2 > MAX_IMPORTE) errores.precioVenta2 = 'Precio venta 2 inválido';
@@ -131,6 +140,11 @@ export const productoExtraToRemote = (p = {}) => ({
   minimo_venta: Number(p.minimoVenta) || 1,
 });
 
+// AC-PBU: columna de la migración 010 (aparte para poder escalonar el sync si falta).
+export const productoPreciosToRemote = (p = {}) => ({
+  precio_bulto: Number(p.precioBulto) > 0 ? Number(p.precioBulto) : 0,
+});
+
 // AC-VTA-5: columnas de la migración 006 (aparte de las de la 001 para poder escalonar el sync).
 export const productoVentaToRemote = (p = {}) => ({
   venta_por: ventaPorEfectivo(p),
@@ -149,6 +163,7 @@ export const productoExtraFromRemote = (r = {}, local = {}) => {
     precioVenta2: Number(pick('precio_venta2', 'precioVenta2', 0)),
     bultoX: Number(pick('bulto_x', 'bultoX', 1)),
     minimoVenta: Number(pick('minimo_venta', 'minimoVenta', 1)),
+    precioBulto: Number(pick('precio_bulto', 'precioBulto', 0)) || 0,
     // AC-VTA-5: columna ausente (sin 006) => valor local => default derivado.
     ventaPor: pick('venta_por', 'ventaPor', undefined),
     bultoNombre: normalizarBultoNombre(pick('bulto_nombre', 'bultoNombre', 'Bulto')),
@@ -159,10 +174,10 @@ export const productoExtraFromRemote = (r = {}, local = {}) => {
 // AC-PROD-4: avisos al cargar un pedido (no bloquean la venta).
 export const avisosItemPedido = (producto, cantidad, stockDisponible) => {
   const avisos = [];
-  const min = Number(producto?.minimoVenta) || 1;
+  const min = minimoEfectivo(producto);
   if (Number(cantidad) < min) avisos.push(`Mínimo de venta: ${min}`);
-  if (stockDisponible !== undefined && stockDisponible !== null && Number(cantidad) > stockDisponible) {
-    avisos.push(`Stock disponible: ${stockDisponible}`);
-  }
+  // AC-SST-1: aviso, nunca bloquea.
+  const sinStock = avisoSinStock(cantidad, stockDisponible);
+  if (sinStock) avisos.push(sinStock);
   return avisos;
 };

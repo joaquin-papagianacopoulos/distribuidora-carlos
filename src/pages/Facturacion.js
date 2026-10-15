@@ -16,6 +16,9 @@ import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON
 import { acotarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
+import { avisoSinStock, stockParaAviso, resumenSinStock } from '../domain/stock';
+import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
+import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
 
 // REQ-COM (AC-COM-13): texto extra para confirmar cambios sobre un pedido que
@@ -74,6 +77,9 @@ const ArmadoResumen = ({ pedido, compact = false, ocultarRemovidos = false }) =>
 const sortItems = (items) =>
   [...(items || [])].sort((a, b) => alpha(a?.nombre, b?.nombre));
 
+// AC-PBU-3: re-precia un renglón con su cantidad actual (precio por bulto), salvo precio manual.
+const reprecio = (it) => precioAplicadoRenglon(it, it?.cantidad);
+
 // Item row con inputs locales — no borra el item al vaciar el campo
 const FacturacionItemRow = ({
   item,
@@ -90,6 +96,8 @@ const FacturacionItemRow = ({
   producto,
   puedeBulto = false,
   onBulto,
+  avisoStock = null,
+  errorMinimo = null,
 }) => {
   // Backward-compat: durante la transicion a drafts, mantener handlers locales
   // para que el JSX no dependa de eventos blur "perdidos" en mobile.
@@ -124,16 +132,32 @@ const FacturacionItemRow = ({
   const textoBultos = textoRenglonBultos(congelarBultosRenglon({ ...item, cantidad: cantidadMostrada }, producto));
   const precioDelBulto = ventaPorEfectivo(producto) !== 'unidad' ? precioBulto(item.precio, producto?.bultoX) : null;
 
+  // AC-PBU-3: el precio por bulto no cuenta como "precio modificado".
   const precioModificado =
     item.precioOriginal !== undefined &&
     item.precioOriginal !== null &&
-    Number(item.precio) !== Number(item.precioOriginal);
+    esPrecioManual(item);
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', marginBottom: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>
           {item.nombre}
+          {avisoStock && (
+            <div data-testid="aviso-stock" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
+              {'\u26A0\uFE0F'} {avisoStock}
+            </div>
+          )}
+          {errorMinimo && (
+            <div data-testid="aviso-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
+              {'\u26D4'} {errorMinimo}
+            </div>
+          )}
+          {item.precioPorBulto === true && !precioModificado && (
+            <div data-testid="precio-por-bulto" style={{ fontSize: 10, color: 'var(--success)', marginTop: 2 }}>
+              Precio llevando bulto
+            </div>
+          )}
           {avisoVenta && (
             <div data-testid="aviso-multiplo" role="alert" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
               {'⚠️'} {avisoVenta}
@@ -219,7 +243,7 @@ const FacturacionItemRow = ({
 };
 
 const Facturacion = () => {
-  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres } = useApp();
+  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres, stockMap } = useApp();
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const isAdmin = permisoNorm === 1;
   const puedeBulto = puedeUsarBulto(permisoNorm, 'facturacion'); // AC-BUL-8 (defensa en profundidad)
@@ -401,7 +425,7 @@ const Facturacion = () => {
     const cantidadNueva = (existente?.cantidad ?? 0) + cantRestaurada;
     setItemsEdit(prev => {
       if (prev.some(i => i.productoId === productoId)) {
-        return sortItems(prev.map(i => i.productoId === productoId ? { ...i, cantidad: i.cantidad + cantRestaurada } : i));
+        return sortItems(prev.map(i => i.productoId === productoId ? reprecio({ ...i, cantidad: i.cantidad + cantRestaurada }) : i));
       }
       return sortItems([...prev, {
         productoId, nombre: r.nombre, precio: Number(r.precio) || 0, precioOriginal: Number(r.precio) || 0, cantidad: cantRestaurada,
@@ -432,7 +456,7 @@ const Facturacion = () => {
       const existe = prev.find(i => i.productoId === p.id);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) }) : i);
+        const next = prev.map(i => i.productoId === p.id ? reprecio(quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) })) : i);
         return sortItems(next);
       }
       // AC-BUL-9: el renglón arranca en 1 con la marca "cantidad por defecto".
@@ -456,7 +480,7 @@ const Facturacion = () => {
   const cambiarCantidad = (productoId, delta) => {
     const piso = pasoCantidad(productosIndex.byId.get(String(productoId)));
     setItemsEdit(prev => {
-      const next = sortItems(prev.map(i => i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad: Math.max(piso, i.cantidad + delta) }) : i));
+      const next = sortItems(prev.map(i => i.productoId === productoId ? reprecio(quitarMarcasRenglon({ ...i, cantidad: Math.max(piso, i.cantidad + delta) })) : i));
       const it = next.find(x => x.productoId === productoId);
       if (it) {
         setDraftByPid(d => {
@@ -487,7 +511,7 @@ const Facturacion = () => {
       ? sumarBultoRenglon(actual.cantidad, bx, { cantidadPorDefecto: actual[MARCA_CANTIDAD_POR_DEFECTO] === true })
       : restarBulto(actual.cantidad, bx, { minimo });
     if (cantidad === actual.cantidad) return;
-    const cambiar = (lista) => sortItems(lista.map(i => i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad }) : i));
+    const cambiar = (lista) => sortItems(lista.map(i => i.productoId === productoId ? reprecio(quitarMarcasRenglon({ ...i, cantidad })) : i));
     itemsEditRef.current = cambiar(itemsEditRef.current);
     draftRef.current = {
       ...draftRef.current,
@@ -499,14 +523,14 @@ const Facturacion = () => {
 
   const setCantidad = (productoId, n) => {
     if (!isNaN(n) && n > 0) {
-      setItemsEdit(prev => sortItems(prev.map(i => i.productoId === productoId ? { ...i, cantidad: n } : i)));
+      setItemsEdit(prev => sortItems(prev.map(i => i.productoId === productoId ? reprecio({ ...i, cantidad: n }) : i)));
     }
   };
 
   const setPrecio = (productoId, precio, descuentoPct = null) => {
     if (!isNaN(precio) && precio >= 0) {
       setItemsEdit(prev => sortItems(prev.map(i =>
-        i.productoId === productoId ? { ...i, precio, descuentoPct } : i
+        i.productoId === productoId ? { ...i, precio, descuentoPct, precioManual: descuentoPct === null || descuentoPct > 0 } : i
       )));
     }
   };
@@ -546,7 +570,7 @@ const Facturacion = () => {
       alert('Porcentaje inválido (0-100).');
       return;
     }
-    const base = Number(item.precioOriginal ?? item.precio ?? 0);
+    const base = precioBaseRenglon(item);
     const nuevo = Math.round((base * (1 - n / 100)) * 100) / 100;
     setPrecio(item.productoId, nuevo, n);
     setDraftByPid(prev => {
@@ -567,7 +591,7 @@ const Facturacion = () => {
     }
 
     const nextItems = sortItems(itemsEdit.map(item => {
-      const base = Number(item.precioOriginal ?? item.precio ?? 0);
+      const base = precioBaseRenglon(item);
       const nuevo = Math.round((base * (1 - n / 100)) * 100) / 100;
       return {
         ...item,
@@ -575,6 +599,7 @@ const Facturacion = () => {
         precioOriginal: item.precioOriginal ?? item.precio,
         descuentoPct: n > 0 ? n : null,
         descuentoTotalPct: n > 0 ? n : null,
+        precioManual: n > 0,
       };
     }));
 
@@ -598,7 +623,7 @@ const Facturacion = () => {
 
     setItemsEdit(prev => sortItems(prev.map(i =>
       i.productoId === item.productoId
-        ? { ...i, precio: nuevo, precioOriginal: nuevo, descuentoPct: null }
+        ? { ...i, precio: nuevo, precioOriginal: nuevo, descuentoPct: null, precioManual: true, precioPorBulto: false }
         : i
     )));
     setDraftByPid(prev => {
@@ -626,6 +651,36 @@ const Facturacion = () => {
 
   const totalEdit = itemsEdit.reduce((acc, i) => acc + i.cantidad * i.precio, 0);
 
+  // AC-SST-1: si el pedido ya está facturado, su cantidad original ya se descontó del stock.
+  const cantidadYaDescontada = (productoId) => {
+    if (String(pedidoEditando?.estado) !== 'facturado') return 0;
+    return (pedidoEditando.items || [])
+      .filter(i => String(i?.productoId) === String(productoId))
+      .reduce((acc, i) => acc + (Number(i.cantidad) || 0), 0);
+  };
+
+  // AC-MIN-2: renglones bajo el mínimo (aviso en el renglón; el admin puede guardar con confirmación).
+  const erroresMinimoEdit = useMemo(() => {
+    const r = validarMinimosItems(itemsEdit, productosIndex.byId, { permiso: permisoNorm, pantalla: 'facturacion', previos: pedidoEditando?.items });
+    return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
+  }, [itemsEdit, productosIndex, permisoNorm, pedidoEditando]);
+
+  // AC-PBU-3: cuando el precio cambia solo (precio por bulto) el campo de precio lo refleja.
+  useEffect(() => {
+    let cambio = false;
+    const nd = { ...draftRef.current };
+    for (const it of itemsEdit) {
+      if (esPrecioManual(it)) continue;
+      const d = nd[it.productoId];
+      if (!d) continue;
+      if (parseFloat(String(d.precioText ?? '').replace(',', '.')) !== Number(it.precio)) {
+        nd[it.productoId] = { ...d, precioText: String(it.precio) };
+        cambio = true;
+      }
+    }
+    if (cambio) { draftRef.current = nd; setDraftByPid(nd); }
+  }, [itemsEdit]);
+
   const guardarEdicion = async () => {
     setGuardando(true);
     try {
@@ -639,8 +694,10 @@ const Facturacion = () => {
         const cn = cantidadTipeada(String(d.cantidadText ?? ''));
         if (cn !== null) next.cantidad = cn;
         const pn = parseFloat(String(d.precioText ?? '').trim().replace(',', '.'));
-        if (!isNaN(pn) && pn >= 0) next.precio = pn;
-        return next;
+        // AC-PBU-3: el precio tipeado manda solo si el renglón es manual; si no, el precio
+        // sale de la cantidad final (precio por bulto).
+        if (!isNaN(pn) && pn >= 0 && esPrecioManual(next)) next.precio = pn;
+        return reprecio(next);
       }));
 
       // C3 / S-BUL-06 (AC-BUL-7, AC-STK-8): ninguna cantidad cambiada puede
@@ -661,6 +718,13 @@ const Facturacion = () => {
         if (!window.confirm(`Estas cantidades no son múltiplo del bulto: ${detalle}.
 
 ¿Guardar igual?`)) return;
+      }
+      // AC-MIN-2: bajo el mínimo el admin guarda con confirmación (el armador no llega acá).
+      const vmin = validarMinimosItems(itemsFinal, productosIndex.byId, { permiso: permisoNorm, pantalla: 'facturacion', previos: pedidoEditando.items });
+      if (vmin.errores.length) {
+        const detalleMin = vmin.errores.map(e => `${e.nombre} (mínimo ${e.minimo})`).join(', ');
+        if (!vmin.requiereConfirmacion) { alert(`Hay productos por debajo del mínimo: ${detalleMin}`); return; }
+        if (!window.confirm(`Estos productos quedan por debajo del mínimo: ${detalleMin}.\n\n¿Guardar igual?`)) return;
       }
       // AC-VTA-2: la cantidad queda en unidades; se congelan bultos/bultoX/bultoNombre.
       const itemsGuardar = congelarBultosItems(itemsFinal, productosIndex.byId, { previos: pedidoEditando.items });
@@ -736,7 +800,8 @@ const Facturacion = () => {
           alert(`No hay stock suficiente para facturar:\n${detalle}`);
           return;
         }
-        if (!window.confirm(`Stock insuficiente:\n${detalle}\n\n¿Facturar igual? El stock va a quedar negativo.`)) return;
+        // AC-SST-1: nunca se bloquea; se resume cuántos productos quedan en negativo.
+        if (!window.confirm(`${resumenSinStock(sinStock)}\n\n${detalle}\n\n¿Facturar igual? El stock va a quedar negativo.`)) return;
       }
     } catch (e) {
       console.warn('No se pudo verificar stock antes de facturar:', e?.message || String(e));
@@ -971,6 +1036,8 @@ const Facturacion = () => {
                 producto={productoParaBulto(item, productosIndex.byId)}
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
+                avisoStock={avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId, cantidadYaDescontada(item.productoId)))}
+                errorMinimo={erroresMinimoEdit.has(String(item.productoId)) ? mensajeMinimo(erroresMinimoEdit.get(String(item.productoId))) : null}
               />
             );
           })}
@@ -1093,7 +1160,7 @@ const Facturacion = () => {
             {(p.items || []).some(i =>
               i?.precioOriginal !== undefined &&
               i?.precioOriginal !== null &&
-              Number(i.precio) !== Number(i.precioOriginal)
+              esPrecioManual(i)
             ) && (
               <div style={{
                 fontSize: 11,

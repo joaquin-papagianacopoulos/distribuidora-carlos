@@ -14,6 +14,7 @@ import { subirImagenTienda } from '../services/tiendaConfigService';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
 import ComisionRubroGrid from '../components/ComisionRubroGrid';
+import CambiosPrecio from './CambiosPrecio';
 import { listarRubros } from '../domain/rubros';
 import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock } from '../services/stockService';
@@ -68,10 +69,10 @@ const importarProductos = async (rows, { proveedores, usuario, origen }) => {
     try {
       if (e.accion === 'crear') {
         const p = e.valor.producto;
-        id = await addProductoLocal({ ...p, marca: marcaDe(p, ''), ...extras });
+        id = await addProductoLocal({ ...p, marca: marcaDe(p, ''), ...extras }, { usuario });
       } else if (e.accion === 'actualizar') {
         const p = e.valor.producto;
-        await updateProducto({ ...e.existente, ...p, marca: marcaDe(p, e.existente.marca), ...extras });
+        await updateProducto({ ...e.existente, ...p, marca: marcaDe(p, e.existente.marca), ...extras }, { usuario });
       }
     } catch (err) {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
@@ -177,6 +178,7 @@ const Configuracion = () => {
   const [prodPin, setProdPin] = useState('');
   const [prodPendientes, setProdPendientes] = useState(0);
   const [prodMsg, setProdMsg] = useState('');
+  const [verCambiosPrecio, setVerCambiosPrecio] = useState(false);
   const [subiendoProd, setSubiendoProd] = useState(false);
   const [borrarProdItem, setBorrarProdItem] = useState(null);
   const [borrarProdPin, setBorrarProdPin] = useState('');
@@ -221,6 +223,8 @@ const Configuracion = () => {
 
   const cerrarForm = () => { setShowForm(false); setForm({}); setEditItem(null); };
   const usuarioActual = vendedorActual?.nombre || '';
+  // AC-HPR-1: quien hace el cambio de precio queda en el historial.
+  const usuarioCambio = { id: vendedorActual?.remoteId ?? vendedorActual?.id ?? null, nombre: usuarioActual };
 
   // REQ-CLI: alta/edicion con validacion de dominio (ClienteForm ya valido).
   const guardarCliente = async (data) => {
@@ -238,10 +242,10 @@ const Configuracion = () => {
   const guardarProducto = async (data, stock, stockMostrado, { pin = '' } = {}) => {
     try {
       if (editItem) {
-        await updateProducto({ ...editItem, ...data, marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true });
+        await updateProducto({ ...editItem, ...data, marca: marcaParaGuardar({ marcaForm: data.marca, marcaExistente: editItem.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true }, { usuario: usuarioCambio });
         if (stock !== null && stock !== undefined) await ajustarStock(editItem.id, stock, { usuario: usuarioActual, base: stockMostrado });
       } else {
-        const id = await addProductoLocal({ ...data, unidad: 'unidad', marca: marcaParaGuardar({ marcaForm: data.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true });
+        const id = await addProductoLocal({ ...data, unidad: 'unidad', marca: marcaParaGuardar({ marcaForm: data.marca, nombre: data.nombre, marcas: listarMarcas(productos), detectar: detectarMarca }), extrasDirty: true }, { usuario: usuarioCambio });
         if (stock) await ajustarStock(id, stock, { usuario: usuarioActual, inicial: true });
       }
     } catch (e) {
@@ -253,7 +257,7 @@ const Configuracion = () => {
     if (pin && navigator.onLine) {
       const r = await subirProductosConPin(pin);
       setProdMsg(r.ok
-        ? 'Producto guardado y subido: ya se ve en la tienda (recargala si la tenías abierta).'
+        ? `Producto guardado y subido: ya se ve en la tienda (recargala si la tenías abierta).${r.avisoMigracion ? ` ${r.avisoMigracion}` : ''}`
         : `Producto guardado en este dispositivo, pero no se pudo subir: ${r.mensaje || 'probá con "Subir productos".'}`);
       await recargar();
     } else {
@@ -359,7 +363,8 @@ const Configuracion = () => {
       if (!r.ok) setProdMsg(r.mensaje || 'No se pudieron subir los productos.');
       else {
         const rech = r.rechazados?.length || 0;
-        setProdMsg(rech ? `Se subieron ${r.subidos || 0}; el servidor rechazó ${rech} (quedan marcados).` : 'Productos subidos.');
+        const base = rech ? `Se subieron ${r.subidos || 0}; el servidor rechazó ${rech} (quedan marcados).` : 'Productos subidos.';
+        setProdMsg(r.avisoMigracion ? `${base} ${r.avisoMigracion}` : base);
       }
       await recargar();
       await refrescarPendientesProd();
@@ -662,6 +667,19 @@ const Configuracion = () => {
             >{borrandoId === borrarProdItem.id ? 'Borrando...' : 'Borrar producto'}</button>
           </div>
         </div>
+      )}
+
+      {/* REQ-HPR: cambios de precio del día en PDF (solo admin, pestaña productos) */}
+      {tab === 'productos' && !editandoProducto && isAdmin && (
+        verCambiosPrecio
+          ? <CambiosPrecio onVolver={() => setVerCambiosPrecio(false)} />
+          : (
+            <div style={{ marginBottom: 16 }}>
+              <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => setVerCambiosPrecio(true)} data-testid="abrir-cambios-precio">
+                Cambios de precio (PDF)
+              </button>
+            </div>
+          )
       )}
 
       {/* Importacion de productos (CSV/XLSX + plantilla) — solo pestaña productos */}

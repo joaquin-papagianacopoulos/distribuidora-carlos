@@ -1,7 +1,7 @@
 // src/tienda/DetalleProducto.js — AC-TIE-8 y AC-TIE-9: detalle compartible con selector de cantidad.
 import React, { useState } from 'react';
 import {
-  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe,
+  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe, textoPrecioBulto, precioUnitarioTienda,
 } from '../domain/tienda';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { normalizarBultoX } from '../domain/bultos';
@@ -30,6 +30,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
   const ok = puedeAgregar(prod, config.permitirSinStock);
   const img = imagenSegura(prod.imagen);
   const bulto = textoBulto(prod);
+  const precioBultoTxt = textoPrecioBulto(prod);
   const relacionados = productos.filter(p => p.rubro && p.rubro === prod.rubro && String(p.id) !== String(prod.id)).slice(0, 4);
 
   const mas = () => setUnidades(u => u + paso);
@@ -49,6 +50,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
           {prod.rubro ? <div className="t-codigo">Rubro {prod.rubro}</div> : null}
           <div className="t-precio t-precio-grande">{formatearPesos(prod.precio)} <small>por unidad</small></div>
           {bulto ? <div className="t-bulto">{bulto}</div> : null}
+          {precioBultoTxt ? <div className="t-bulto" data-testid="precio-bulto">{precioBultoTxt}</div> : null}
           {min > 1 ? <div className="t-aviso">Compra mínima: {min} u.</div> : null}
 
           {vp === 'ambos' ? (
@@ -64,7 +66,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
             <span data-testid="cantidad-detalle">{textoEquivalencia(unidades, prod)}</span>
             <button type="button" className="t-btn t-btn-sec" aria-label="Más" onClick={mas}>+</button>
           </div>
-          <div className="t-subtotal">Subtotal {formatearPesos(Math.round(prod.precio * 100) * unidades / 100)}</div>
+          <div className="t-subtotal">Subtotal {formatearPesos(Math.round(precioUnitarioTienda(prod, unidades) * 100) * unidades / 100)}</div>
           <button type="button" className="t-btn t-btn-primario" disabled={!ok} onClick={() => onAgregar(prod, unidades, vp === 'bulto' ? 'bulto' : modo)}>
             {ok ? 'Agregar al carrito' : 'Sin stock'}
           </button>

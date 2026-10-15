@@ -6,6 +6,8 @@
 import { normalizarBultoX } from './bultos';
 import { MAX_CANTIDAD } from './stock';
 import { ventaPorEfectivo, normalizarBultoNombre, bultosDeUnidades } from './unidadVenta';
+import { precioAplicado } from './precios';
+import { minimoEfectivo, cantidadInicialConMinimo } from './minimos';
 import { texto, validarCuit, formatearCuit, soloDigitos } from './validacion';
 import { PROVINCIAS } from './clientes';
 
@@ -77,15 +79,14 @@ export function unidadesRenglon(linea, prod) {
   return u > MAX_CANTIDAD ? null : u;
 }
 
+// AC-MIN-1/3: mínimo efectivo (redondeado al bulto si se vende por bulto).
 export function minimoDe(prod) {
-  return enteroPositivo(prod && prod.minimoVenta) || 1;
+  return minimoEfectivo(prod);
 }
 
 // Cantidad con la que arranca un producto en el carrito (unidades).
 export function unidadesIniciales(prod) {
-  const bx = normalizarBultoX(prod && prod.bultoX);
-  const base = ventaPorEfectivo(prod) === 'bulto' && bx ? bx : 1;
-  return Math.max(base, minimoDe(prod));
+  return cantidadInicialConMinimo(prod || {});
 }
 
 // Paso del +/− según el modo elegido.
@@ -141,7 +142,9 @@ export function calcularCarrito(lineas, catalogoById, cfg = {}, hoyISO = '') {
     const prod = getProd(catalogoById, id);
     const v = validarRenglon({ cantidad: unidades, modo: 'unidad' }, prod, cfg);
     for (const e of v.errores) errores.push({ productoId: id, mensaje: e });
-    const { precio } = precioVigente(prod, prod.ofertas || [], hoyISO);
+    const { precio: vigente } = precioVigente(prod, prod.ofertas || [], hoyISO);
+    // AC-PBU-4: mismo precio que el servidor; con oferta y bulto se cobra el menor.
+    const precio = vigente === null ? null : precioAplicado({ precio: vigente, precioBulto: prod.precioBulto, bultoX: prod.bultoX }, unidades).precio;
     const pc = aCentavos(precio);
     if (pc === null || pc <= 0) { errores.push({ productoId: id, mensaje: 'Producto sin precio' }); continue; }
     const subC = pc * unidades;
@@ -185,6 +188,23 @@ export function textoBulto(prod) {
   const c = aCentavos(prod.precio);
   if (bx === null || c === null) return null;
   return `${normalizarBultoNombre(prod.bultoNombre)} x${bx} · ${formatearPesos(deCentavos(c * bx))}`;
+}
+
+// AC-PBU-4: precio por unidad que ve el cliente para `unidades` (el servidor aplica lo mismo).
+// Sirve de precioVisto y de subtotal en la ficha/carrito.
+export function precioUnitarioTienda(prod, unidades) {
+  if (!prod) return null;
+  const base = precioAplicado({ precio: prod.precio, precioBulto: prod.precioBulto, bultoX: prod.bultoX }, unidades).precio;
+  return aCentavos(base) === null ? prod.precio : base;
+}
+
+// AC-PBU-4: "Llevando el display: $800 c/u" (solo si el precio por bulto realmente baja el precio).
+export function textoPrecioBulto(prod) {
+  if (!prod || normalizarBultoX(prod.bultoX) === null) return null;
+  const pb = aCentavos(Number(prod.precioBulto));
+  const p = aCentavos(Number(prod.precio));
+  if (pb === null || pb <= 0 || p === null || pb >= p) return null;
+  return `Llevando el ${normalizarBultoNombre(prod.bultoNombre).toLowerCase()}: ${formatearPesos(deCentavos(pb))} c/u`;
 }
 
 // "48 u. (3 Display)" o "20 u. (1 Display + 4 u.)"

@@ -27,3 +27,9 @@ Revisá **solo lo que cambió en esta corrida** (`git diff` sobre los archivos d
 
 ## Salida
 `harness/reports/<RUN_ID>/security-report.md` (**máx. 120 líneas**) con tabla priorizada (Crítico/Alto/Medio/Bajo) y sección "Corregido en esta corrida" vs "Requiere acción del dueño".
+
+**Formato obligatorio** (lo valida el test AC-SEC-6 en `src/__tests__/security.migracion.test.js`, si no se cumple falla el gate):
+- Secciones con estos títulos: `## Resumen ejecutivo`, `## Tabla de hallazgos`, `## Detalle`, `## Corregido en esta corrida`, `## Requiere acción del dueño`.
+- Tabla con encabezado exacto `| Id | Severidad | Hallazgo | Evidencia | Estado | Dónde se corrige |` y su fila separadora `|---|...`.
+- Severidades escritas como `Crítico`, `Alto`, `Medio`, `Bajo`; si no hay de alguna, mencionala igual en el resumen (ej. "Crítico: 0, Alto: 0").
+- Estado de cada hallazgo: `ABIERTO` o `CORREGIDO` (el reporte debe contener ambas palabras; si no hay corregidos, poné una línea "CORREGIDO: ninguno").

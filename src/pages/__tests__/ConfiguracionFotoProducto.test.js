@@ -95,7 +95,7 @@ describe('editar producto con foto', () => {
     await elegirFoto();
     await click(guardar());
     await flush();
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 1, imagen_url: URL_OK, extrasDirty: true }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 1, imagen_url: URL_OK, extrasDirty: true }), expect.anything());
     expect(subirProductosConPin).toHaveBeenCalledWith('1234');
     expect(tid('productos-msg').textContent).toMatch(/ya se ve en la tienda/);
   });

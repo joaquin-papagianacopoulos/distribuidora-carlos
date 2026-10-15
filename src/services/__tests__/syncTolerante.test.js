@@ -169,6 +169,28 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     expect(db.clearProductosPendingSync).toHaveBeenCalledWith([3]);
   });
 
+  it('AC-PBU-1 syncProductos sube precio_bulto; sin la 010 sube igual lo demás y deja el precio por bulto pendiente', async () => {
+    mockLocal.productos = [{ id: 3, nombre: 'Alfajor', precio: 900, precioBulto: 800, bultoX: 16, pendingSync: true, extrasDirty: true }];
+    mockSb.respuestas = [{ error: { code: 'PGRST204', message: "Could not find the 'precio_bulto' column" } }, { error: null }];
+    await syncProductos();
+    expect(mockSb.upserts[0].rows[0]).toMatchObject({ id: 3, precio_bulto: 800, venta_por: 'ambos' });
+    // Segundo intento: mantiene 001 + 006 (bulto_x, venta_por) y saca solo precio_bulto.
+    expect(mockSb.upserts[1].rows[0]).not.toHaveProperty('precio_bulto');
+    expect(mockSb.upserts[1].rows[0]).toMatchObject({ id: 3, bulto_x: 16, venta_por: 'ambos' });
+    expect(db.clearProductosPendingSync).toHaveBeenCalledWith([3]);
+    expect(mockLocal.productos[0].extrasPendientes).toBe(true);
+  });
+
+  it('AC-PBU-1 downloadMaestros baja precio_bulto y, si la columna no existe, conserva el local', async () => {
+    mockLocal.productos = [{ id: 3, nombre: 'Alfajor', precio: 900, precioBulto: 800, pendingSync: false }];
+    mockSb.remoto.productos = [{ id: 3, nombre: 'Alfajor', precio: 900 }];
+    await downloadMaestros();
+    expect(mockLocal.productos[0].precioBulto).toBe(800);
+    mockSb.remoto.productos = [{ id: 3, nombre: 'Alfajor', precio: 900, precio_bulto: 750 }];
+    await downloadMaestros();
+    expect(mockLocal.productos[0].precioBulto).toBe(750);
+  });
+
   it('AC-CLI-5 AC-CLI-6 downloadMaestros: si Supabase no tiene las columnas (undefined) conserva los valores locales', async () => {
     mockLocal.clientes = [{ ...CLIENTE, pendingSync: false }];
     mockSb.remoto.clientes = [{ id: 7, nombre: 'Kiosco SRL', direccion: 'Mitre 1', telefono: '1144445555' }];

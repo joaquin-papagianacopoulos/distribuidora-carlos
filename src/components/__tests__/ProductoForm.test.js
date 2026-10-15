@@ -51,8 +51,21 @@ describe('ProductoForm', () => {
       .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, ''));
     expect(labels).toEqual([
       'Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock',
+      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock',
     ]);
+  });
+
+  it('AC-PBU-1 avisa (sin bloquear) si el precio llevando bulto supera al precio por unidad', async () => {
+    const onGuardar = jest.fn();
+    await render({ onGuardar });
+    await setValue(campo('codigo'), 'A1');
+    await setValue(campo('nombre'), 'Algo');
+    await setValue(campo('precio'), '900');
+    await setValue(campo('precioBulto'), '1000');
+    expect(container.textContent).toMatch(/precio llevando bulto es mayor/);
+    await click(boton('Guardar'));
+    expect(onGuardar).toHaveBeenCalled();
+    expect(onGuardar.mock.calls[0][0]).toMatchObject({ precio: 900, precioBulto: 1000 });
   });
 
   it('AC-PROD-1 recalcula Precio venta 1 al cambiar costo, descuentos y ganancia', async () => {

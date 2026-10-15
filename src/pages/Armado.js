@@ -19,7 +19,13 @@ import {
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, sumarCantidades, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
 import { cambiosDeCantidad, fusionarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
+import { avisoSinStock, stockParaAviso } from '../domain/stock';
+import { precioAplicadoRenglon } from '../domain/precios';
+import { minimoEfectivo, validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
+
+// AC-PBU-3: re-precia el renglón con su cantidad actual (precio por bulto), salvo precio manual.
+const reprecio = (it) => precioAplicadoRenglon(it, it?.cantidad);
 
 let _keySeq = 0;
 const nextKey = () => `k${Date.now()}_${_keySeq++}`;
@@ -40,7 +46,7 @@ const sortItemsArmado = (items) => [...(items || [])].sort((a, b) => alpha(b?.no
 
 // Tarjeta de un producto dentro de "Armar pedido". Separada del componente
 // principal para poder repetirla en el grupo de tachados y el de activos.
-const ItemArmadoCard = ({ item, producto, puedeBulto = false, onTick, onCantidad, onCantidadTexto, onEliminar, onBulto }) => {
+const ItemArmadoCard = ({ item, producto, puedeBulto = false, avisoStock = null, errorMinimo = null, onTick, onCantidad, onCantidadTexto, onEliminar, onBulto }) => {
   // REQ-VTA (AC-VTA-2/3): paso por bulto, aviso de no múltiplo y "3 Display (48 u.)".
   const paso = pasoCantidad(producto);
   const avisoVenta = item.eliminado ? null : avisoMultiplo(item.cantidad, producto);
@@ -79,6 +85,16 @@ const ItemArmadoCard = ({ item, producto, puedeBulto = false, onTick, onCantidad
         }}>
           {item.nombre}
         </div>
+        {!item.eliminado && avisoStock && (
+          <div data-testid="aviso-stock" style={{ fontSize: 12, color: 'var(--warning)' }}>
+            {'\u26A0\uFE0F'} {avisoStock}
+          </div>
+        )}
+        {!item.eliminado && errorMinimo && (
+          <div data-testid="aviso-minimo" role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>
+            {'\u26D4'} {errorMinimo} (si falta mercadería, sacalo con el tachito)
+          </div>
+        )}
         {avisoVenta && (
           <div data-testid="aviso-multiplo" role="alert" style={{ fontSize: 12, color: 'var(--warning)' }}>
             {'⚠️'} {avisoVenta}
@@ -150,7 +166,7 @@ const ItemArmadoCard = ({ item, producto, puedeBulto = false, onTick, onCantidad
 };
 
 const Armado = () => {
-  const { pedidos, clientes, productos, faltantes, deudas, vendedorActual, recargar, syncPedidosFecha } = useApp();
+  const { pedidos, clientes, productos, faltantes, deudas, vendedorActual, recargar, syncPedidosFecha, stockMap } = useApp();
   const productosById = useMemo(() => new Map((productos || []).map(p => [String(p.id), p])), [productos]);
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const puedeBulto = puedeUsarBulto(permisoNorm, 'armado'); // AC-BUL-8
@@ -425,7 +441,7 @@ const Armado = () => {
       const existe = prev.find(i => i.productoId === prod.id && !i.eliminado);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        return sortItemsArmado(prev.map(i => i._key === existe._key ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(prod) }) : i));
+        return sortItemsArmado(prev.map(i => i._key === existe._key ? reprecio(quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(prod) })) : i));
       }
       // AC-BUL-9: el renglón arranca en 1 con la marca "cantidad por defecto".
       return sortItemsArmado([...prev, renglonNuevo(prod, { eliminado: false, picked: false, _key: nextKey() })]);
@@ -453,7 +469,7 @@ const Armado = () => {
       if (otraActiva && sumarCantidades(otraActiva.cantidad, target.cantidad) !== null) {
         const sinTarget = prev.filter(i => i._key !== key);
         return sortItemsArmado(sinTarget.map(i =>
-          i._key === otraActiva._key ? quitarMarcasRenglon({ ...i, cantidad: sumarCantidades(i.cantidad, target.cantidad), picked: true }) : i
+          i._key === otraActiva._key ? reprecio(quitarMarcasRenglon({ ...i, cantidad: sumarCantidades(i.cantidad, target.cantidad), picked: true })) : i
         ));
       }
       return sortItemsArmado(prev.map(i => i._key === key ? { ...i, eliminado: false, picked: true } : i));
@@ -461,9 +477,13 @@ const Armado = () => {
   };
 
   const cambiarCantidadArmado = (key, delta) => {
-    setItemsArmado(prev => prev.map(i =>
-      i._key === key ? quitarMarcasRenglon({ ...i, cantidad: Math.max(pasoCantidad(productoParaBulto(i, productosById)), i.cantidad + delta) }) : i
-    ));
+    setItemsArmado(prev => prev.map(i => {
+      if (i._key !== key) return i;
+      const prod = productoParaBulto(i, productosById);
+      // AC-MIN-2: el armador no baja del mínimo (un renglón viejo que ya estaba más abajo no se sube solo).
+      const piso = Math.min(i.cantidad, Math.max(pasoCantidad(prod), prod ? minimoEfectivo(prod) : 1));
+      return reprecio(quitarMarcasRenglon({ ...i, cantidad: Math.max(piso, i.cantidad + delta) }));
+    }));
   };
 
   // AC-BUL-2/3/9: suma o resta un bulto (bultoX actual), sin bajar de 1 como el "−".
@@ -474,11 +494,11 @@ const Armado = () => {
       // C4 / S-BUL-08: misma resolución por id que Facturación (una sola fuente).
       const prodBulto = productoParaBulto(i, productosById);
       const bx = prodBulto?.bultoX;
-      const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prodBulto));
+      const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prodBulto), prodBulto ? minimoEfectivo(prodBulto) : 1);
       const cantidad = op === 'sumar'
         ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
         : restarBulto(i.cantidad, bx, { minimo });
-      return cantidad === i.cantidad ? i : quitarMarcasRenglon({ ...i, cantidad });
+      return cantidad === i.cantidad ? i : reprecio(quitarMarcasRenglon({ ...i, cantidad }));
     }));
   };
 
@@ -487,7 +507,7 @@ const Armado = () => {
     const n = cantidadTipeada(String(texto ?? '').replace(/[^\d]/g, ''));
     // AC-BUL-9: escribir la cantidad a mano (aunque sea 1) quita la marca.
     setItemsArmado(prev => prev.map(i =>
-      i._key === key ? quitarMarcasRenglon({ ...i, cantidad: n !== null ? n : i.cantidad }) : i
+      i._key === key ? reprecio(quitarMarcasRenglon({ ...i, cantidad: n !== null ? n : i.cantidad })) : i
     ));
   };
 
@@ -497,6 +517,20 @@ const Armado = () => {
     setItemsArmado(prev => prev.map(i =>
       i._key === key ? { ...i, eliminado: true, picked: false } : i
     ));
+  };
+
+  // AC-SST-1: aviso por renglón, nunca bloquea. Si el pedido ya está facturado, lo que
+  // tenía ya se descontó del stock.
+  const avisoStockDe = (item) => {
+    const yaDescontado = String(armando?.estado) === 'facturado'
+      ? (armando.items || []).filter(x => String(x?.productoId) === String(item.productoId)).reduce((a, x) => a + (Number(x.cantidad) || 0), 0)
+      : 0;
+    return avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId, yaDescontado));
+  };
+  // AC-MIN-2: error de mínimo en el renglón (el armador no puede guardar por debajo).
+  const errorMinimoDe = (item) => {
+    const r = validarMinimosItems([item], productosById, { permiso: permisoNorm, pantalla: 'armado', previos: armando?.items });
+    return r.errores.length ? mensajeMinimo(r.errores[0].minimo) : null;
   };
 
   const totalArmado = itemsArmado.filter(i => !i.eliminado).reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0);
@@ -533,6 +567,12 @@ const Armado = () => {
       const vm = validarMultiplosItems(itemsFinal, productosById, { permiso: permisoNorm, pantalla: 'armado', previos: armando.items });
       if (vm.bloquea) {
         alert(`Hay cantidades que no son múltiplo del bulto: ${vm.avisos.map(a => `${a.nombre} (${a.cantidad} u., bulto x ${a.bultoX})`).join(', ')}`);
+        return;
+      }
+      // AC-MIN-2: el armador no guarda por debajo del mínimo; si falta mercadería, tacha el renglón.
+      const vmin = validarMinimosItems(itemsFinal, productosById, { permiso: permisoNorm, pantalla: 'armado', previos: armando.items });
+      if (vmin.errores.length) {
+        alert(`Hay productos por debajo del mínimo: ${vmin.errores.map(e => `${e.nombre} (mínimo ${e.minimo})`).join(', ')}. Si falta mercadería, sacalos con el tachito: quedan anotados como faltantes.`);
         return;
       }
       // AC-VTA-2: la cantidad queda en unidades; se congelan bultos/bultoX/bultoNombre.
@@ -687,14 +727,14 @@ const Armado = () => {
               {'⚠️'} Marcados como faltantes ({itemsTachados.length})
             </div>
             {itemsTachados.map(item => (
-              <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
+              <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} avisoStock={avisoStockDe(item)} errorMinimo={errorMinimoDe(item)} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
             ))}
             <div style={{ height: 6 }} />
           </>
         )}
 
         {itemsActivos.map(item => (
-          <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
+          <ItemArmadoCard key={item._key} item={item} producto={productoParaBulto(item, productosById)} puedeBulto={puedeBulto} avisoStock={avisoStockDe(item)} errorMinimo={errorMinimoDe(item)} onBulto={aplicarBultoArmado} onTick={tocarTick} onCantidad={cambiarCantidadArmado} onCantidadTexto={setCantidadArmadoTexto} onEliminar={eliminarItemArmado} />
         ))}
 
         <div className="total-row">

@@ -323,6 +323,7 @@ export function catalogoDesdeLocales(productos, stockDe = () => 0, permitirSinSt
       bultoX: p.bultoX,
       bultoNombre: p.bultoNombre,
       minimoVenta: p.minimoVenta,
+      precioBulto: Number(p.precioBulto) > 0 ? Number(p.precioBulto) : null,
       disponible: !!permitirSinStock || Number(stockDe(p.id)) > 0,
     }));
 }

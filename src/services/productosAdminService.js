@@ -2,15 +2,17 @@
 // Orquesta la escritura de productos con PIN de admin (RPC de la migracion 007).
 // El PIN llega por parametro, viaja solo en la llamada y NO se guarda ni se loguea.
 import { supabase } from '../lib/supabase';
-import { getVendedores, getProductos, deleteProducto } from '../db';
+import { getVendedores, getProductos, deleteProducto, patchRegistros } from '../db';
 import { esAdmin, validarPinIngresado } from '../domain/permisos';
 import { argsAdminProductos, interpretarBajaProducto } from '../domain/productosRpc';
 import { syncProductos } from '../sync/syncService';
+import { subirCambiosPrecio, sondearMigracion010 } from './cambiosPrecioService';
 import { getUsuarioSesion } from './sesion';
 
 const MSG_SIN_ID_ADMIN = 'Tu usuario de admin todavia no esta sincronizado con el servidor: sincroniza y volve a intentar.';
 const MSG_SOLO_ADMIN = 'Solo un admin puede subir o borrar productos.';
 const MSG_OFFLINE = 'Necesitas conexion para esto.';
+export const MSG_FALTA_010 = 'Falta aplicar la migracion 010 en Supabase: el precio llevando bulto y el historial de cambios de precio quedan pendientes.';
 
 const esAdminSesion = () => esAdmin(getUsuarioSesion()?.permiso);
 
@@ -48,7 +50,26 @@ export const subirProductosConPin = async (pin) => {
   if (!cr.ok) return cr;
   try {
     const r = await syncProductos({ cred: cr.cred });
-    return { ...r, pendientes: r.ok ? await contarProductosPendientes() : r.pendientes };
+    // REQ-HPR: el historial de cambios de precio viaja con la misma credencial.
+    // REQ-PBU: si falta la 010 el RPC viejo ignora precio_bulto => esos productos quedan pendientes.
+    let cambios = null;
+    let falta010 = false;
+    if (r.ok) {
+      try {
+        cambios = await subirCambiosPrecio(cr.cred);
+        falta010 = cambios.faltaMigracion === true || (await sondearMigracion010()).faltaMigracion;
+        if (falta010) {
+          const conBulto = ((await getProductos()) || []).filter(p => Number(p?.precioBulto) > 0).map(p => p.id);
+          if (conBulto.length) await patchRegistros('productos', conBulto, { extrasPendientes: true });
+        }
+      } catch { /* el historial se reintenta en la proxima subida */ }
+    }
+    return {
+      ...r,
+      cambiosPrecio: cambios,
+      ...(falta010 ? { avisoMigracion: MSG_FALTA_010 } : {}),
+      pendientes: r.ok ? await contarProductosPendientes() : r.pendientes,
+    };
   } catch (e) {
     return { ok: false, motivo: 'error', mensaje: e?.message || String(e) };
   }

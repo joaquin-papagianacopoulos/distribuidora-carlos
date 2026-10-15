@@ -22,7 +22,7 @@ const roundTrip = (aoa) => {
 
 describe('AC-PLA-3b campos opcionales de productos', () => {
   test('AC-PLA-3b son exactamente Descuento 1, Descuento 2, % Ganancia, Precio venta 2 y Mínimo venta', () => {
-    expect([...CAMPOS_OPCIONALES_PRODUCTO]).toEqual(['descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'minimoVenta']);
+    expect([...CAMPOS_OPCIONALES_PRODUCTO]).toEqual(['descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'minimoVenta']);
     for (const v of ['', '   ', '-', ' - ', '–', '—', null, undefined]) expect(celdaSinDato(v)).toBe(true);
     for (const v of ['0', '10', '-5', 'x']) expect(celdaSinDato(v)).toBe(false);
   });

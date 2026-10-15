@@ -442,3 +442,46 @@ export const generarCierreComisionesFile = async (cierre) => {
   const blob = doc.output('blob');
   return new File([blob], filename, { type: 'application/pdf' });
 };
+
+// REQ-HPR (AC-HPR-2/3): PDF de cambios de precio. `filas` viene de resumirCambiosPrecio
+// (completo) o de filasPdfSoloPrecioNuevo (lista para pasar a clientes/vendedores).
+const fmtPesosPdf = (n) => (n === null || n === undefined ? '' : `$${Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const fmtFechaPdf = (f) => String(f || '').split('-').reverse().join('/');
+
+export const generarCambiosPrecioFile = async (filas, { desde, hasta, soloNuevo = false } = {}) => {
+  const { jsPDF } = await import('jspdf');
+  const { applyPlugin } = await import('jspdf-autotable');
+  applyPlugin(jsPDF);
+  const doc = new jsPDF();
+  const periodo = !desde || desde === hasta ? fmtFechaPdf(desde || hasta) : `${fmtFechaPdf(desde)} a ${fmtFechaPdf(hasta)}`;
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(soloNuevo ? 'Lista de precios nuevos' : 'Cambios de precio', 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Período: ${periodo} · Productos: ${(filas || []).length}`, 14, 20);
+
+  const head = soloNuevo
+    ? [['Código', 'Producto', 'Precio por unidad', 'Llevando bulto']]
+    : [['Código', 'Producto', 'Rubro', 'Anterior', 'Nuevo', 'Var. %']];
+  const body = (filas || []).map(f => (soloNuevo
+    ? [f.codigo, f.nombre, fmtPesosPdf(f.precio), fmtPesosPdf(f.precioBulto)]
+    : [
+      f.codigo, f.nombre, f.rubro,
+      f.precioAnterior === null ? 'Nuevo' : fmtPesosPdf(f.precioAnterior),
+      fmtPesosPdf(f.precioNuevo),
+      f.variacionPct === null ? '' : `${f.variacionPct > 0 ? '+' : ''}${String(f.variacionPct).replace('.', ',')}%`,
+    ]));
+  doc.autoTable({
+    startY: 25,
+    head,
+    body,
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 2 },
+    headStyles: { fillColor: [40, 40, 40] },
+  });
+  const filename = `${soloNuevo ? 'precios_nuevos' : 'cambios_precio'}_${String(desde || '').replace(/[^0-9-]/g, '')}${hasta && hasta !== desde ? `_${String(hasta).replace(/[^0-9-]/g, '')}` : ''}.pdf`;
+  const blob = doc.output('blob');
+  return new File([blob], filename, { type: 'application/pdf' });
+};

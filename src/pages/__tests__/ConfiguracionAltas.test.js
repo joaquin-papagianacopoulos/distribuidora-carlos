@@ -290,7 +290,7 @@ describe('Productos (REQ-PROD)', () => {
     await click(boton('+ Agregar'));
     await llenar({ codigo: 'N1', nombre: 'Nuevo', costoFinal: '100', ganancia: '20', stock: '12', proveedorId: 'prov-2' });
     await click(boton('Guardar'));
-    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'N1', nombre: 'Nuevo', precio: 120, proveedorId: 'prov-2', unidad: 'unidad' }));
+    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'N1', nombre: 'Nuevo', precio: 120, proveedorId: 'prov-2', unidad: 'unidad' }), expect.anything());
     expect(addProductoLocal.mock.calls[0][0]).not.toHaveProperty('stock');
     expect(ajustarStock).toHaveBeenCalledWith(77, 12, { usuario: 'Admin', inicial: true });
   });
@@ -311,10 +311,10 @@ describe('Productos (REQ-PROD)', () => {
     expect(campo('stock').value).toBe('5');
     await setValue(campo('stock'), '8');
     await click(boton('Guardar'));
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1500 }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1500 }), expect.anything());
     // iter 4: el ajuste se calcula contra el stock MOSTRADO al abrir (base)
     expect(ajustarStock).toHaveBeenCalledWith(2, 8, { usuario: 'Admin', base: 5 });
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ extrasDirty: true }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ extrasDirty: true }), expect.anything());
   });
 
   // ---- iter 4, bloqueante 2 del revisor ----
@@ -328,7 +328,7 @@ describe('Productos (REQ-PROD)', () => {
     expect(campo('stock').value).toBe('5'); // el form no cambia lo mostrado
     await setValue(campo('precio'), '1700');
     await click(boton('Guardar'));
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1700 }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1700 }), expect.anything());
     expect(ajustarStock).not.toHaveBeenCalled();
   });
 
@@ -413,8 +413,8 @@ describe('Importación CSV (regresión)', () => {
     await render();
     await importar('nombre;precio;codigo;unidad;categoria\nAlfajor Jorgito;450;J1;unidad;Golosinas\nCoca Cola 500ml;1600;CC500;unidad;Bebidas\n');
     expect(addProductoLocal).toHaveBeenCalledTimes(1);
-    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Alfajor Jorgito', precio: 450, codigo: 'J1', categoria: 'Golosinas' }));
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1600 }));
+    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Alfajor Jorgito', precio: 450, codigo: 'J1', categoria: 'Golosinas' }), expect.anything());
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 2, precio: 1600 }), expect.anything());
     expect(mockApp.recargar).toHaveBeenCalled();
     expect(syncProductos).toHaveBeenCalled();
     expect(container.textContent).toContain('1 creado, 1 actualizado');
@@ -424,7 +424,7 @@ describe('Importación CSV (regresión)', () => {
     getProductos.mockResolvedValue([]);
     await render();
     await importar('nombre,precio\n"Galletitas, surtidas",1200\n');
-    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Galletitas, surtidas', precio: 1200 }));
+    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Galletitas, surtidas', precio: 1200 }), expect.anything());
   });
 
   it('AC-PROD-5 sin columna precio muestra error y no crea nada', async () => {

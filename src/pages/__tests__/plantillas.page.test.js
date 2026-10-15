@@ -166,14 +166,14 @@ describe('AC-PLA-3 importación de productos con la plantilla', () => {
     const file = xlsxFile('plantilla_productos.xlsx', [
       L,
       fila({ 'Código': 'N1', 'Descripción': 'Nuevo', 'Proveedor': 'arcor', 'Costo final': '100', '% Ganancia': '50', 'Stock': '10' }),
-      fila({ 'Código': 'B1', 'Descripción': 'Bon o Bon', 'Precio venta 1': '350', 'Stock': '99' }),
+      fila({ 'Código': 'B1', 'Descripción': 'Bon o Bon', 'Precio por unidad': '350', 'Stock': '99' }),
       fila({ 'Código': 'N2', 'Descripción': 'Malo', 'Bulto x': '0' }),
     ]);
     await subir(container.querySelector('input[type="file"]'), file);
-    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'N1', proveedorId: 'prov-1', precio: 150, extrasDirty: true }));
+    expect(addProductoLocal).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'N1', proveedorId: 'prov-1', precio: 150, extrasDirty: true }), expect.anything());
     expect(ajustarStock).toHaveBeenCalledTimes(1);
     expect(ajustarStock).toHaveBeenCalledWith(55, 10, { usuario: 'Admin', inicial: true });
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 7, precio: 350, extrasDirty: true }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 7, precio: 350, extrasDirty: true }), expect.anything());
     const res = container.querySelector('[data-testid="resultado-productos"]');
     expect(res.textContent).toContain('1 creado, 1 actualizado, 1 línea ignorada');
     expect(container.querySelector('[data-testid="resultado-productos-resumen"]').textContent)

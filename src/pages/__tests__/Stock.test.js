@@ -327,3 +327,12 @@ describe('Historial de ingresos', () => {
     expect(container.textContent).toContain('Todavía no hay ingresos');
   });
 });
+
+describe('Stock — negativo (REQ-SST)', () => {
+  it('AC-SST-2 el stock negativo se muestra en rojo', () => {
+    // jsdom descarta color:var(--danger); el HTML estático conserva el estilo tal cual.
+    const { renderToStaticMarkup } = require('react-dom/server');
+    const html = renderToStaticMarkup(<Stock />);
+    expect(html).toContain('color:var(--danger)">-2');
+  });
+});

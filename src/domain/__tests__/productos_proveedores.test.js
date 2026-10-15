@@ -45,7 +45,7 @@ describe('REQ-PROD productos', () => {
     expect(manual.producto.precio).toBe(199.9);
   });
   it('AC-PROD-1 tiene las 13 etiquetas pedidas', () => {
-    expect(CAMPOS_PRODUCTO.map(c => c.label)).toEqual(['Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio venta 1', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']);
+    expect(CAMPOS_PRODUCTO.map(c => c.label)).toEqual(['Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock']);
   });
   it('obligatorios, duplicados y proveedor inexistente', () => {
     const r = validarProducto({ codigo: 'dup', nombre: '', proveedorId: 'nope' }, { existentes: [{ id: 5, codigo: 'DUP', nombre: 'X' }], proveedores });
@@ -69,7 +69,7 @@ describe('REQ-PROD productos', () => {
   });
   it('AC-PROD-4 avisos de mínimo de venta y stock al cargar pedido', () => {
     expect(avisosItemPedido({ minimoVenta: 6 }, 2, 10)).toEqual(['Mínimo de venta: 6']);
-    expect(avisosItemPedido({ minimoVenta: 1 }, 12, 10)).toEqual(['Stock disponible: 10']);
+    expect(avisosItemPedido({ minimoVenta: 1 }, 12, 10)).toEqual(['Sin stock (hay 10)']);
     expect(avisosItemPedido(undefined, 1, undefined)).toEqual([]);
   });
   it('mapeo de columnas nuevas de productos (tolerante)', () => {

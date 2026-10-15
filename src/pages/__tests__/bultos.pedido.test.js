@@ -126,21 +126,23 @@ describe('REQ-BUL Nuevo Pedido', () => {
     expect(mas().textContent).toBe('+ Bulto (x 6)');
   });
 
-  test('AC-BUL-6 los avisos de mínimo y stock siguen la cantidad resultante', async () => {
+  test('AC-BUL-6 AC-MIN-1 AC-SST-1 el error de mínimo y el aviso de stock siguen la cantidad resultante', async () => {
     setApp({
       productos: [producto({ minimoVenta: 24 })],
       stockMap: new Map([['p1', 30]]),
     });
     sembrarBorrador(VENDEDOR, 1);
     await render();
-    expect(avisos().textContent).toContain('Mínimo de venta: 24');
+    const errorMin = () => container.querySelector('[data-testid="error-minimo"]');
+    expect(errorMin().textContent).toContain('Mínimo para pedir: 24');
     await click(mas());
     await click(mas());
     expect(cantidadInput().value).toBe('25');
+    expect(errorMin()).toBeNull();
     expect(avisos()).toBeNull();
     await click(mas());
     expect(cantidadInput().value).toBe('37');
-    expect(avisos().textContent).toContain('Stock disponible: 30');
+    expect(avisos().textContent).toContain('Sin stock (hay 30)');
   });
 
   test.each([['vendedor (2)', VENDEDOR], ['admin (1)', ADMIN]])('AC-BUL-8 en Pedido el botón está para %s', async (_l, v) => {

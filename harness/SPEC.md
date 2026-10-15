@@ -455,3 +455,46 @@ Migración `supabase/migrations/009_tienda_portada.sql` (se aplica a mano, despu
 - **AC-FOT-1** El formulario de producto permite subir una foto (jpg/png/webp, máx. 2 MB, validado en el navegador) con el PIN del admin; se muestra la miniatura y al guardar queda en `imagen_url`. Con el PIN cargado, guardar **sube el producto a Supabase en el momento** (sin el PIN queda pendiente para "Subir productos" y se avisa), así la tienda muestra la foto nueva. El formulario de alta/edición se abre arriba de todo, en lugar de la lista.
 - **AC-FOT-2** Se puede quitar la foto. Editar un producto sin tocar la foto conserva la que tenía (incluidas las que encontró la búsqueda automática).
 - **AC-FOT-3** La lista de productos marca los que no tienen foto y muestra cuántos faltan.
+
+---
+
+## Lote operación — principios (pedido 2026-10-15)
+
+> Autorización del dueño: decisiones de seguridad delegadas al arquitecto/auditor ("lo más fácil y recomendable"), anotadas en plan y reporte.
+
+- **Lo más simple que funcione**, reutilizando lo que ya existe (bultos/`unidadVenta`, `stockService`/ledger, `pdfGen`, `rubros`/`marcas`, patrón de RPC con PIN de admin de la migración 007, selectores con "Agregar nuevo…").
+- **Nada se rompe:** pedidos, productos, clientes e ingresos viejos (sin los campos nuevos) siguen funcionando con defaults.
+- Stock **solo** por movimientos. Todo cálculo (precios, agrupado, rentabilidad, saldos, A/B) en funciones puras de `src/domain/` con tests.
+- **Seguridad de datos financieros:** costos, ganancias, pagos y saldos con proveedores, notas de crédito y facturación A/B **no** pueden quedar legibles ni escribibles con la anon key. Usar el patrón más simple que lo garantice (RPC `security definer` con PIN de admin como 007, o el que el auditor justifique mejor). Pantallas nuevas: **solo admin**, salvo que el REQ diga otra cosa.
+- Migraciones nuevas numeradas después de la última existente, idempotentes, sin `drop` de datos.
+
+## REQ-PBU — Precio por unidad llevando bulto
+| Decisión | Valor |
+|---|---|
+| Campo nuevo | `precioBulto` (columna `precio_bulto`), etiqueta **"Precio por unidad llevando bulto"**. Vacío/0 = no hay precio por bulto |
+| Etiqueta del precio actual | `precio` pasa a mostrarse como **"Precio por unidad"** (antes "Precio venta 1"; el campo interno no cambia). "Precio venta 2" queda como está |
+| Regla | Si la cantidad del renglón llega a **al menos 1 bulto completo** (`cantidad ≥ bultoX`, con `bultoX > 1`) y hay `precioBulto`, **todas las unidades del renglón** van a `precioBulto`. Si no, `precio`. Ej.: unidad $900, llevando bulto $800, bulto x16: 10 u. → $9.000; 16 u. → $12.800; 20 u. → $16.000 |
+| Cómo se guarda | `item.precio` = precio aplicado; `item.precioOriginal` = precio por unidad; `item.precioPorBulto = true`. Así boleta, totales y "Total sin descuento" siguen funcionando |
+
+- **AC-PBU-1** Formulario de producto con "Precio por unidad" y "Precio por unidad llevando bulto" (≥ 0; si es mayor que el precio por unidad se avisa, no se bloquea).
+- **AC-PBU-2** Plantilla Excel de productos (REQ-PLA): columnas **"Precio por unidad"** y **"Precio por unidad llevando bulto"**; un Excel viejo con "Precio venta 1" se sigue importando.
+- **AC-PBU-3** Nuevo pedido, Facturación y Armado aplican la regla al cambiar la cantidad (subir o bajar del bulto cambia el precio), salvo que el admin haya puesto un precio/descuento manual en ese renglón (se respeta el manual).
+- **AC-PBU-4** La tienda muestra "Llevando el display: $800 c/u" y el servidor (`tienda_crear_pedido`/`tienda_catalogo`) aplica la **misma** regla; un carrito con precio manipulado no pasa.
+- **AC-PBU-5** Función pura `precioAplicado(producto, cantidad)` con tests (bordes: `bultoX` 0/1/vacío, `precioBulto` vacío/0/mayor que el unitario, cantidades decimales, el ejemplo de la tabla).
+
+## REQ-MIN — Mínimo para pedir un producto
+Se usa el campo existente **"Mínimo venta"** (`minimoVenta`).
+- **AC-MIN-1** Al agregar un producto con mínimo a un pedido (Nuevo pedido y tienda), la cantidad arranca en el mínimo y **no** se puede guardar por debajo (error claro en el renglón). Mínimo vacío/0/1 = sin restricción.
+- **AC-MIN-2** En Facturación el admin puede guardar por debajo del mínimo con confirmación; el armador no puede bajar de él (si falta mercadería, lo anota como faltante como hoy).
+- **AC-MIN-3** Si el producto se vende por bulto, el mínimo se redondea al múltiplo de bulto superior. Función pura con tests.
+
+## REQ-SST — Vender sin stock con aviso
+- **AC-SST-1** En Nuevo pedido, Facturación y Armado se puede cargar y facturar un producto sin stock suficiente: **nunca se bloquea**, se muestra el aviso "Sin stock (hay N)" en el renglón y un resumen al facturar ("3 productos quedan con stock negativo"). `STOCK_POLICY` queda en `advertir`.
+- **AC-SST-2** El stock puede quedar negativo (sigue siendo la suma de movimientos) y Stock lo muestra en rojo. Revertir/borrar el pedido lo devuelve como hoy (AC-STK-3).
+- **AC-SST-3** La tienda mantiene su configuración propia (`permitir pedir sin stock`, REQ-POR); este REQ no la cambia.
+
+## REQ-HPR — Cambios de precio del día en PDF
+- **AC-HPR-1** Cada vez que cambia `precio` o `precioBulto` de un producto (formulario, plantilla Excel, cualquier otro camino) se registra un cambio: producto, precio anterior → nuevo (de cada uno), fecha y hora, usuario. Registro con UUID, offline-first, sincronizado. Sin cambio real (mismo valor) no se registra.
+- **AC-HPR-2** Sección "Cambios de precio" (Configuración o Productos, admin): elegir un día (default hoy) o un rango, ver la lista y bajar un **PDF** con código, producto, rubro, precio anterior, precio nuevo y variación %, ordenado por rubro y nombre. Si un producto cambió varias veces en el período, se muestra el primero anterior y el último nuevo.
+- **AC-HPR-3** Opción "solo precio nuevo" para el PDF (lista para pasarle a clientes/vendedores: código, producto, precio por unidad, precio llevando bulto).
+- **AC-HPR-4** El historial empieza a registrarse desde esta versión (no se reconstruye el pasado) y la pantalla lo aclara.

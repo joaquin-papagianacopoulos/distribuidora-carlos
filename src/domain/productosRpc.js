@@ -1,7 +1,7 @@
 // src/domain/productosRpc.js — S-VTA-01. Funciones puras para escribir productos
 // por las RPC admin_guardar_productos / admin_baja_producto (migracion 007).
 // Sin React ni IndexedDB. El stock NUNCA viaja (solo por movimientosStock).
-import { productoExtraToRemote, productoVentaToRemote } from './productos';
+import { productoExtraToRemote, productoVentaToRemote, productoPreciosToRemote } from './productos';
 import { esAdmin } from './permisos';
 
 export const MENSAJES_PRODUCTOS = Object.freeze({
@@ -26,7 +26,7 @@ export const filaProductoRpc = (p = {}, { conExtras = false } = {}) => ({
   categoria: p.categoria ?? '',
   marca: p.marca ?? '',
   imagen_url: p.imagen_url ?? null,
-  ...(conExtras ? { ...productoExtraToRemote(p), ...productoVentaToRemote(p) } : {}),
+  ...(conExtras ? { ...productoExtraToRemote(p), ...productoVentaToRemote(p), ...productoPreciosToRemote(p) } : {}),
   extras: !!conExtras,
 });
 

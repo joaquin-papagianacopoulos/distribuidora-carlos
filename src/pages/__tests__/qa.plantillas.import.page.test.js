@@ -239,7 +239,7 @@ describe('AC-PROD-5 archivos viejos desde la pantalla', () => {
     const alta = addProductoLocal.mock.calls[0][0];
     expect(alta).toMatchObject({ nombre: 'Alfajor', precio: 10, codigo: 'A1', unidad: 'caja', categoria: 'Golosinas' });
     expect(alta).not.toHaveProperty('extrasDirty');
-    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 7, precio: 150, codigo: 'CC', unidad: 'unidad' }));
+    expect(updateProducto).toHaveBeenCalledWith(expect.objectContaining({ id: 7, precio: 150, codigo: 'CC', unidad: 'unidad' }), expect.anything());
     expect(updateProducto.mock.calls[0][0]).not.toHaveProperty('extrasDirty');
     expect(ajustarStock).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="resultado-productos"]').textContent).toContain('1 creado, 1 actualizado');

@@ -5,8 +5,9 @@ import { fuzzySearch, getTodayStr, formatFecha, searchProductos } from '../utils
 import { addCliente } from '../db';
 import { crearPedidoOnlineFirst } from '../services/pedidoRepository';
 import { normalizePedidoFecha } from '../utils/pedidos';
-import { avisosItemPedido } from '../domain/productos';
-import { stockDe } from '../domain/stock';
+import { avisoSinStock, stockParaAviso } from '../domain/stock';
+import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
+import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
@@ -38,12 +39,17 @@ const hasDraftContent = (draft) =>
   (draft?.items || []).length > 0;
 
 // Componente separado con estado local para los inputs — evita borrar el item al vaciar el campo
-const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
+const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], errorMinimo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
   const [cantidadText, setCantidadText] = useState(String(item.cantidad));
   const [precioText, setPrecioText] = useState(String(item.precio));
 
   // Sincronizar texto cuando cambia desde los botones +/-
   useEffect(() => { setCantidadText(String(item.cantidad)); }, [item.cantidad]);
+  // AC-PBU-3: al subir/bajar del bulto el precio cambia solo; el campo lo refleja
+  // (sin pisar lo que se está tipeando).
+  useEffect(() => {
+    setPrecioText(prev => (parseFloat(String(prev).replace(',', '.')) === item.precio ? prev : String(item.precio)));
+  }, [item.precio]);
 
   const handleCantidadChange = (e) => {
     const val = e.target.value;
@@ -104,7 +110,7 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
   const avisoVenta = avisoMultiplo(item.cantidad, producto);
   const textoBultos = textoRenglonBultos(congelarBultosRenglon(item, producto));
   const precioDelBulto = ventaPorEfectivo(producto) !== 'unidad' ? precioBulto(item.precio, producto?.bultoX) : null;
-  const precioModificado = item.precioOriginal !== undefined && item.precio !== item.precioOriginal;
+  const precioModificado = item.precioOriginal !== undefined && esPrecioManual(item);
   const subtotal = item.cantidad * item.precio;
 
   return (
@@ -116,6 +122,16 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], canEditPreci
           {avisos.length > 0 && (
             <div data-testid="aviso-stock" style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
               {'\u26A0\uFE0F'} {avisos.join(' · ')}
+            </div>
+          )}
+          {errorMinimo && (
+            <div data-testid="error-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
+              {'⛔'} {errorMinimo}
+            </div>
+          )}
+          {item.precioPorBulto === true && !precioModificado && (
+            <div data-testid="precio-por-bulto" style={{ fontSize: 10, color: 'var(--success)', marginTop: 2 }}>
+              Precio llevando bulto
             </div>
           )}
           {avisoVenta && (
@@ -289,10 +305,13 @@ const NuevoPedido = () => {
     // se borra con la cruz del buscador.
   }, []);
 
+  // AC-PBU-3: toda cantidad nueva re-precia el renglón (precio por bulto) salvo precio manual.
+  const conCantidad = (i, cantidad) => precioAplicadoRenglon(quitarMarcasRenglon({ ...i, cantidad }), cantidad);
+
   const cambiarCantidad = (productoId, delta, minVal) => {
     setItems(prev => prev.map(i =>
       i.productoId === productoId
-        ? quitarMarcasRenglon({ ...i, cantidad: Math.max(minVal !== null ? minVal : 1, i.cantidad + delta) })
+        ? conCantidad(i, Math.max(minVal !== null ? minVal : 1, i.cantidad + delta))
         : i
     ));
   };
@@ -300,7 +319,7 @@ const NuevoPedido = () => {
   const setCantidad = (productoId, n) => {
     setItems(prev => prev.map(i =>
       // AC-BUL-9: cantidad escrita a mano (aunque sea 1) => se quita la marca.
-      i.productoId === productoId ? quitarMarcasRenglon({ ...i, cantidad: n }) : i
+      i.productoId === productoId ? conCantidad(i, n) : i
     ));
   };
 
@@ -316,23 +335,23 @@ const NuevoPedido = () => {
       const cantidad = op === 'sumar'
         ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
         : restarBulto(i.cantidad, bx, { minimo });
-      return cantidad === i.cantidad ? i : quitarMarcasRenglon({ ...i, cantidad });
+      return cantidad === i.cantidad ? i : conCantidad(i, cantidad);
     }));
   };
 
   const setPrecio = (productoId, precio) => {
     setItems(prev => prev.map(i =>
-      i.productoId === productoId ? { ...i, precio, descuentoPct: null } : i
+      i.productoId === productoId ? { ...i, precio, descuentoPct: null, precioManual: true } : i
     ));
   };
 
   const setDescuentoPct = (productoId, pct) => {
     setItems(prev => prev.map(i => {
       if (i.productoId !== productoId) return i;
-      const base = Number(i.precioOriginal ?? i.precio ?? 0);
+      const base = precioBaseRenglon(i);
       const p = Math.max(0, Math.min(100, Number(pct) || 0));
       const nuevoPrecio = Math.round((base * (1 - p / 100)) * 100) / 100;
-      return { ...i, descuentoPct: p, precio: nuevoPrecio };
+      return { ...i, descuentoPct: p, precio: nuevoPrecio, precioManual: p > 0 };
     }));
   };
 
@@ -342,11 +361,21 @@ const NuevoPedido = () => {
 
   const total = items.reduce((acc, i) => acc + i.cantidad * i.precio, 0);
 
+  // AC-MIN-1: renglones por debajo del mínimo (error en el renglón; no se guarda).
+  const erroresMinimo = useMemo(() => {
+    const r = validarMinimosItems(items, productosById, { permiso: permisoNorm, pantalla: 'nuevoPedido' });
+    return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
+  }, [items, productosById, permisoNorm]);
+
   const guardar = async () => {
     if (!clienteNombre.trim()) { setToast({ msg: 'Ingresá el nombre del cliente', type: 'error' }); return; }
     if (items.length === 0) { setToast({ msg: 'Agregá al menos un producto', type: 'error' }); return; }
     // C3 / S-BUL-06 (AC-SEC-2): defensa en profundidad antes de guardar
     // (y antes de cualquier efecto, como dar de alta el cliente).
+    if (erroresMinimo.size > 0) {
+      setToast({ msg: `Hay productos por debajo del mínimo: ${[...erroresMinimo.keys()].map(k => items.find(i => String(i.productoId) === k)?.nombre).filter(Boolean).join(', ')}`, type: 'error' });
+      return;
+    }
     const vc = validarCantidadesItems(items);
     if (!vc.ok) { alert(mensajeCantidadesInvalidas(vc.errores)); return; }
     // AC-VTA-3: producto "solo bulto" con cantidad que no es múltiplo => no se guarda desde acá.
@@ -487,7 +516,8 @@ const NuevoPedido = () => {
                 producto={productosById.get(String(item.productoId))}
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
-                avisos={avisosItemPedido(productosById.get(String(item.productoId)), item.cantidad, stockMap?.has(String(item.productoId)) ? stockDe(stockMap, item.productoId) : undefined)}
+                avisos={[avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId))].filter(Boolean)}
+                errorMinimo={erroresMinimo.has(String(item.productoId)) ? mensajeMinimo(erroresMinimo.get(String(item.productoId))) : null}
                 canEditPrecio={isAdmin}
                 onCambiarCantidad={cambiarCantidad}
                 onSetCantidad={setCantidad}

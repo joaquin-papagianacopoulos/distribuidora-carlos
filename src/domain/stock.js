@@ -125,6 +125,32 @@ export const verificarStock = (nuevos = [], stockMap = new Map(), productos = []
   return faltantes;
 };
 
+// AC-SST-1: aviso por renglón (nunca bloquea). null si alcanza el stock.
+export const avisoSinStock = (cantidad, disponible) => {
+  if (disponible === undefined || disponible === null) return null;
+  const c = Number(cantidad);
+  const d = Number(disponible);
+  if (!Number.isFinite(c) || !Number.isFinite(d) || c <= d) return null;
+  return `Sin stock (hay ${d})`;
+};
+
+// AC-SST-1: resumen al facturar: "3 productos quedan con stock negativo" + detalle.
+export const resumenSinStock = (faltantes = []) => {
+  const lista = Array.isArray(faltantes) ? faltantes : [];
+  if (!lista.length) return '';
+  const n = lista.length;
+  const titulo = `${n} ${n === 1 ? 'producto queda' : 'productos quedan'} con stock negativo`;
+  const detalle = lista.map(f => `- ${f.nombre || f.productoId}: hay ${f.disponible}, queda ${f.resultante}`).join('\n');
+  return `${titulo}:\n${detalle}`;
+};
+
+// Stock a comparar en el aviso de un renglón: si el pedido ya está facturado,
+// su cantidad ya fue descontada y se suma de vuelta.
+export const stockParaAviso = (stockMap, productoId, cantidadYaDescontada = 0) => {
+  if (!stockMap || typeof stockMap.has !== 'function' || !stockMap.has(keyProd(productoId))) return undefined;
+  return stockDe(stockMap, productoId) + (Number(cantidadYaDescontada) || 0);
+};
+
 export const decidirFacturacion = (faltantes, policy = STOCK_POLICY) => {
   if (!faltantes.length) return 'ok';
   return policy === 'bloquear' ? 'bloquear' : 'confirmar';

@@ -5,7 +5,8 @@
 import { toInt } from './validacion';
 import { MAX_CANTIDAD } from './stock';
 import { rubroDeProducto } from './rubros';
-import { cantidadInicialRenglon } from './unidadVenta';
+import { cantidadInicialConMinimo } from './minimos';
+import { precioAplicado } from './precios';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
 export const CANTIDAD_MINIMA_RENGLON = 1;
@@ -64,13 +65,18 @@ export const MARCA_CANTIDAD_POR_DEFECTO = '_cantidadPorDefecto';
 export function renglonNuevo(producto, extra = {}) {
   const p = producto && typeof producto === 'object' ? producto : {};
   const rubro = rubroDeProducto(p);
+  // AC-MIN-1: arranca en el mínimo. AC-VTA-3: "solo bulto" arranca en 1 bulto (AC-BUL-9).
+  const cantidad = cantidadInicialConMinimo(p);
+  // AC-PBU-3: se congelan precio por unidad y precio por bulto; el aplicado depende de la cantidad.
+  const conBulto = Number(p.precioBulto) > 0 && normalizarBultoX(p.bultoX) !== null;
+  const aplicado = precioAplicado(p, cantidad);
   return {
     productoId: p.id,
     nombre: p.nombre,
-    precio: p.precio,
+    precio: conBulto ? aplicado.precio : p.precio,
     precioOriginal: p.precio,
-    // AC-VTA-3: "solo bulto" arranca en 1 bulto; el resto, en 1 unidad (AC-BUL-9).
-    cantidad: cantidadInicialRenglon(p),
+    ...(conBulto ? { precioBultoOriginal: Number(p.precioBulto), precioBultoX: normalizarBultoX(p.bultoX), precioPorBulto: aplicado.porBulto } : {}),
+    cantidad,
     ...(rubro ? { rubro } : {}),
     ...extra,
     [MARCA_CANTIDAD_POR_DEFECTO]: true,

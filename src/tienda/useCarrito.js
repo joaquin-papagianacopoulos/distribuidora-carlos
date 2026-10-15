@@ -1,7 +1,7 @@
 // src/tienda/useCarrito.js — carrito de la tienda (REQ-TIE, AC-TIE-10).
 // Persiste en localStorage con try/catch: si falla, sigue funcionando en memoria.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { serializarCarrito, restaurarCarrito, unidadesIniciales, minimoDe } from '../domain/tienda';
+import { serializarCarrito, restaurarCarrito, unidadesIniciales, minimoDe, precioUnitarioTienda } from '../domain/tienda';
 
 export const CLAVE_CARRITO = 'tienda_carrito_v1';
 export const CLAVE_CONTACTO = 'tienda_contacto_v1';
@@ -30,9 +30,9 @@ export function useCarrito() {
     const u = unidades || unidadesIniciales(prod);
     setLineas(prev => {
       const i = prev.findIndex(l => String(l.productoId) === String(prod.id));
-      if (i < 0) return [...prev, { productoId: String(prod.id), unidades: u, modo, precioVisto: prod.precio }];
+      if (i < 0) return [...prev, { productoId: String(prod.id), unidades: u, modo, precioVisto: precioUnitarioTienda(prod, u) }];
       const copia = [...prev];
-      copia[i] = { ...copia[i], unidades: copia[i].unidades + u, modo, precioVisto: prod.precio };
+      copia[i] = { ...copia[i], unidades: copia[i].unidades + u, modo, precioVisto: precioUnitarioTienda(prod, copia[i].unidades + u) };
       return copia;
     });
   }, []);
@@ -41,7 +41,9 @@ export function useCarrito() {
     setLineas(prev => prev.map(l => {
       if (String(l.productoId) !== String(productoId)) return l;
       const min = prod ? minimoDe(prod) : 1;
-      return { ...l, unidades: Math.max(min, Math.floor(Number(unidades) || min)) };
+      const nuevas = Math.max(min, Math.floor(Number(unidades) || min));
+      // AC-PBU-4: al cruzar un bulto cambia el precio que ve el cliente (y el precioVisto).
+      return { ...l, unidades: nuevas, ...(prod ? { precioVisto: precioUnitarioTienda(prod, nuevas) } : {}) };
     }));
   }, []);
 

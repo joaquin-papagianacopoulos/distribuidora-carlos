@@ -54,13 +54,15 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
   it('AC-COMR-7 desde v6 crea SOLO comisionesRubro con keyPath id (UUID, sin autoIncrement) e índices vendedorId y clave', async () => {
     const r = await correr({ existentes: V6 });
     // MOD (RUN 20261014-2100, REQ-WEB): la versión pasó a 8; desde v6 también se crea pedidosWebAcciones.
-    expect(r.version).toBe(8);
-    expect(r.creados).toEqual([['pedidosWebAcciones', { keyPath: 'id' }], ['comisionesRubro', { keyPath: 'id' }]]);
+    expect(r.version).toBe(9);
+    expect(r.creados).toEqual([['pedidosWebAcciones', { keyPath: 'id' }], ['comisionesRubro', { keyPath: 'id' }], ['cambiosPrecio', { keyPath: 'id' }]]);
     expect(r.creados[1][1].autoIncrement).toBeUndefined();
     expect(r.indices).toEqual([
       ['pedidosWebAcciones', 'pedidoRemoteId', 'pedidoRemoteId', { unique: false }],
       ['comisionesRubro', 'vendedorId', 'vendedorId', { unique: false }],
       ['comisionesRubro', 'clave', 'clave', { unique: false }],
+      ['cambiosPrecio', 'productoId', 'productoId', { unique: false }],
+      ['cambiosPrecio', 'fecha', 'fecha', { unique: false }],
     ]);
   });
 
@@ -73,7 +75,7 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
   });
 
   it('AC-COMR-7 es idempotente: si comisionesRubro ya existe no crea nada', async () => {
-    const r = await correr({ existentes: [...V6, 'comisionesRubro', 'pedidosWebAcciones'] });
+    const r = await correr({ existentes: [...V6, 'comisionesRubro', 'pedidosWebAcciones', 'cambiosPrecio'] });
     expect(r.creados).toEqual([]);
     expect(r.borrados).toEqual([]);
   });
@@ -85,6 +87,6 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     expect(upgrade).toContain("if (!d.objectStoreNames.contains('comisionesRubro'))");
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 8;/);
+    expect(src).toMatch(/const DB_VERSION = 9;/);
   });
 });

@@ -39,6 +39,7 @@ const INFO_PRODUCTO = {
   descuento2: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 100 (acepta "10%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '5' },
   ganancia: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 1000 (acepta "35%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '35' },
   precio: { obligatorio: 'No', formato: 'Número ≥ 0. Si queda vacío se calcula: costo × (1 − desc1/100) × (1 − desc2/100) × (1 + ganancia/100)', ejemplo: '' },
+  precioBulto: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Precio por unidad cuando se lleva al menos un bulto completo. Vacío, "-" o 0 = no hay precio por bulto; en productos existentes se conserva', ejemplo: '800' },
   precioVenta2: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '1300' },
   bultoX: { obligatorio: 'No', formato: 'Entero ≥ 1 (vacío = 1)', ejemplo: '12' },
   ventaPor: { obligatorio: 'No', formato: 'Unidad, Bulto o Ambos. "Bulto" exige "Bulto x" mayor que 1. Vacío = Ambos si Bulto x es mayor que 1, si no Unidad', ejemplo: 'Bulto' },
@@ -122,7 +123,7 @@ const columnasDe = (entidad) => {
 const ALIAS = {
   productos: {
     nombre: 'nombre', producto: 'nombre',
-    precio: 'precio', precioventa: 'precio', preciodeventa: 'precio', price: 'precio', pcio: 'precio',
+    precio: 'precio', precioventa: 'precio', precioventa1: 'precio', preciounidad: 'precio', preciodeventa: 'precio', price: 'precio', pcio: 'precio',
     clave: 'codigo', sku: 'codigo', cod: 'codigo',
     categoria: 'categoria', familia: 'categoria', linea: 'categoria',
     unidad: 'unidad', unit: 'unidad',
@@ -157,7 +158,7 @@ const PARCIALES_PRODUCTO = [
 ];
 
 // Columnas que solo trae la plantilla nueva (no los archivos viejos).
-const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'bultoX', 'minimoVenta', 'stock'];
+const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stock'];
 
 /**
  * Mapea los encabezados de un archivo a campos.
@@ -211,7 +212,7 @@ const sinPorcentaje = (v) => celda(v).replace(/%$/, '').trim();
 const strOr = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
 // AC-PLA-3b: en los campos opcionales de productos, "-" o "–" (o "—") es "sin dato".
-export const CAMPOS_OPCIONALES_PRODUCTO = Object.freeze(['descuento1', 'descuento2', 'ganancia', 'precioVenta2', 'minimoVenta']);
+export const CAMPOS_OPCIONALES_PRODUCTO = Object.freeze(['descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'minimoVenta']);
 const SIN_DATO = new Set(['', '-', '–', '—']);
 export const celdaSinDato = (v) => SIN_DATO.has(celda(v).replace(/\s+/g, ''));
 
@@ -298,6 +299,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     descuento2: strOr(existente?.descuento2),
     ganancia: strOr(existente?.ganancia),
     precio: strOr(existente?.precio),
+    precioBulto: strOr(existente?.precioBulto),
     precioVenta2: strOr(existente?.precioVenta2),
     bultoX: strOr(existente?.bultoX, '1'),
     minimoVenta: strOr(existente?.minimoVenta, '1'),
@@ -318,7 +320,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     if (vt === null) errores.push('Mostrar en tienda: poné Sí o No');
     else form.visibleTienda = vt;
   }
-  for (const k of ['costoFinal', 'precioVenta2', 'bultoX', 'minimoVenta']) if (tiene(k)) form[k] = celda(valores[k]);
+  for (const k of ['costoFinal', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta']) if (tiene(k)) form[k] = celda(valores[k]);
   for (const k of PCT_PRODUCTO) if (tiene(k)) form[k] = sinPorcentaje(valores[k]);
   // AC-PLA-3b: minimo venta 0 = sin minimo (1).
   if (tiene('minimoVenta') && /^0+([.,]0*)?$/.test(celda(valores.minimoVenta))) form.minimoVenta = '1';
@@ -333,7 +335,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     proveedoresValidos = [...(proveedores || []), { id: form.proveedorId }];
   }
 
-  // Precio venta 1: vacio => se calcula con AC-PROD-1 (validarProducto), salvo
+  // Precio por unidad (antes Precio venta 1): vacio => se calcula con AC-PROD-1 (validarProducto), salvo
   // un producto existente al que no se le cambio ningun costo: ahi se conserva.
   if (tiene('precio')) form.precio = celda(valores.precio);
   else if (modo === 'legacy') errores.push('Precio vacío o inválido');

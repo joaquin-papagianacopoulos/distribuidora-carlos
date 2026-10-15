@@ -115,7 +115,7 @@ describe('AC-SEC-3 AC-PLA-6 formula injection en la plantilla exportada', () => 
 describe('AC-PROD-3 AC-STK-8 regla dura 4: la importacion no escribe stock', () => {
   test('AC-PROD-3 un producto existente con columna Stock no genera stock (stockIgnorado)', () => {
     const existentes = [{ id: 'p1', codigo: 'A1', nombre: 'Prod', precio: 10, unidad: 'unidad' }];
-    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '', '10', '', '', '', '', '', '', '999']];
+    const rows = [LABELS_P, ['A1', 'Prod', '', '', '', '', '', '', '', '10', '', '', '', '', '', '', '', '999']];
     const plan = planificarImportacion(rows, 'productos', { existentes, proveedores: [] });
     expect(plan.entradas[0].accion).toBe('actualizar');
     expect(plan.entradas[0].valor.stock).toBeNull();
@@ -159,7 +159,7 @@ describe('AC-PLA-3 AC-PLA-4 vendedor / proveedor por nombre', () => {
   });
   // S-PLA-01 (Medio): CORREGIDO en la iteracion 2 (topes en el dominio).
   test('S-PLA-01 planificarImportacion rechaza archivos con mas de MAX_FILAS_IMPORT filas', () => {
-    const filas = [LABELS_P, ...Array.from({ length: MAX_FILAS_IMPORT + 1 }, (_, i) => LABELS_P.map(l => ({ 'Código': `C${i}`, 'Descripción': `P${i}`, 'Precio venta 1': '1' }[l] || '')))];
+    const filas = [LABELS_P, ...Array.from({ length: MAX_FILAS_IMPORT + 1 }, (_, i) => LABELS_P.map(l => ({ 'Código': `C${i}`, 'Descripción': `P${i}`, 'Precio por unidad': '1' }[l] || '')))];
     const plan = planificarImportacion(filas, 'productos');
     expect(plan).toMatchObject({ ok: false, error: MSG_EXCESO_FILAS, entradas: [] });
     expect(planificarImportacion(filas.slice(0, MAX_FILAS_IMPORT + 1), 'productos').ok).toBe(true);

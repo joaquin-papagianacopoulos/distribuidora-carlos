@@ -6,6 +6,7 @@ import SelectorMarca from './SelectorMarca';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta, validarProducto } from '../domain/productos';
 import { validarImagen } from '../domain/tiendaPortada';
+import { avisoPrecioBulto } from '../domain/precios';
 
 const str = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
@@ -23,6 +24,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     descuento2: str(inicial?.descuento2),
     ganancia: str(inicial?.ganancia),
     precio: str(inicial?.precio),
+    precioBulto: str(inicial?.precioBulto),
     precioVenta2: str(inicial?.precioVenta2),
     bultoX: str(inicial?.bultoX, '1'),
     // AC-VTA-1: productos viejos sin estos campos arrancan con los defaults derivados.
@@ -110,6 +112,8 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
           ),
         }}
         ayudas={{
+          // AC-PBU-1: si el precio por bulto supera al unitario se avisa, no se bloquea.
+          precioBulto: avisoPrecioBulto(valores.precio, valores.precioBulto) || 'Opcional. Precio por unidad cuando se lleva al menos un bulto completo.',
           ventaPor: 'El precio es por unidad. "Bulto" exige Bulto x mayor que 1.',
           precio: `Costo neto ${fmt(costoNeto)} · sugerido ${fmt(precioVenta1)}${precioManual ? ' (precio cargado a mano)' : ''}`,
           stock: inicial
