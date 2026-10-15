@@ -13,6 +13,7 @@ import OrdenEntrega from './pages/OrdenEntrega';
 import Armado from './pages/Armado';
 import Stock from './pages/Stock';
 import Comisiones from './pages/Comisiones';
+import FacturasAEmitir from './pages/FacturasAEmitir';
 import PedidosWeb from './pages/PedidosWeb';
 import { contarPorRevisar } from './domain/pedidosWeb';
 import SelectorVendedor from './components/SelectorVendedor';
@@ -32,6 +33,7 @@ const TABS = [
   { id: 'ordenentrega', label: 'Orden', icon: '\u{1F5FA}️' }, // 🗺️
   { id: 'resumen', label: 'Resumen', icon: '\u{1F4CA}' }, // 📊
   { id: 'comisiones', label: 'Comisiones', icon: '\u{1F4B5}' }, // solo admin (REQ-COM)
+  { id: 'facturasemitir', label: 'A emitir', icon: '\u{1F4D1}' }, // solo admin (REQ-FAB, AC-FAB-3)
   { id: 'pedidosweb', label: 'Web', icon: '\u{1F6D2}' }, // carrito, solo admin (REQ-WEB)
   { id: 'reportes', label: 'Reportes', icon: '\u{1F4C8}' }, // 📈
   { id: 'config', label: 'Config', icon: '\u2699\uFE0F' }, // ⚙️
@@ -214,6 +216,7 @@ const AppContent = () => {
         {tab === 'resumen' && <ResumenDia />}
         {tab === 'reportes' && <ReportesVentas />}
         {tab === 'comisiones' && isAdmin && <Comisiones />}
+        {tab === 'facturasemitir' && isAdmin && <FacturasAEmitir />}
         {tab === 'pedidosweb' && isAdmin && <PedidosWeb />}
         {tab === 'config' && <Configuracion />}
       </main>

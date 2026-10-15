@@ -20,6 +20,12 @@ import { avisoSinStock, stockParaAviso, resumenSinStock } from '../domain/stock'
 import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
 import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
+import TipoFacturaSelector from '../components/TipoFacturaSelector';
+import AgruparRenglones from '../components/AgruparRenglones';
+import { normalizarGrupos } from '../domain/gruposFactura';
+import { filasTiposFacturaRpc, ETIQUETA_TIPO_FACTURA } from '../domain/facturacionAB';
+import { guardarTiposFacturaLocal, subirTiposFactura } from '../services/facturacionService';
+import { credencialesAdminProductos } from '../services/productosAdminService';
 
 // REQ-COM (AC-COM-13): texto extra para confirmar cambios sobre un pedido que
 // ya esta en un cierre de comisiones vigente.
@@ -263,6 +269,12 @@ const Facturacion = () => {
   const [modoSeleccion, setModoSeleccion] = useState(false);
   const [seleccion, setSeleccion] = useState(new Set());
   const [draftByPid, setDraftByPid] = useState({});
+  // REQ-AGR: grupos del pedido que se esta editando (undefined = el pedido no tiene) y como se imprimen.
+  const [gruposEdit, setGruposEdit] = useState(undefined);
+  const [modoGrupos, setModoGrupos] = useState('detalle');
+  // REQ-FAB: PIN de admin para subir los tipos de factura (vive solo en este estado; no se guarda).
+  const [pinTipos, setPinTipos] = useState('');
+  const [tiposMsg, setTiposMsg] = useState('');
   const draftRef = useRef({});
   // S-BUL-07: espejo de itemsEdit para calcular "± Bulto" fuera del updater.
   const itemsEditRef = useRef([]);
@@ -364,7 +376,7 @@ const Facturacion = () => {
     for (const p of pedidosSel) {
       const cliente = (clientes || []).find(c => c.id === p.clienteId);
       const deudaPendiente = getDeudaPendienteParaPedido(deudas, p);
-      files.push(await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente));
+      files.push(await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente, null, { modoGrupos }));
     }
 
     try {
@@ -391,8 +403,13 @@ const Facturacion = () => {
     }
   };
 
+  // REQ-FAB / REQ-AGR: contadores para la pantalla (solo admin los muestra).
+  const tiposPendientes = filasTiposFacturaRpc(pedidos || []).length;
+  const hayGrupos = (pedidosDia || []).some(p => Array.isArray(p.grupos) && p.grupos.length > 0);
+
   const abrirEdicion = (p) => {
     setPedidoEditando(p);
+    setGruposEdit(Array.isArray(p.grupos) ? p.grupos.map(g => ({ ...g, itemIds: [...(g.itemIds || [])] })) : undefined);
     const sorted = sortItems(p.items.map(i => ({ ...i })));
     setItemsEdit(sorted);
     setFechaEdit(normalizePedidoFecha(p.fecha) || getTodayStr());
@@ -751,6 +768,8 @@ const Facturacion = () => {
         fecha: normalizePedidoFecha(fechaEdit),
         items: itemsGuardar,
         total: itemsFinal.reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0),
+        // REQ-AGR (AC-AGR-2): los grupos son solo presentacion; los renglones quedan separados.
+        ...(isAdmin && gruposEdit !== undefined ? { grupos: normalizarGrupos(gruposEdit, itemsGuardar) } : {}),
       };
 
       await guardarPedidoOnlineFirst(pedidoFinal);
@@ -768,6 +787,28 @@ const Facturacion = () => {
     }
   };
 
+  // REQ-FAB (AC-FAB-1): marca local del tipo de factura (uno o varios pedidos). No toca stock ni estado.
+  const cambiarTipoFactura = async (ids, tipo) => {
+    if (!isAdmin) return;
+    await guardarTiposFacturaLocal(ids, tipo);
+    setTiposMsg('');
+    await recargar();
+  };
+
+  // REQ-FAB: sube los tipos pendientes con el PIN del admin (el PIN se limpia antes de llamar).
+  const subirTipos = async () => {
+    if (!isAdmin) return;
+    setTiposMsg('');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { setTiposMsg('Necesitás conexión para subir los tipos de factura.'); return; }
+    const cr = await credencialesAdminProductos(pinTipos);
+    if (!cr.ok) { setTiposMsg(cr.mensaje); return; }
+    setPinTipos('');
+    const r = await subirTiposFactura(cr.cred);
+    if (!r.ok) { setTiposMsg(r.mensaje || 'No se pudieron subir los tipos de factura.'); return; }
+    await recargar();
+    setTiposMsg(r.rechazados?.length ? `Se subieron ${r.subidos}; ${r.rechazados.length} quedaron pendientes.` : `Se subieron ${r.subidos} tipos de factura.`);
+  };
+
   const imprimirFactura = async (p) => {
     const cliente = clientes.find(c => c.id === p.clienteId);
     // iOS Safari suele bloquear descargas directas (doc.save).
@@ -775,7 +816,7 @@ const Facturacion = () => {
     const w = window.open('', '_blank');
     try {
       const deudaPendiente = getDeudaPendienteParaPedido(deudas, p);
-      const file = await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente);
+      const file = await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente, null, { modoGrupos });
       const url = URL.createObjectURL(file);
       if (w) w.location.href = url;
       else window.location.href = url;
@@ -1063,6 +1104,15 @@ const Facturacion = () => {
           )}
         </div>
 
+        {isAdmin && (
+          <AgruparRenglones
+            items={itemsEdit}
+            grupos={gruposEdit || []}
+            productosById={productosIndex.byId}
+            onChange={setGruposEdit}
+          />
+        )}
+
         <div style={{ display: 'flex', gap: 10, marginBottom: 80 }}>
           <button className="btn btn-ghost" onClick={() => setPedidoEditando(null)}>Cancelar</button>
           <button className="btn btn-primary" onClick={guardarEdicion} disabled={guardando} style={{ flex: 1 }}>
@@ -1131,6 +1181,18 @@ const Facturacion = () => {
           >
             Seleccionar
           </button>
+          {modoSeleccion && isAdmin && ['A', 'B', 'ninguna'].map(t => (
+            <button
+              key={t}
+              className="btn btn-ghost btn-sm"
+              style={{ width: 'auto' }}
+              data-testid={`marcar-${t}`}
+              disabled={seleccion.size === 0}
+              onClick={async () => { await cambiarTipoFactura([...seleccion], t); }}
+            >
+              {ETIQUETA_TIPO_FACTURA[t]}
+            </button>
+          ))}
           {modoSeleccion && (
             <button
               className="btn btn-primary btn-sm"
@@ -1143,6 +1205,40 @@ const Facturacion = () => {
           )}
         </div>
       </div>
+
+      {isAdmin && (tiposPendientes > 0 || tiposMsg) && (
+        <div className="card" data-testid="subir-tipos-factura" style={{ padding: '10px 14px', marginBottom: 14 }}>
+          {tiposPendientes > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                className="input"
+                aria-label="PIN de administrador"
+                placeholder="Tu PIN"
+                value={pinTipos}
+                onChange={e => setPinTipos(e.target.value)}
+                style={{ width: 120 }}
+              />
+              <button className="btn btn-primary btn-sm" style={{ width: 'auto' }} onClick={subirTipos}>
+                Subir tipos de factura ({tiposPendientes})
+              </button>
+            </div>
+          )}
+          {tiposMsg && <div role="status" style={{ fontSize: 13, marginTop: 6 }}>{tiposMsg}</div>}
+        </div>
+      )}
+
+      {isAdmin && hayGrupos && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 14 }}>
+          <label className="input-label" htmlFor="modo-grupos">Al imprimir, los grupos salen</label>
+          <select id="modo-grupos" className="input" value={modoGrupos} onChange={e => setModoGrupos(e.target.value)}>
+            <option value="detalle">Con detalle (el grupo y debajo sus renglones)</option>
+            <option value="solo_grupos">Solo grupos</option>
+          </select>
+        </div>
+      )}
 
       {pedidosDia.length === 0 ? (
         <div className="empty-state">
@@ -1217,6 +1313,14 @@ const Facturacion = () => {
 
             {/* Sin descripcion en listado: el detalle se ve entrando al pedido (Editar). */}
             <ArmadoResumen pedido={p} compact />
+
+            {isAdmin && (
+              <TipoFacturaSelector
+                pedido={p}
+                cliente={(clientes || []).find(c => c.id === p.clienteId)}
+                onChange={(t) => cambiarTipoFactura([p.id], t)}
+              />
+            )}
 
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

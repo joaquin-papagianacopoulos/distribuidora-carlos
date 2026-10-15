@@ -11,6 +11,7 @@ import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
 
 import { pedidoEntregaToRemote, pedidoEntregaFromRemote, sinColumnasEntrega } from '../domain/comisiones';
 import { esColumnaInexistente, esEscrituraDenegada } from './tolerancia';
+import { gruposToRemote, gruposFromRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
 import { vendedorDesdeRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO, COLUMNAS_VENDEDOR_LEGACY } from '../domain/vendedores';
 
@@ -139,6 +140,9 @@ const mapPedidoRemoto = (r, local = null) => {
     ...pedidoEntregaFromRemote(r, local),
     // REQ-WEB: origen y datos de la bandeja "Pedidos web" (tolerante a columnas faltantes).
     ...pedidoWebFromRemote(r, local),
+    // REQ-AGR: grupos de renglones (dato no confiable: se sanea). tipoFactura* vive solo
+    // en el local (viene en ...local), no en la tabla pedidos.
+    grupos: gruposFromRemote(r, local),
     borrado: ['cancelado', 'eliminado', 'borrado'].includes(String(estado).toLowerCase()),
     synced: true,
     createdAt: local?.createdAt ?? Date.now(),
@@ -170,6 +174,8 @@ const pedidoToRemoteRow = (pedido) => {
     deuda_generada: !!p.deudaGenerada,
     // Entregado (REQ-COM): no cambia estado ni stock.
     ...pedidoEntregaToRemote(p),
+    // REQ-AGR: solo si el pedido conoce la clave (un dispositivo viejo no la pisa).
+    ...gruposToRemote(p),
     updated_at:     new Date().toISOString(),
   };
 };
@@ -182,12 +188,27 @@ const avisarFalta003 = () => {
   console.warn('Supabase: faltan las columnas "entregado" en pedidos. Correr supabase/migrations/003_comisiones.sql. La marca queda en este dispositivo y se reintenta.');
 };
 
+let avisoMigracion011 = false;
+const avisarFalta011 = () => {
+  if (avisoMigracion011) return;
+  avisoMigracion011 = true;
+  console.warn('Supabase: falta la columna "grupos" en pedidos. Correr supabase/migrations/011_lote_operacion_facturacion_zonas.sql. Los grupos quedan en este dispositivo.');
+};
+
 // Reintenta un update/insert de pedidos SIN las columnas de entregado si
 // Supabase todavia no las tiene. Devuelve { data, error, sinEntrega }.
 export const conFallbackEntrega = async (ejecutar, rowOrRows) => {
-  const r1 = await ejecutar(rowOrRows);
+  let filas = rowOrRows;
+  let r1 = await ejecutar(filas);
   if (!r1.error || !esColumnaInexistente(r1.error)) return { ...r1, sinEntrega: false };
-  const legacy = Array.isArray(rowOrRows) ? rowOrRows.map(sinColumnasEntrega) : sinColumnasEntrega(rowOrRows);
+  // REQ-AGR: falta la columna grupos (migracion 011): reintentar sin ella antes del fallback de entrega.
+  if (nombraColumna011(r1.error)) {
+    avisarFalta011();
+    filas = Array.isArray(filas) ? filas.map(sinColumnas011) : sinColumnas011(filas);
+    r1 = await ejecutar(filas);
+    if (!r1.error || !esColumnaInexistente(r1.error)) return { ...r1, sinEntrega: false };
+  }
+  const legacy = Array.isArray(filas) ? filas.map(sinColumnasEntrega) : sinColumnasEntrega(filas);
   const r2 = await ejecutar(legacy);
   if (!r2.error) avisarFalta003();
   return { ...r2, sinEntrega: !r2.error };
@@ -650,6 +671,9 @@ export const pullContactosPedidosWeb = async ({ cred = null } = {}) => {
   return { ok: true, count };
 };
 
+// REQ-ZON: fila de cliente sin la columna de la migracion 011.
+const sinOrdenZona = ({ orden_zona: _oz, ...resto }) => resto;
+
 export const syncClientes = async () => {
   const todos = await getClientes();
   // Solo se sube lo que este dispositivo edito de verdad (pendingSync). Subir
@@ -668,6 +692,8 @@ export const syncClientes = async () => {
       boleta_contra_boleta: !!c.boletaContraBoleta,
       dia_entrega: c.diaEntrega || null,
       orden_entrega: (c.ordenEntrega !== undefined && c.ordenEntrega !== null && c.ordenEntrega !== '') ? Number(c.ordenEntrega) : null,
+      // REQ-ZON: puesto dentro de la zona (migracion 011). Si la columna no existe, se reintenta sin ella.
+      orden_zona: (Number(c.ordenZona) > 0) ? Math.floor(Number(c.ordenZona)) : null,
     }));
     const porId = new Map(clientes.map(c => [c.id, c]));
     // Revisor, bloqueante 1: los campos nuevos (codigo, CUIT, ...) se suben SOLO
@@ -685,11 +711,11 @@ export const syncClientes = async () => {
       const basicos = filasLegacy.filter(l => !conExtras(l));
       let err = null; let leg = false;
       if (extras.length) {
-        const r = await upsertTolerante('clientes', extras.map(x => x[0]), extras.map(x => x[1]));
+        const r = await upsertTolerante('clientes', extras.map(x => x[0]), extras.map(x => sinOrdenZona(x[1])));
         err = r.error; leg = r.legacy;
       }
       if (!err && basicos.length) {
-        const r = await supabase.from('clientes').upsert(basicos, { onConflict: 'id' });
+        const r = await upsertTolerante('clientes', basicos, basicos.map(sinOrdenZona));
         err = r.error;
       }
       return { error: err, legacy: leg };
@@ -1125,6 +1151,8 @@ export const downloadMaestros = async () => {
         boletaContraBoleta: r.boleta_contra_boleta !== undefined ? !!r.boleta_contra_boleta : !!local?.boletaContraBoleta,
         diaEntrega: r.dia_entrega !== undefined ? (r.dia_entrega ?? null) : (local?.diaEntrega ?? null),
         ordenEntrega: r.orden_entrega !== undefined ? (r.orden_entrega ?? null) : (local?.ordenEntrega ?? null),
+        // REQ-ZON: tolerante a que la columna todavia no exista (migracion 011).
+        ordenZona: r.orden_zona !== undefined ? (r.orden_zona ?? null) : (local?.ordenZona ?? null),
       };
     });
   for (let i = 0; i < clientesUpserts.length; i += 500) {

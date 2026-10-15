@@ -12,6 +12,7 @@ import { aplicarStockPedido } from './stockService';
 import { getNombreUsuarioSesion, getUsuarioSesion } from './sesion';
 import { marcarEntregado, pedidoEntregaToRemote, sinColumnasEntrega, validarCambioEntrega } from '../domain/comisiones';
 import { esColumnaInexistente } from '../sync/tolerancia';
+import { gruposToRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 
 const toRemoteRow = (pedido) => {
   const p = normalizePedidoOrdenEntrega(pedido);
@@ -38,6 +39,8 @@ const toRemoteRow = (pedido) => {
     deuda_generada: !!p.deudaGenerada,
     // Entregado (REQ-COM, AC-COM-1): independiente de estado y del stock.
     ...pedidoEntregaToRemote(p),
+    // REQ-AGR: grupos de la boleta; la clave viaja solo si el pedido la conoce.
+    ...gruposToRemote(p),
     updated_at: new Date().toISOString(),
   };
 };
@@ -92,8 +95,14 @@ const guardarPedidoInterno = async (pedido) => {
     // entregado (migracion 003 sin correr), se reintenta sin ellas y la marca
     // queda local (entregaPendiente) para subirla cuando exista la columna.
     let entregaPendiente = false;
+    let filaEnvio = row;
+    // REQ-AGR: falta la columna grupos (migracion 011): reintento sin ella.
+    if (error && esColumnaInexistente(error) && nombraColumna011(error)) {
+      filaEnvio = sinColumnas011(row);
+      ({ data, error } = await enviar(filaEnvio));
+    }
     if (error && esColumnaInexistente(error)) {
-      const retry = await enviar(sinColumnasEntrega(row));
+      const retry = await enviar(sinColumnasEntrega(filaEnvio));
       data = retry.data; error = retry.error;
       entregaPendiente = !error && !!pedidoNormalizado.entregado;
     }

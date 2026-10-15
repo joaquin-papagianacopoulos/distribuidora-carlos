@@ -498,3 +498,27 @@ Se usa el campo existente **"Mínimo venta"** (`minimoVenta`).
 - **AC-HPR-2** Sección "Cambios de precio" (Configuración o Productos, admin): elegir un día (default hoy) o un rango, ver la lista y bajar un **PDF** con código, producto, rubro, precio anterior, precio nuevo y variación %, ordenado por rubro y nombre. Si un producto cambió varias veces en el período, se muestra el primero anterior y el último nuevo.
 - **AC-HPR-3** Opción "solo precio nuevo" para el PDF (lista para pasarle a clientes/vendedores: código, producto, precio por unidad, precio llevando bulto).
 - **AC-HPR-4** El historial empieza a registrarse desde esta versión (no se reconstruye el pasado) y la pantalla lo aclara.
+
+---
+
+## REQ-FAB — Facturas A y B en pedidos + PDF para el contador
+- **AC-FAB-1** En Facturación cada pedido tiene un selector **Factura A / Factura B / Sin factura** (`tipoFactura`, columna `tipo_factura`). Sugerencia por defecto según el tipo de IVA del cliente: Responsable Inscripto → A; el resto → B; sin dato → sin factura. Se puede marcar varios pedidos a la vez.
+- **AC-FAB-2** Pedido marcado A con cliente sin CUIT válido → aviso visible (no bloquea).
+- **AC-FAB-3** Reporte "Facturas a emitir" (admin): rango de fechas y filtro A/B/todas → lista y **PDF** con cliente, CUIT, tipo de IVA, tipo de factura, n.º de pedido, fecha y monto, agrupado A y B con subtotales y total general. Solo pedidos facturados no borrados.
+- **AC-FAB-4** La boleta impresa muestra "Factura A" / "Factura B" en el encabezado cuando corresponde.
+
+## REQ-AGR — Agrupar productos al facturar
+Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphirus — 3 bultos (36 u.) — $X".
+- **AC-AGR-1** En Facturación el admin selecciona renglones y toca **"Agrupar"**; el nombre del grupo se sugiere con la marca común (o el rubro) y se puede editar. Se pueden deshacer grupos.
+- **AC-AGR-2** El grupo se guarda en el pedido (`grupos: [{id, nombre, itemIds}]`); los renglones **siguen separados** para stock, armado, comisiones y estadísticas (agrupar no toca movimientos de stock).
+- **AC-AGR-3** En la boleta (PDF) el grupo sale como una sola línea: nombre, unidades totales, bultos (si todos los renglones comparten `bultoX` → "3 bultos (36 u.)"; si no, solo unidades) y subtotal. Opción al imprimir: "con detalle" (el grupo y debajo sus renglones) o "solo grupos".
+- **AC-AGR-4** Funciones puras (armar grupos, totales, texto de bultos) con tests, incluidos grupos con bultos mixtos, renglones eliminados y grupos vacíos.
+
+## REQ-TRQ — Casilla "Transferencia a proveedor" en el troquel
+- **AC-TRQ-1** En la parte de recorte de la boleta (abajo de todo, donde están "Efectivo" y "Transferencia") se agrega la casilla **"Transf. a proveedor"** con una línea "Proveedor: ________". No se superpone con nada (probar con boleta larga y con deuda pendiente).
+
+## REQ-ZON — Logística por zona en lugar de por día
+- **AC-ZON-1** Orden de entrega se organiza por **zona** (la zona de la ficha del cliente): cada cliente tiene un puesto (`ordenZona`) dentro de su zona. La pantalla deja elegir la zona, ver y reordenar sus clientes (mover arriba/abajo o escribir el número, corriendo a los demás como hoy).
+- **AC-ZON-2** Imprimir: se eligen fecha(s) de pedido y una o varias zonas; los pedidos salen agrupados por zona y numerados sin huecos dentro de cada zona según quién tiene pedido (mismo criterio que hoy por día). El número de "ORDEN" de la boleta es el de la zona.
+- **AC-ZON-3** Migración sin pérdida: la primera vez, el orden por zona se inicializa con el orden actual (día y luego orden). `diaEntrega`/`ordenEntrega` se conservan (no se borran ni se muestran). Clientes sin zona van a "Sin zona" al final.
+- **AC-ZON-4** Funciones puras de orden por zona con tests (renumeración, empates, clientes sin zona, zonas con mayúsculas/espacios distintos se tratan como la misma).

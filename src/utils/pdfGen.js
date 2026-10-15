@@ -2,6 +2,8 @@
 import { getOrdenEntrega } from './ordenEntrega';
 import { isPedidoVisible, normalizePedidoFecha } from './pedidos';
 import { filasPdfCierre } from '../domain/comisiones';
+import { filasBoleta } from '../domain/gruposFactura';
+import { layoutPieBoleta, encabezadoTipoFactura } from '../domain/boletaLayout';
 
 const alpha = (a, b) =>
   String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' });
@@ -222,7 +224,10 @@ export const generarFaltantesDiaFile = async (faltantesDelDia, fecha, modo = 'pr
   return new File([blob], filename, { type: 'application/pdf' });
 };
 
-const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null) => {
+// opciones (todas opcionales, retrocompatible):
+//   tipoFactura: 'A' | 'B' => muestra "FACTURA A/B" en el encabezado (REQ-FAB, AC-FAB-4).
+//   modoGrupos: 'detalle' | 'solo_grupos' => como se imprimen los grupos (REQ-AGR, AC-AGR-3).
+const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null, opciones = {}) => {
   const { jsPDF } = await import('jspdf');
   // jspdf-autotable 5.x ya no se auto-registra al importarse (S-06).
   const { applyPlugin } = await import('jspdf-autotable');
@@ -240,12 +245,17 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   doc.text('DISTRIBUIDORA APP', 14, 9);
   doc.setFontSize(7);
   doc.text(`BOLETA N° ${numero}`, 14, 13);
+  const encabezadoFactura = encabezadoTipoFactura(opciones?.tipoFactura ?? pedido.tipoFactura);
+  if (encabezadoFactura) {
+    doc.setFontSize(11);
+    doc.text(encabezadoFactura, 112, 9, { align: 'center' });
+  }
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(`Fecha: ${fecha}`, 150, 10);
 
   // El numero override viene de "Orden de entrega": se calcula al imprimir
-  // (renumerando segun quien tiene pedido ese dia), no queda guardado en el pedido.
+  // (renumerando segun quien tiene pedido en su zona), no queda guardado en el pedido.
   const ordenEntrega = ordenOverride ?? getOrdenEntrega(pedido);
   if (ordenEntrega) {
     doc.setDrawColor(0, 0, 0);
@@ -268,14 +278,11 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   doc.setFontSize(9);
   doc.text(`Vendedor: ${vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-'}`, 14, 23);
 
+  // Filas de la tabla: renglones sueltos y grupos (REQ-AGR). Los totales salen siempre
+  // de los items, nunca de las filas (no hay doble conteo).
   const sortedItems = [...(pedido.items || [])].sort((a, b) => alpha(a.nombre, b.nombre));
-
-  const rows = sortedItems.map(item => [
-    item.nombre,
-    item.cantidad,
-    `$${Number(item.precio).toLocaleString('es-AR')}`,
-    `$${(Number(item.cantidad) * Number(item.precio)).toLocaleString('es-AR')}`,
-  ]);
+  const filas = filasBoleta(pedido.items || [], pedido.grupos, { modo: opciones?.modoGrupos === 'solo_grupos' ? 'solo_grupos' : 'detalle' });
+  const rows = filas.map(f => [f.nombre, f.cantidadTexto, f.precioTexto, `$${Number(f.subtotal).toLocaleString('es-AR')}`]);
 
   const total = sortedItems.reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0);
   const totalSinDesc = sortedItems.reduce((acc, i) => {
@@ -287,8 +294,8 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
 
   doc.autoTable({
     startY: 28,
-    // Reservar espacio para la seccion inferior de recorte para que no se superponga con la tabla.
-    margin: { left: 14, right: 14, bottom: 58 },
+    // El pie (totales, deuda, obs y troquel) lo ubica layoutPieBoleta; la tabla solo deja un margen chico.
+    margin: { left: 14, right: 14, bottom: 14 },
     head: [['Producto', 'Cant.', 'Precio Unit.', 'Subtotal']],
     body: rows,
     theme: 'grid',
@@ -301,72 +308,82 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     columnStyles: {
       // A4 ancho 210mm, con margenes 14/14 => 182mm max para que no se pase del borde.
       0: { cellWidth: 90 },
-      1: { cellWidth: 18, halign: 'center' },
+      1: { cellWidth: 28, halign: 'center' },
       2: { cellWidth: 32, halign: 'right' },
-      3: { cellWidth: 42, halign: 'right' },
+      3: { cellWidth: 32, halign: 'right' },
+    },
+    didParseCell: (data) => {
+      if (data.section !== 'body') return;
+      const tipo = filas[data.row.index]?.tipo;
+      if (tipo === 'grupo') { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [210, 210, 210]; }
+      else if (tipo === 'detalle') { data.cell.styles.fontStyle = 'italic'; data.cell.styles.textColor = [70, 70, 70]; data.cell.styles.fillColor = [255, 255, 255]; }
     },
   });
 
   const finalY = doc.lastAutoTable.finalY + 6;
+  const hayDescuento = descuentoTotal > 0.001;
+  const hayDeuda = deudaPendiente > 0.001;
+  const obsLineas = pedido.observaciones ? doc.splitTextToSize(`Obs: ${pedido.observaciones}`, 175).slice(0, 3) : [];
+  const pie = layoutPieBoleta({ finalY, pageH, hayDescuento, hayDeuda, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1 });
+  // Si totales/deuda/obs no entran arriba del corte, van a una hoja nueva (el troquel queda en la ultima).
+  if (pie.nuevaPagina) doc.addPage();
+  const base = pie.baseY;
+
   // Totales: mostrar "Total sin descuento", luego "TOTAL", y luego el descuento aplicado.
   // (Si no hay descuento, solo mostrar TOTAL).
-  let totalesY;
-  if (descuentoTotal > 0.001) {
+  if (hayDescuento) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text('Total sin descuento:', 150, finalY + 4);
-    doc.text(`$${totalSinDesc.toLocaleString('es-AR')}`, 195, finalY + 4, { align: 'right' });
+    doc.text('Total sin descuento:', 150, base + 4);
+    doc.text(`$${totalSinDesc.toLocaleString('es-AR')}`, 195, base + 4, { align: 'right' });
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text('TOTAL:', 150, finalY + 10);
-    doc.text(`$${total.toLocaleString('es-AR')}`, 195, finalY + 10, { align: 'right' });
+    doc.text('TOTAL:', 150, base + 10);
+    doc.text(`$${total.toLocaleString('es-AR')}`, 195, base + 10, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text(`Descuento (${descuentoPct}%): -$${descuentoTotal.toLocaleString('es-AR')}`, 150, finalY + 16);
-    totalesY = finalY + 16;
+    doc.text(`Descuento (${descuentoPct}%): -$${descuentoTotal.toLocaleString('es-AR')}`, 150, base + 16);
   } else {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text('TOTAL:', 150, finalY + 6);
-    doc.text(`$${total.toLocaleString('es-AR')}`, 195, finalY + 6, { align: 'right' });
-    totalesY = finalY + 6;
+    doc.text('TOTAL:', 150, pie.totalesY);
+    doc.text(`$${total.toLocaleString('es-AR')}`, 195, pie.totalesY, { align: 'right' });
   }
 
   // Deuda pendiente (clientes "boleta contra boleta" u otras deudas anotadas):
   // bien visible abajo de todo, para que no se confunda con el total de esta boleta.
-  if (deudaPendiente > 0.001) {
+  if (hayDeuda) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(200, 0, 0);
-    doc.text(`Deuda pendiente: $${deudaPendiente.toLocaleString('es-AR')}`, 195, totalesY + 8, { align: 'right' });
+    doc.text(`Deuda pendiente: $${deudaPendiente.toLocaleString('es-AR')}`, 195, pie.deudaY, { align: 'right' });
     doc.setTextColor(0, 0, 0);
   }
 
-  if (pedido.observaciones) {
+  if (obsLineas.length) {
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(9);
-    doc.text(`Obs: ${pedido.observaciones}`, 14, finalY + 30);
+    doc.text(obsLineas, 14, pie.obsY);
   }
 
-  // Seccion inferior para recorte/entrega
-  const cutY = pageH - 12;
+  // Seccion inferior para recorte/entrega (solo en la ultima pagina)
   doc.setDrawColor(80, 80, 80);
   doc.setLineWidth(0.8);
   doc.setLineDash([2, 2], 0);
-  doc.line(14, cutY - 26, 196, cutY - 26);
+  doc.line(14, pie.corteY, 196, pie.corteY);
   doc.setLineDash([], 0);
 
   const clienteNombre = pedido.clienteNombre || cliente?.nombre || 'Sin nombre';
   const vendedorNombreFinal = vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-';
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Cliente: ${clienteNombre}`, 14, cutY - 18);
-  doc.text(`Vendedor: ${vendedorNombreFinal}`, 14, cutY - 13);
-  doc.text(`Total: $${total.toLocaleString('es-AR')}`, 14, cutY - 8);
-  if (descuentoTotal > 0.001) {
-    doc.text(`Desc (${descuentoPct}%): -$${descuentoTotal.toLocaleString('es-AR')}`, 90, cutY - 8);
+  doc.text(`Cliente: ${clienteNombre}`, 14, pie.clienteY);
+  doc.text(`Vendedor: ${vendedorNombreFinal}`, 14, pie.vendedorY);
+  doc.text(`Total: $${total.toLocaleString('es-AR')}`, 14, pie.totalTroquelY);
+  if (hayDescuento) {
+    doc.text(`Desc (${descuentoPct}%): -$${descuentoTotal.toLocaleString('es-AR')}`, 90, pie.totalTroquelY);
   }
 
   const box = (x, y, label) => {
@@ -374,20 +391,21 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     doc.rect(x, y - 4, 4, 4);
     doc.text(label, x + 6, y);
   };
-  box(140, cutY - 18, 'Efectivo');
-  box(140, cutY - 12, 'Transferencia');
+  for (const c of pie.casillas) box(140, c.y, c.label);
+  // REQ-TRQ (AC-TRQ-1): linea para anotar el proveedor de la transferencia.
+  doc.text(pie.proveedorTexto, 140, pie.proveedorY);
 
   const filename = `factura_${numero}_${fechaPedido}.pdf`;
   return { doc, filename };
 };
 
-export const generarFactura = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null) => {
-  const { doc, filename } = await buildFacturaDoc(pedido, cliente, vendedor, deudaPendiente, ordenOverride);
+export const generarFactura = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null, opciones = {}) => {
+  const { doc, filename } = await buildFacturaDoc(pedido, cliente, vendedor, deudaPendiente, ordenOverride, opciones);
   doc.save(filename);
 };
 
-export const generarFacturaFile = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null) => {
-  const { doc, filename } = await buildFacturaDoc(pedido, cliente, vendedor, deudaPendiente, ordenOverride);
+export const generarFacturaFile = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null, opciones = {}) => {
+  const { doc, filename } = await buildFacturaDoc(pedido, cliente, vendedor, deudaPendiente, ordenOverride, opciones);
   const blob = doc.output('blob');
   return new File([blob], filename, { type: 'application/pdf' });
 };
@@ -482,6 +500,54 @@ export const generarCambiosPrecioFile = async (filas, { desde, hasta, soloNuevo 
     headStyles: { fillColor: [40, 40, 40] },
   });
   const filename = `${soloNuevo ? 'precios_nuevos' : 'cambios_precio'}_${String(desde || '').replace(/[^0-9-]/g, '')}${hasta && hasta !== desde ? `_${String(hasta).replace(/[^0-9-]/g, '')}` : ''}.pdf`;
+  const blob = doc.output('blob');
+  return new File([blob], filename, { type: 'application/pdf' });
+};
+
+// REQ-FAB (AC-FAB-3): PDF "Facturas a emitir" para el contador. `reporte` viene de
+// armarReporteFacturas (grupos A/B con filas y subtotales). El nombre del archivo no
+// lleva CUIT ni datos del cliente.
+export const generarFacturasAEmitirFile = async (reporte, { desde, hasta, filtro = 'todas' } = {}) => {
+  const { jsPDF } = await import('jspdf');
+  const { applyPlugin } = await import('jspdf-autotable');
+  applyPlugin(jsPDF);
+  const doc = new jsPDF({ orientation: 'landscape' });
+  const periodo = !desde || desde === hasta ? fmtFechaPdf(desde || hasta) : `${fmtFechaPdf(desde)} a ${fmtFechaPdf(hasta)}`;
+  const nFilas = (reporte?.grupos || []).reduce((s, g) => s + g.filas.length, 0);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('Facturas a emitir', 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Período: ${periodo} · Filtro: ${filtro === 'todas' ? 'A y B' : `Factura ${filtro}`} · Pedidos: ${nFilas}`, 14, 20);
+
+  let y = 25;
+  for (const g of reporte?.grupos || []) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(`Factura ${g.tipo}`, 14, y + 4);
+    doc.autoTable({
+      startY: y + 6,
+      head: [['Cliente', 'CUIT', 'Tipo de IVA', 'Factura', 'Pedido', 'Fecha', 'Monto']],
+      body: g.filas.map(f => [
+        f.clienteNombre, f.cuit || '-', f.tipoIva || '-', `${f.tipo}${f.sugerido ? ' (sugerido)' : ''}`,
+        f.pedidoId, fmtFechaPdf(f.fecha), fmtPesosPdf(f.total),
+      ]),
+      foot: [['', '', '', '', '', `Subtotal ${g.tipo}`, fmtPesosPdf(g.subtotal)]],
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [40, 40, 40] },
+      footStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
+      columnStyles: { 6: { halign: 'right' } },
+    });
+    y = (doc.lastAutoTable?.finalY || y) + 8;
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(`TOTAL GENERAL: ${fmtPesosPdf(reporte?.total || 0)}`, 14, y + 4);
+
+  const filename = `facturas_a_emitir_${String(desde || '').replace(/[^0-9-]/g, '')}${hasta && hasta !== desde ? `_${String(hasta).replace(/[^0-9-]/g, '')}` : ''}.pdf`;
   const blob = doc.output('blob');
   return new File([blob], filename, { type: 'application/pdf' });
 };

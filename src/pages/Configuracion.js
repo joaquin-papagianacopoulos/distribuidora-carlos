@@ -20,6 +20,7 @@ import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
 import { nuevoId } from '../domain/validacion';
+import { ordenZonaTrasCambioZona } from '../domain/zonas';
 import { stockDe } from '../domain/stock';
 import { planificarImportacion, resumirEntradas, textoResumen, avisoColumnasExcluidas } from '../domain/plantillas';
 import { descargarPlantilla } from '../services/plantillaExcel';
@@ -104,7 +105,7 @@ const importarClientes = async (rows, { existentes, vendedores, origen }) => {
   for (const e of plan.entradas) {
     try {
       if (e.accion === 'crear') await addCliente({ ...e.valor, boletaContraBoleta: false, extrasDirty: true });
-      else if (e.accion === 'actualizar') await updateCliente({ ...e.existente, ...e.valor, extrasDirty: true });
+      else if (e.accion === 'actualizar') await updateCliente({ ...e.existente, ...e.valor, ordenZona: ordenZonaTrasCambioZona(e.existente, { ...e.existente, ...e.valor }), extrasDirty: true });
       entradas.push(e);
     } catch (err) {
       entradas.push({ ...e, accion: 'rechazar', errores: [`No se pudo guardar: ${err?.message || String(err)}`] });
@@ -231,7 +232,7 @@ const Configuracion = () => {
     // extrasDirty: solo los clientes editados ACA suben los campos nuevos
     // (codigo, CUIT, etc.). Otros guardados (p. ej. Orden de entrega) suben
     // solo lo basico y no pisan con NULL lo que cargo el admin (revisor, bloqueante 1).
-    if (editItem) await updateCliente({ ...editItem, ...data, extrasDirty: true });
+    if (editItem) await updateCliente({ ...editItem, ...data, ordenZona: ordenZonaTrasCambioZona(editItem, { ...editItem, ...data }), extrasDirty: true });
     else await addCliente({ ...data, extrasDirty: true });
     await recargar();
     cerrarForm();

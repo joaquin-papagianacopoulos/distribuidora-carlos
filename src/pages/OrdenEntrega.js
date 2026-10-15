@@ -1,21 +1,21 @@
 // src/pages/OrdenEntrega.js
-// Visible para cualquier usuario. Cada cliente tiene un dia habitual de
-// reparto y un puesto fijo en la ruta de ese dia (ej: "Garibaldi 420 -
-// Miercoles - Orden 5"). Al imprimir los pedidos de un dia de reparto, se
-// renumeran sin huecos segun quien realmente tiene pedido ese dia: si el
-// puesto 2 no pidio, el que sigue pasa a ser el 2, no el 3. Ese numero
-// calculado es el que aparece en la boleta — no se guarda en el pedido.
+// Visible para cualquier usuario. REQ-ZON: la logistica se organiza por ZONA (la de la
+// ficha del cliente). Cada cliente tiene un puesto (ordenZona) dentro de su zona. Al
+// imprimir los pedidos de una o varias fechas y zonas, se numeran sin huecos segun quien
+// realmente tiene pedido: si el puesto 2 no pidio, el que sigue pasa a ser el 2, no el 3.
+// Ese numero calculado es el que aparece en la boleta — no se guarda en el pedido.
+// diaEntrega / ordenEntrega (modelo viejo por dia) se conservan en los datos, pero ya no se
+// muestran ni se usan.
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
-import { fuzzySearch } from '../utils/fuzzy';
 import { updateCliente, getPedidos } from '../db';
 import { syncClientes } from '../sync/syncService';
 import { generarFacturaFile } from '../utils/pdfGen';
-import { calcularOrdenDelDia } from '../utils/ordenEntrega';
+import { listarZonas, clientesDeZona, moverEnZona, calcularOrdenPorZona } from '../domain/zonas';
 import { shareFiles, canShareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
 import { isPedidoVisible, normalizePedidoFecha, getDeudaPendienteParaPedido } from '../utils/pedidos';
-import { DIAS_SEMANA, DIA_LABEL, diaDeFecha, sumarDias } from '../utils/diasSemana';
+import { sumarDias } from '../utils/diasSemana';
 import { marcarEntregadoOnlineFirst } from '../services/pedidoRepository';
 import { puedeMarcarEntregado, puedeDesmarcarEntregado, pedidosEnCierresVigentes, pedidoIdComision } from '../domain/comisiones';
 
@@ -92,9 +92,8 @@ export const EntregasDelDia = ({ pedidos, permiso, recargar, cierres = [] }) => 
 const OrdenEntrega = () => {
   const { clientes, deudas, recargar, syncPedidosFecha, pedidos, vendedorActual, comisionesCierres } = useApp();
 
-  // Sube el cliente recien guardado ya mismo y avisa si no llego a Supabase
-  // (antes quedaba en el aire: syncClientes puede saltear en silencio un
-  // error de permisos de escritura, o directamente no se esperaba la subida).
+  // Sube los clientes recien guardados ya mismo y avisa si no llegaron a Supabase
+  // (syncClientes puede saltear en silencio un error de permisos de escritura).
   const subirClientes = async () => {
     if (!navigator.onLine) return;
     try {
@@ -102,7 +101,7 @@ const OrdenEntrega = () => {
       if (r?.skipped) {
         alert(
           'Se guardó en este dispositivo, pero Supabase rechazó la subida por permisos (RLS) ' +
-          'en la tabla "clientes". El día/orden de entrega no va a verse en otros dispositivos ' +
+          'en la tabla "clientes". El orden de la zona no va a verse en otros dispositivos ' +
           'hasta que se habilite la escritura ahí.'
         );
       }
@@ -111,88 +110,49 @@ const OrdenEntrega = () => {
     }
   };
 
-  const [clienteQ, setClienteQ] = useState('');
-  const [clienteSel, setClienteSel] = useState(null);
-  const [dia, setDia] = useState('');
-  const [orden, setOrden] = useState('');
+  // REQ-ZON (AC-ZON-1): la zona sale de la ficha del cliente. '' = "Sin zona".
+  const zonasLista = useMemo(() => listarZonas(clientes || []), [clientes]);
+  const [zonaSel, setZonaSel] = useState(null);
   const [guardando, setGuardando] = useState(false);
+  const [puestoEdit, setPuestoEdit] = useState({});
 
-  const [fechasImprimir, setFechasImprimir] = useState([]);
-  const [nuevaFecha, setNuevaFecha] = useState('');
-  const [imprimiendo, setImprimiendo] = useState(false);
+  const clientesZona = useMemo(
+    () => (zonaSel === null ? [] : clientesDeZona(clientes || [], zonaSel)),
+    [clientes, zonaSel],
+  );
 
-  const clienteSugg = clienteQ.trim().length >= 1 ? fuzzySearch(clienteQ, clientes || [], 'nombre', 8) : [];
-
-  const asignados = useMemo(() => {
-    return (clientes || [])
-      .filter(c => c.diaEntrega && Number(c.ordenEntrega) > 0)
-      .sort((a, b) => a.diaEntrega.localeCompare(b.diaEntrega) || Number(a.ordenEntrega) - Number(b.ordenEntrega));
-  }, [clientes]);
-
-  const porDia = useMemo(() => {
-    const map = {};
-    for (const c of asignados) {
-      if (!map[c.diaEntrega]) map[c.diaEntrega] = [];
-      map[c.diaEntrega].push(c);
-    }
-    return map;
-  }, [asignados]);
-
-  const seleccionarCliente = (c) => {
-    setClienteSel(c);
-    setClienteQ('');
-    setDia(c.diaEntrega || '');
-    setOrden(c.ordenEntrega != null ? String(c.ordenEntrega) : '');
-  };
-
-  const guardarAsignacion = async () => {
-    if (!clienteSel || !dia || !orden || Number(orden) <= 0) return;
-    const ordenNum = Number(orden);
+  // Mueve al cliente al puesto indicado y corre a los demas. Solo se guardan los que cambian
+  // (con spread: diaEntrega / ordenEntrega se conservan tal cual).
+  const moverCliente = async (clienteId, nuevoPuesto) => {
+    const cambios = moverEnZona(clientes || [], zonaSel, clienteId, nuevoPuesto);
+    if (cambios.length === 0) return;
     setGuardando(true);
     try {
-      // Si ese numero ya lo tiene otro cliente de ese mismo dia, se corre un
-      // lugar a ese cliente y a todos los que le siguen (incluido el que ya
-      // estaba en ese numero), para "insertar" a este sin pisar a nadie.
-      const otros = (clientes || []).filter(c => c.id !== clienteSel.id && c.diaEntrega === dia);
-      const yaUsado = otros.some(c => Number(c.ordenEntrega) === ordenNum);
-      if (yaUsado) {
-        const aCorrer = otros.filter(c => Number(c.ordenEntrega) >= ordenNum);
-        for (const c of aCorrer) {
-          await updateCliente({ ...c, ordenEntrega: Number(c.ordenEntrega) + 1 });
-        }
+      const porId = new Map((clientes || []).map(c => [String(c.id), c]));
+      for (const cambio of cambios) {
+        const c = porId.get(String(cambio.id));
+        if (c) await updateCliente({ ...c, ordenZona: cambio.ordenZona });
       }
-
-      await updateCliente({ ...clienteSel, diaEntrega: dia, ordenEntrega: ordenNum });
       await recargar();
       await subirClientes();
-      setClienteSel(null);
-      setDia('');
-      setOrden('');
     } catch (e) {
       alert('No se pudo guardar: ' + (e?.message || String(e)));
     } finally {
       setGuardando(false);
+      setPuestoEdit({});
     }
   };
 
-  const quitarAsignacion = async (c) => {
-    if (!window.confirm(`¿Quitar el orden de entrega de "${c.nombre}"?`)) return;
-    try {
-      await updateCliente({ ...c, diaEntrega: null, ordenEntrega: null });
-      await recargar();
-      await subirClientes();
-    } catch (e) {
-      alert('No se pudo quitar: ' + (e?.message || String(e)));
-    }
-  };
+  // ---- Imprimir (AC-ZON-2): fechas de PEDIDO + zonas elegidas ----
+  const [fechasImprimir, setFechasImprimir] = useState([]);
+  const [nuevaFecha, setNuevaFecha] = useState('');
+  const [zonasImprimir, setZonasImprimir] = useState([]);
+  const [imprimiendo, setImprimiendo] = useState(false);
 
-  const editar = (c) => seleccionarCliente(c);
-
-  // "Hoy" = el dia de reparto. Los pedidos que salen hoy son los que se
-  // cargaron y armaron AYER.
-  const agregarHoy = () => {
-    const hoy = sumarDias(null, 0);
-    setFechasImprimir(prev => prev.includes(hoy) ? prev : [...prev, hoy].sort());
+  // Atajo: el reparto de hoy lleva los pedidos que se cargaron AYER.
+  const agregarRepartoHoy = () => {
+    const ayer = sumarDias(null, -1);
+    setFechasImprimir(prev => prev.includes(ayer) ? prev : [...prev, ayer].sort());
   };
 
   const agregarFecha = () => {
@@ -203,34 +163,34 @@ const OrdenEntrega = () => {
 
   const quitarFecha = (f) => setFechasImprimir(prev => prev.filter(x => x !== f));
 
+  const toggleZonaImprimir = (clave) =>
+    setZonasImprimir(prev => (prev.includes(clave) ? prev.filter(x => x !== clave) : [...prev, clave]));
+
   const imprimirPedidos = async () => {
     if (fechasImprimir.length === 0) return;
     setImprimiendo(true);
     try {
       const files = [];
-      for (const fechaEntrega of fechasImprimir) {
-        const fechaPedido = sumarDias(fechaEntrega, -1);
-        // El "dia" que se le asigna al cliente es el dia en que se le toma el
-        // pedido (ej: miercoles), no el dia de entrega (jueves) — por eso se
-        // compara contra el dia de fechaPedido, no el de fechaEntrega.
-        const diaObjetivo = diaDeFecha(fechaPedido);
-
+      for (const fechaPedido of fechasImprimir) {
         await syncPedidosFecha(fechaPedido);
         const todos = await getPedidos();
         const pedidosDelDia = todos.filter(p =>
           isPedidoVisible(p) && normalizePedidoFecha(p.fecha) === fechaPedido
         );
 
-        const ordenados = calcularOrdenDelDia(pedidosDelDia, clientes, diaObjetivo);
-        for (const { pedido, orden: n } of ordenados) {
-          const cliente = (clientes || []).find(c => c.id === pedido.clienteId);
-          const deudaPendiente = getDeudaPendienteParaPedido(deudas, pedido);
-          files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, deudaPendiente, n));
+        // Numeracion sin huecos dentro de cada zona, segun quien tiene pedido ese dia.
+        const porZona = calcularOrdenPorZona(pedidosDelDia, clientes || [], { zonas: zonasImprimir });
+        for (const grupo of porZona) {
+          for (const { pedido, orden: n } of grupo.pedidos) {
+            const cliente = (clientes || []).find(c => c.id === pedido.clienteId);
+            const deudaPendiente = getDeudaPendienteParaPedido(deudas, pedido);
+            files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, deudaPendiente, n));
+          }
         }
       }
 
       if (files.length === 0) {
-        alert('No hay pedidos para los dias elegidos.');
+        alert('No hay pedidos para las fechas y zonas elegidas.');
         return;
       }
 
@@ -263,79 +223,81 @@ const OrdenEntrega = () => {
     <div className="page">
       <h1 className="page-title">Orden de entrega</h1>
       <p style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 16, marginTop: -10, lineHeight: 1.5 }}>
-        Asignale a cada cliente su dia habitual de reparto y su puesto en la ruta de ese dia.
-        Al imprimir, si algun cliente no tiene pedido ese dia, los que le siguen se renumeran
+        Elegí una zona (la que tiene cada cliente en su ficha) y ordená a sus clientes: cada uno tiene un puesto en la ruta de esa zona.
+        Al imprimir, si algun cliente no tiene pedido, los que le siguen se renumeran
         para no dejar huecos (1, 2, 3...).
       </p>
 
-      {/* Asignar / editar cliente */}
-      <div className="card" style={{ position: 'relative' }}>
-        <label className="input-label">Cliente</label>
-        <input
+      {/* Zona y orden de sus clientes (AC-ZON-1) */}
+      <div className="card" data-testid="zona-orden">
+        <label className="input-label" htmlFor="zona-sel">Zona</label>
+        <select
+          id="zona-sel"
           className="input"
-          value={clienteSel ? clienteSel.nombre : clienteQ}
-          onChange={e => { setClienteSel(null); setClienteQ(e.target.value); }}
-          placeholder="Buscar cliente..."
-          autoComplete="off"
+          value={zonaSel === null ? '__ninguna__' : zonaSel}
+          onChange={e => { setZonaSel(e.target.value === '__ninguna__' ? null : e.target.value); setPuestoEdit({}); }}
           style={{ marginBottom: 10 }}
-        />
-        {!clienteSel && clienteSugg.length > 0 && (
-          <div className="suggestions" style={{ position: 'absolute', top: 66, left: 14, right: 14 }}>
-            {clienteSugg.map(c => (
-              <div key={c.id} className="suggestion-item" onClick={() => seleccionarCliente(c)}>
-                <div>{c.nombre}</div>
-                {c.diaEntrega && (
-                  <span className="suggestion-sub">{DIA_LABEL[c.diaEntrega]} · {c.ordenEntrega}</span>
-                )}
-              </div>
-            ))}
-          </div>
+        >
+          <option value="__ninguna__">Elegir zona...</option>
+          {zonasLista.map(z => (
+            <option key={z.clave || '__sin_zona__'} value={z.clave}>{z.etiqueta} ({z.cantidad})</option>
+          ))}
+        </select>
+
+        {zonaSel !== null && clientesZona.length === 0 && (
+          <div style={{ fontSize: 13, color: 'var(--text3)' }}>No hay clientes en esta zona.</div>
         )}
 
-        {clienteSel && (
-          <>
-            <label className="input-label">Día</label>
-            <select className="input" value={dia} onChange={e => setDia(e.target.value)} style={{ marginBottom: 10 }}>
-              <option value="">Elegir día...</option>
-              {DIAS_SEMANA.map(d => (
-                <option key={d} value={d}>{DIA_LABEL[d]}</option>
-              ))}
-            </select>
-
-            <label className="input-label">Orden</label>
+        {clientesZona.map((c, i) => (
+          <div
+            key={c.id}
+            data-testid={`zona-cliente-${c.id}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}
+          >
             <input
               className="input"
               type="number"
               inputMode="numeric"
-              value={orden}
-              onChange={e => setOrden(e.target.value)}
-              placeholder="Ej: 5"
-              style={{ marginBottom: 14 }}
+              min={1}
+              aria-label={`Puesto de ${c.nombre}`}
+              value={puestoEdit[c.id] ?? String(i + 1)}
+              disabled={guardando}
+              onChange={e => setPuestoEdit(prev => ({ ...prev, [c.id]: e.target.value }))}
+              onBlur={() => {
+                if (puestoEdit[c.id] === undefined) return;
+                const n = Number(puestoEdit[c.id]);
+                if (!Number.isFinite(n) || n <= 0) { setPuestoEdit({}); return; }
+                moverCliente(c.id, n);
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+              style={{ width: 64, textAlign: 'center', flex: 'none' }}
             />
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-ghost" onClick={() => { setClienteSel(null); setDia(''); setOrden(''); }} disabled={guardando}>
-                Cancelar
-              </button>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                onClick={guardarAsignacion}
-                disabled={guardando || !dia || !orden || Number(orden) <= 0}
-              >
-                {guardando ? 'Guardando...' : 'Guardar'}
-              </button>
-            </div>
-          </>
-        )}
+            <span style={{ flex: 1, fontSize: 14 }}>{c.nombre}</span>
+            <button
+              className="btn-icon"
+              aria-label={`Subir a ${c.nombre}`}
+              style={{ width: 30, height: 30, fontSize: 13 }}
+              disabled={guardando || i === 0}
+              onClick={() => moverCliente(c.id, i)}
+            >▲</button>
+            <button
+              className="btn-icon"
+              aria-label={`Bajar a ${c.nombre}`}
+              style={{ width: 30, height: 30, fontSize: 13 }}
+              disabled={guardando || i === clientesZona.length - 1}
+              onClick={() => moverCliente(c.id, i + 2)}
+            >▼</button>
+          </div>
+        ))}
       </div>
 
       {/* Imprimir */}
       <div className="card">
         <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Imprimir pedidos</div>
 
-        <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={agregarHoy}>
-          {'\u{1F5A8}️'} Agregar hoy
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6 }}>Fecha(s) en que se cargaron los pedidos</div>
+        <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={agregarRepartoHoy}>
+          {'\u{1F5A8}️'} Reparto de hoy (pedidos de ayer)
         </button>
 
         {fechasImprimir.length > 0 && (
@@ -364,6 +326,7 @@ const OrdenEntrega = () => {
           <input
             type="date"
             className="input"
+            aria-label="Fecha del pedido"
             value={nuevaFecha}
             onChange={e => setNuevaFecha(e.target.value)}
             style={{ flex: 1 }}
@@ -371,6 +334,20 @@ const OrdenEntrega = () => {
           <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={agregarFecha}>
             + Agregar día
           </button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6 }}>Zonas (si no marcás ninguna, salen todas)</div>
+        <div data-testid="zonas-imprimir" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+          {zonasLista.map(z => (
+            <label key={z.clave || '__sin_zona__'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={zonasImprimir.includes(z.clave)}
+                onChange={() => toggleZonaImprimir(z.clave)}
+              />
+              {z.etiqueta}
+            </label>
+          ))}
         </div>
 
         <button
@@ -381,50 +358,12 @@ const OrdenEntrega = () => {
           {imprimiendo ? 'Generando...' : `\u{1F5A8}️ Imprimir pedidos para entregar (${fechasImprimir.length || 0} día${fechasImprimir.length === 1 ? '' : 's'})`}
         </button>
         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
-          Por cada día elegido se imprimen los pedidos cargados el día anterior, ordenados por su puesto de ruta.
+          Los pedidos salen agrupados por zona y numerados según el puesto de cada cliente en su zona.
         </div>
       </div>
 
       {/* Entregas (REQ-COM, AC-COM-1) */}
       <EntregasDelDia pedidos={pedidos} permiso={Number(vendedorActual?.permiso || 2)} recargar={recargar} cierres={comisionesCierres || []} />
-
-      {/* Lista de asignados */}
-      {DIAS_SEMANA.filter(d => porDia[d]?.length).length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">{'\u{1F5D3}️'}</div>
-          <div className="empty-text">Todavía no asignaste ningún cliente</div>
-        </div>
-      ) : (
-        DIAS_SEMANA.filter(d => porDia[d]?.length).map(d => (
-          <div key={d} style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, margin: '4px 2px 8px' }}>{DIA_LABEL[d]}</div>
-            <div className="card" style={{ padding: '4px 14px' }}>
-              {porDia[d].map((c, i) => (
-                <div
-                  key={c.id}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 0',
-                    borderBottom: i === porDia[d].length - 1 ? 'none' : '1px solid var(--border)',
-                  }}
-                >
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 26, height: 22, padding: '0 5px',
-                    background: 'var(--bg4)', borderRadius: 6, fontSize: 12, fontWeight: 700,
-                    color: 'var(--text2)', flex: 'none',
-                  }}>
-                    {c.ordenEntrega}
-                  </span>
-                  <span style={{ flex: 1, fontSize: 14 }}>{c.nombre}</span>
-                  <button className="btn-icon" style={{ width: 30, height: 30, fontSize: 13 }} onClick={() => editar(c)}>✏</button>
-                  <button className="btn-icon" style={{ width: 30, height: 30, fontSize: 13, color: 'var(--danger)' }} onClick={() => quitarAsignacion(c)}>×</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
     </div>
   );
 };
