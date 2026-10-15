@@ -323,8 +323,11 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const finalY = doc.lastAutoTable.finalY + 6;
   const hayDescuento = descuentoTotal > 0.001;
   const hayDeuda = deudaPendiente > 0.001;
+  // REQ-REN (AC-REN-3): saldo a favor del cliente (ya neteado con la deuda por cuentaParaBoleta).
+  // Va en el mismo lugar que la deuda (nunca aparecen las dos).
+  const saldoAFavor = !hayDeuda && Number(opciones?.saldoAFavor) > 0.001 ? Number(opciones.saldoAFavor) : 0;
   const obsLineas = pedido.observaciones ? doc.splitTextToSize(`Obs: ${pedido.observaciones}`, 175).slice(0, 3) : [];
-  const pie = layoutPieBoleta({ finalY, pageH, hayDescuento, hayDeuda, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1 });
+  const pie = layoutPieBoleta({ finalY, pageH, hayDescuento, hayDeuda: hayDeuda || saldoAFavor > 0, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1 });
   // Si totales/deuda/obs no entran arriba del corte, van a una hoja nueva (el troquel queda en la ultima).
   if (pie.nuevaPagina) doc.addPage();
   const base = pie.baseY;
@@ -359,6 +362,12 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     doc.setFontSize(11);
     doc.setTextColor(200, 0, 0);
     doc.text(`Deuda pendiente: $${deudaPendiente.toLocaleString('es-AR')}`, 195, pie.deudaY, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+  } else if (saldoAFavor > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(0, 140, 60);
+    doc.text(`Saldo a favor: $${saldoAFavor.toLocaleString('es-AR')}`, 195, pie.deudaY, { align: 'right' });
     doc.setTextColor(0, 0, 0);
   }
 
@@ -700,4 +709,43 @@ export const generarPedidoProveedorFile = async (items, { proveedor = '', fecha 
   });
   const blob = doc.output('blob');
   return new File([blob], `pedido_proveedor_${String(proveedor).replace(/[^0-9a-zA-Z]/g, '').slice(0, 20) || 'sin_nombre'}.pdf`, { type: 'application/pdf' });
+};
+// ---- REQ-REN (AC-REN-4): PDF de la rendicion del dia. `resumen` viene de resumenRendicionDia
+// (importes en centavos). Las anuladas se listan marcadas y no suman. Sin motivos de anulacion
+// largos ni datos del cliente en el nombre del archivo.
+export const generarRendicionDiaFile = async (resumen, { fecha } = {}) => {
+  const doc = await nuevoDocConTabla({ orientation: 'landscape' });
+  const dia = fecha || resumen?.fecha || '';
+  const t = resumen?.totales || {};
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(`Rendición del día ${fmtFechaPdf(dia)}`, 14, 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Movimientos: ${(resumen?.filas || []).length} · Anuladas: ${t.anuladas || 0}`, 14, 20);
+  doc.autoTable({
+    startY: 25,
+    head: [['#', 'Cliente', 'Pedido', 'Tipo', 'Detalle', 'Motivo', 'Crédito', 'Estado']],
+    body: (resumen?.filas || []).map(f => [
+      f.idCorto, f.clienteNombre, String(f.pedidoId ?? ''), `${f.tipoLabel}${f.nroNc ? ` ${f.tipoFactura ? `${f.tipoFactura} ` : ''}N.º ${f.nroNc}` : ''}`,
+      String(f.detalle || '').slice(0, 200), String(f.motivo || '').slice(0, 120), fmtCentPdf(f.creditoCents),
+      f.anulada ? `ANULADA${f.motivoAnulacion ? `: ${String(f.motivoAnulacion).slice(0, 60)}` : ''}` : (f.rechazada ? 'RECHAZADA' : (f.pendiente ? 'Sin subir' : 'Vigente')),
+    ]),
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.6 },
+    headStyles: { fillColor: [40, 40, 40] },
+    columnStyles: { 6: { halign: 'right' } },
+  });
+  const y = (doc.lastAutoTable?.finalY || 25) + 8;
+  doc.autoTable({
+    startY: y,
+    head: [['Devuelto', 'Notas de crédito', 'Cambios (neto)', 'Mermas']],
+    body: [[fmtCentPdf(t.devueltoCents), fmtCentPdf(t.ncCents), fmtCentPdf(t.cambiosCents), `${t.mermaUnidades || 0} u. · ${fmtCentPdf(t.mermaCents)}`]],
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 2 },
+    headStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
+  });
+  const blob = doc.output('blob');
+  return new File([blob], `rendicion_${String(dia).replace(/[^0-9-]/g, '')}.pdf`, { type: 'application/pdf' });
 };

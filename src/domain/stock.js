@@ -11,7 +11,8 @@ import { texto, toInt, claveUnica, nuevoId } from './validacion';
 // 'advertir' = pide confirmación si queda stock negativo; 'bloquear' = no deja facturar.
 export const STOCK_POLICY = 'advertir';
 
-export const TIPOS_MOVIMIENTO = ['inicial', 'ajuste', 'ingreso', 'venta', 'anulacion'];
+// REQ-REN (AC-REN-2): 'devolucion' (+) = mercaderia que vuelve por una rendicion (ref rendicion:<uuid>).
+export const TIPOS_MOVIMIENTO = ['inicial', 'ajuste', 'ingreso', 'venta', 'anulacion', 'devolucion'];
 
 // Mismo tope que el CHECK de movimientos_stock en Supabase (S-12): lo que el
 // dominio acepta, la base tambien lo acepta.
@@ -43,6 +44,13 @@ export const refsPedido = (pedido) => {
   if (pedido?.id !== undefined && pedido?.id !== null) refs.push(`pedido-local:${pedido.id}`);
   return refs;
 };
+
+// REQ-REN (AC-REN-2): movimientos de una rendicion. NUNCA usan ref pedido:* (revisarMovimientosPedido
+// reconcilia por ref de pedido y "corregiria" la devolucion).
+export const REF_RENDICION = 'rendicion:';
+export const refRendicion = (rendicionId) => `${REF_RENDICION}${rendicionId}`;
+export const esRefRendicion = (row) => String(row?.ref || '').startsWith(REF_RENDICION);
+export const idRendicionDeRef = (ref) => (String(ref || '').startsWith(REF_RENDICION) ? String(ref).slice(REF_RENDICION.length) : null);
 
 const estaBorrado = (p) => !!p?.borrado || ['cancelado', 'eliminado', 'borrado'].includes(String(p?.estado || '').toLowerCase());
 

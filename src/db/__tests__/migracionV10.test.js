@@ -43,12 +43,15 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
 
   it('AC-INA-1 desde v9 crea SOLO los 4 stores nuevos, con keyPath id (UUID) e índices', async () => {
     const r = await correr(V9);
-    expect(r.version).toBe(10);
+    expect(r.version).toBe(11); // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([
       ['ingresosCostos', { keyPath: 'id' }],
       ['cuentaProveedores', { keyPath: 'id' }],
       ['comprobantesPendientes', { keyPath: 'id' }],
       ['pedidosProveedor', { keyPath: 'id' }],
+      // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+      ['rendiciones', { keyPath: 'id' }],
+      ['cuentaClientes', { keyPath: 'id' }],
     ]);
     expect(r.creados.every(c => c[1].autoIncrement === undefined)).toBe(true);
     expect(r.indices).toEqual([
@@ -58,6 +61,13 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
       ['cuentaProveedores', 'fecha', 'fecha', { unique: false }],
       ['pedidosProveedor', 'proveedorId', 'proveedorId', { unique: false }],
       ['pedidosProveedor', 'estado', 'estado', { unique: false }],
+      // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+      ['rendiciones', 'pedidoId', 'pedidoId', { unique: false }],
+      ['rendiciones', 'clienteId', 'clienteId', { unique: false }],
+      ['rendiciones', 'fecha', 'fecha', { unique: false }],
+      ['rendiciones', 'estado', 'estado', { unique: false }],
+      ['cuentaClientes', 'clienteId', 'clienteId', { unique: false }],
+      ['cuentaClientes', 'rendicionId', 'rendicionId', { unique: false }],
     ]);
   });
 
@@ -69,7 +79,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
   });
 
   it('AC-INA-5 es idempotente: si los stores ya existen no crea nada', async () => {
-    const r = await correr([...V9, 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor']);
+    const r = await correr([...V9, 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes']);
     expect(r.creados).toEqual([]);
     expect(r.borrados).toEqual([]);
   });
@@ -86,11 +96,11 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
     const path = require('path');
     const src = readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
-    for (const s of ['ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor']) {
+    for (const s of ['ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes']) {
       expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
     }
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 10;/);
+    expect(src).toMatch(/const DB_VERSION = 11;/);
   });
 });
 

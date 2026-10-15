@@ -1,6 +1,6 @@
 // Integración del control de stock (REQ-STK / REQ-ING) con una IndexedDB
 // falsa en memoria y un Supabase falso.
-const mockDb = { movs: [], ingresos: [], proveedores: [] };
+const mockDb = { movs: [], ingresos: [], proveedores: [], rends: [] };
 
 jest.mock('../../db', () => {
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -36,6 +36,8 @@ jest.mock('../../db', () => {
     putProveedoresRemotos: async (rows) => putIn('proveedores')(rows),
     clearProveedoresPendingSync: async (ids) => clearIn('proveedores')(ids),
     deleteProveedor: async (id) => { mockDb.proveedores = mockDb.proveedores.filter(p => p.id !== id); },
+    // REQ-REN (RUN 20261015-1630): rendiciones locales para la retencion de movimientos.
+    getRendiciones: async () => clone(mockDb.rends),
   };
   const mod = { __impl: impl };
   for (const k of Object.keys(impl)) mod[k] = jest.fn(impl[k]);
@@ -90,6 +92,7 @@ beforeEach(() => {
   mockDb.movs = [];
   mockDb.ingresos = [];
   mockDb.proveedores = [];
+  mockDb.rends = [];
   mockSb.upserts = [];
   mockSb.remoto = {};
   mockSb.upsertError = {};
@@ -672,5 +675,37 @@ describe('REQ-BUL: sumar bultos a un pedido facturado (AC-BUL-7)', () => {
     expect(await aplicarStockPedido(legacy)).toEqual([]);
     expect(addMovimientosStock).not.toHaveBeenCalled();
     expect(await stock(1)).toBe(100);
+  });
+});
+
+// REQ-REN (AC-REN-2): los movimientos de una rendicion no suben hasta que el servidor la confirma.
+describe('syncStock retiene movimientos de rendiciones no confirmadas (AC-REN-2)', () => {
+  const R = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const mov = (id, ref) => ({ id, productoId: '1', cantidad: 2, tipo: 'devolucion', ref, fecha: '2026-10-15T10:00:00Z', pendingSync: true });
+  const subidosIds = () => mockSb.upserts.filter(u => u.table === 'movimientos_stock').flatMap(u => u.rows.map(r => r.id));
+
+  it('AC-REN-2 rendicion pendiente, rechazada o ausente: sus movimientos quedan pendientes', async () => {
+    mockDb.rends = [{ id: R, syncEstado: 'pendiente' }, { id: 'rech', syncEstado: 'rechazada' }];
+    mockDb.movs.push(mov(`${R}:0:a`, `rendicion:${R}`), mov('rech:0:a', 'rendicion:rech'), mov('aus:0:a', 'rendicion:aus'));
+    await syncStock();
+    expect(subidosIds()).toEqual([]);
+    expect(mockDb.movs.filter(m => m.pendingSync).map(m => m.id)).toEqual([`${R}:0:a`, 'rech:0:a', 'aus:0:a']);
+  });
+
+  it('AC-REN-2 rendicion confirmada: sube por upsert (id determinista) y un reintento no duplica', async () => {
+    mockDb.rends = [{ id: R, syncEstado: 'confirmada' }];
+    mockDb.movs.push(mov(`${R}:0:a`, `rendicion:${R}`));
+    await syncStock();
+    expect(subidosIds()).toEqual([`${R}:0:a`]);
+    expect(mockSb.upserts.find(u => u.table === 'movimientos_stock').opts).toEqual({ onConflict: 'id' });
+    await syncStock();
+    expect(subidosIds()).toEqual([`${R}:0:a`]);
+  });
+
+  it('AC-REN-2 sin store de rendiciones (getRendiciones falla) se retiene igual', async () => {
+    db.getRendiciones.mockImplementation(async () => { throw new Error('sin store'); });
+    mockDb.movs.push(mov(`${R}:0:a`, `rendicion:${R}`));
+    await syncStock();
+    expect(subidosIds()).toEqual([]);
   });
 });

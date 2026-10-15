@@ -9,6 +9,8 @@ import { borrarPedidoOnlineFirst, guardarPedidoOnlineFirst } from '../services/p
 import { isPedidoVisible, normalizePedidoFecha, getDeudaPendienteParaPedido } from '../utils/pedidos';
 import { quitarDeudaDePedido } from '../services/deudaRepository';
 import { filtrarActivos } from '../domain/vendedores';
+import { cargarRendicionesLocales } from '../services/rendicionService';
+import { pedidoTieneRendicionVigente, MSG_PEDIDO_CON_RENDICION } from '../domain/rendicion';
 
 const ESTADOS = ['todos', 'pendiente', 'facturado'];
 
@@ -158,6 +160,11 @@ const ListaPedidos = () => {
   };
 
   const handleCancelar = async (p) => {
+    // REQ-REN (AC-REN-4): con rendicion vigente no se borra (devolveria el stock dos veces).
+    if (p.estado === 'facturado') {
+      const { rendiciones } = (await cargarRendicionesLocales()) || {};
+      if (pedidoTieneRendicionVigente(p, rendiciones || [])) { alert(MSG_PEDIDO_CON_RENDICION); return; }
+    }
     const msg = p.estado === 'facturado'
       ? `Este pedido ya está FACTURADO. ¿Borrar igualmente el pedido de "${p.clienteNombre}"?`
       : '¿Borrar este pedido?';

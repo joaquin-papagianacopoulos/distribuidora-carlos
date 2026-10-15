@@ -169,3 +169,81 @@ export const borrarDeuda = async (deuda) => {
   }
   await deleteDeuda(deuda.id);
 };
+
+// ---------------------------------------------------------------------------
+// REQ-REN (AC-REN-3 / AC-REN-4): efectos de una rendicion sobre la tabla legacy de deudas.
+// Aditivo: no cambia nada de lo de arriba. Los textos solo llevan "#<8 chars>" del UUID (D3).
+// El sync de deudas es "best effort": lo local ya quedo grabado y se sube en el proximo sync.
+// ---------------------------------------------------------------------------
+const syncSilencioso = async () => {
+  if (!navigator.onLine) return;
+  try { await syncDeudas(); } catch (e) { console.error('syncDeudas fallo:', e?.message || String(e)); }
+};
+
+// Los ids locales de clientes son numericos (autoIncrement): '5' -> 5 para que Deudas los agrupe igual.
+export const clienteIdLocal = (v) => (typeof v === 'string' && /^\d{1,15}$/.test(v) ? Number(v) : v);
+
+const cobrarLocal = async (deuda, montoPesos, por) => {
+  const cobra = Math.min(Math.max(Number(montoPesos) || 0, 0), saldoDeuda(deuda));
+  if (cobra <= 0) return false;
+  const montoPagado = Number(deuda.montoPagado || 0) + cobra;
+  const pagada = montoPagado >= Number(deuda.monto || 0) - 0.001;
+  await updateDeuda({
+    ...deuda, montoPagado, pagada, pagadaAt: pagada ? Date.now() : null, pagadaPor: por || null, synced: false, updatedAt: Date.now(),
+  });
+  return true;
+};
+
+/** Cobra de cada deuda lo indicado por planEfectoCuenta (centavos). Devuelve cuantas toco. */
+export const aplicarCobrosRendicion = async (cobros = [], por = null) => {
+  const porId = new Map((await getDeudas()).map(d => [d.id, d]));
+  let n = 0;
+  for (const c of Array.isArray(cobros) ? cobros : []) {
+    const d = porId.get(c?.deudaId);
+    if (d && await cobrarLocal(d, (Number(c.montoCents) || 0) / 100, por)) n += 1;
+  }
+  if (n) await syncSilencioso();
+  return n;
+};
+
+/** Deuda nueva por un cargo/reversion. Anti-duplicado local por concepto (lleva el #id corto). */
+export const crearDeudaRendicion = async ({ clienteId, clienteNombre, montoCents, concepto, fecha }) => {
+  const monto = (Number(montoCents) || 0) / 100;
+  if (monto <= 0 || !concepto) return false;
+  const existe = (await getDeudas()).some(d => d.concepto === concepto && String(d.clienteId ?? '') === String(clienteId ?? ''));
+  if (existe) return false;
+  await addDeuda({
+    clienteId: clienteIdLocal(clienteId), clienteNombre: clienteNombre || '', pedidoId: null, pedidoLocalId: null,
+    monto, montoPagado: 0, concepto, fecha: fecha || getLocalTodayStr(), pagada: false, pagadaAt: null, pagadaPor: null,
+  });
+  await syncSilencioso();
+  return true;
+};
+
+/** Anula la deuda del cargo de un cambio (sin cobros), igual que quitarDeudaDePedido. */
+export const anularDeudaRendicion = async (deudaId) => {
+  const d = (await getDeudas()).find(x => x.id === deudaId);
+  if (!d || d.pagada || Number(d.montoPagado || 0) > 0) return false;
+  if (d.remoteId && navigator.onLine) {
+    const { error } = await supabase.from('deudas').delete().eq('id', d.remoteId);
+    if (error) throw error;
+    await deleteDeuda(d.id);
+  } else if (d.remoteId) {
+    await updateDeuda({ ...d, monto: 0, pagada: true, concepto: 'Anulada', synced: false, updatedAt: Date.now() });
+  } else {
+    await deleteDeuda(d.id);
+  }
+  await syncSilencioso();
+  return true;
+};
+
+/** Baja el monto de una deuda a lo ya cobrado (cargo de un cambio anulado con cobros parciales). */
+export const ajustarDeudaRendicion = async (deudaId, montoCents) => {
+  const d = (await getDeudas()).find(x => x.id === deudaId);
+  if (!d) return false;
+  const monto = (Number(montoCents) || 0) / 100;
+  const pagada = Number(d.montoPagado || 0) >= monto - 0.001;
+  await updateDeuda({ ...d, monto, pagada, pagadaAt: pagada ? (d.pagadaAt || Date.now()) : null, synced: false, updatedAt: Date.now() });
+  await syncSilencioso();
+  return true;
+};

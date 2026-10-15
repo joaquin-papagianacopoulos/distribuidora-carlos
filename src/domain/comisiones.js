@@ -321,7 +321,10 @@ export const subtotalRenglonCentavos = (item) => {
 // Base de cálculo de un pedido agrupada por rubro (AC-COMR-9, 11).
 // S9: un pedido sin renglones válidos y con total > 0 (p. ej. WEB sin items)
 // cuenta como renglón inválido.
-export const baseRubrosPedido = (pedido, productosById) => {
+// REQ-REN (AC-REN-5): `extras` = renglones de comision congelados en las rendiciones vigentes
+// del pedido ([{ rubroClave, rubro, subtotalCents }], negativos por devolucion/NC). Se suman por
+// clave igual que comision_rubro_base de la 014. Sin extras el resultado es el de siempre.
+export const baseRubrosPedido = (pedido, productosById, { extras = [] } = {}) => {
   const items = Array.isArray(pedido?.items) ? pedido.items : [];
   const porClave = new Map();
   const sinRubro = [];
@@ -345,6 +348,14 @@ export const baseRubrosPedido = (pedido, productosById) => {
     porClave.get(r.clave).subtotalCents += st.cents;
   }
   if (validos === 0 && invalidos === 0 && (aCentavos(pedido?.total) || 0) > 0) invalidos = 1;
+  for (const x of Array.isArray(extras) ? extras : []) {
+    const cents = Number(x?.subtotalCents);
+    if (!Number.isSafeInteger(cents) || cents === 0) continue;
+    const clave = typeof x?.rubroClave === 'string' ? x.rubroClave : '';
+    if (!clave) { sinRubro.push({ productoId: null, nombre: 'Rendición', subtotalCents: cents }); continue; }
+    if (!porClave.has(clave)) porClave.set(clave, { rubro: texto(x?.rubro, 120), clave, subtotalCents: 0 });
+    porClave.get(clave).subtotalCents += cents;
+  }
   const porRubro = [...porClave.values()].sort((a, b) => (a.clave < b.clave ? -1 : a.clave > b.clave ? 1 : 0));
   return { porRubro, sinRubro, invalidos };
 };
@@ -558,6 +569,33 @@ export const clasificarPedidos = (pedidos, periodo, cerrados = new Map(), config
 };
 
 // ---------------------------------------------------------------------------
+// REQ-REN (AC-REN-5): rendiciones (devolucion, cambio, NC) sobre la comision
+// ---------------------------------------------------------------------------
+const rendicionCuenta = (r) => !!r && r.estado === 'vigente' && r.syncEstado !== 'rechazada';
+
+/**
+ * Pedido con el total para comision neto de las rendiciones vigentes (total - creditoComision,
+ * minimo 0, igual que _pedido_total_comision de la 014) y sus renglones de comision congelados
+ * en `comisionExtras`. Sin rendiciones devuelve el MISMO objeto.
+ */
+export const pedidoNetoParaComision = (pedido, rendiciones = []) => {
+  const pid = pedidoIdComision(pedido);
+  if (!pid) return pedido;
+  const propias = (Array.isArray(rendiciones) ? rendiciones : []).filter(r => rendicionCuenta(r) && String(r.pedidoId) === pid);
+  if (!propias.length) return pedido;
+  const credito = propias.reduce((a, r) => a + (Number(r.creditoComisionCents) || 0), 0);
+  const totalCents = aCentavos(pedido?.total);
+  const total = totalCents === null || totalCents < 0 ? pedido.total : deCentavos(Math.max(0, totalCents - credito));
+  const extras = propias.flatMap(r => (Array.isArray(r.comisionRenglones) ? r.comisionRenglones : []));
+  return { ...pedido, total, comisionExtras: extras };
+};
+
+export const netearPedidosComision = (pedidos, rendiciones = []) => {
+  if (!Array.isArray(rendiciones) || !rendiciones.length || !Array.isArray(pedidos)) return pedidos;
+  return pedidos.map(p => pedidoNetoParaComision(p, rendiciones));
+};
+
+// ---------------------------------------------------------------------------
 // Líneas del dashboard
 // ---------------------------------------------------------------------------
 const conPartes = (cents, totalCents, asignacion) => {
@@ -634,7 +672,7 @@ export const armarLineaRubro = (pedido, { clientes, vendedores, productosById, i
   const cargaDeOtro = esCargaDeOtroVendedor(pedido, cliente, vendedores, config);
   const { asignacion, asignacionErrores, asignacionConfirmada } = resolverAsignacion(pedido, cliente, vendedores, asignacionBorrador, config);
   const sinComision = asignacion?.modo === 'sin_comision';
-  const base = baseRubrosPedido(pedido, productosById);
+  const base = baseRubrosPedido(pedido, productosById, { extras: pedido?.comisionExtras });
 
   const avisosRubro = { sinPct: [], sinRubro: sinComision ? [] : base.sinRubro, vendedorSinId: [], invalidos: sinComision ? 0 : base.invalidos };
   let partes = [];
@@ -709,7 +747,7 @@ const acumularPartes = (acc, partes) => {
 // que no estaba en el cierre usa el % vigente: supuesto S6).
 const ajusteRubro = (l, pedido, prev, sigueContando, ctx) => {
   const asignacion = l.asignacion || { modo: null, partes: [] };
-  const base = sigueContando ? baseRubrosPedido(pedido, ctx.productosById) : { porRubro: [], sinRubro: [], invalidos: 0 };
+  const base = sigueContando ? baseRubrosPedido(pedido, ctx.productosById, { extras: pedido?.comisionExtras }) : { porRubro: [], sinRubro: [], invalidos: 0 };
   const cerrado = new Map();
   acumularPartes(cerrado, l.partes);
   acumularPartes(cerrado, prev.partes);
@@ -995,8 +1033,12 @@ export const indexarProductos = (productos) => {
 export const armarDashboard = ({
   pedidos, clientes, vendedores, cierres, borrador, periodo,
   modelo, productos, tablaRubros, pendientesRubro = 0, faltaMigracion005 = false,
+  rendiciones = [],
 }, config = CONFIG_COMISIONES) => {
   const vp = validarPeriodo(periodo, config);
+  // REQ-REN (AC-REN-5): total y base de cada pedido netos de sus rendiciones vigentes y
+  // confirmadas. Pedido no cerrado => baja la linea; cerrado => aparece como ajuste.
+  pedidos = netearPedidosComision(pedidos, rendiciones);
   const cerrados = pedidosEnCierresVigentes(cierres);
   const clas = vp.ok
     ? clasificarPedidos(pedidos, vp.periodo, cerrados, config)

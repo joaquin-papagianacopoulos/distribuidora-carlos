@@ -27,6 +27,7 @@ import {
 } from '../domain/comisiones';
 import { syncComisionesRubro, sondearMigracion005, MSG_FALTA_MIGRACION_005 } from './comisionesRubroService';
 import { getUsuarioSesion } from './sesion';
+import { cargarRendicionesLocales } from './rendicionService';
 import { esAdmin, validarPinIngresado } from '../domain/permisos';
 
 export const MSG_FALTA_MIGRACION = 'Falta correr supabase/migrations/003_comisiones.sql en Supabase: no se pueden cerrar comisiones todavía.';
@@ -104,7 +105,11 @@ export const cargarDatosComisiones = async (periodo, { online = navigator.onLine
     getProductos(), getComisionesRubro(),
   ]);
   const tabla = tablaRubros || [];
+  // REQ-REN (AC-REN-5): solo rendiciones CONFIRMADAS por el servidor (el servidor solo descuenta
+  // esas: con una pendiente local, cerrar_comisiones daria montos_inconsistentes).
+  const rendiciones = ((await cargarRendicionesLocales())?.rendiciones || []).filter(r => r?.syncEstado === 'confirmada');
   return {
+    rendiciones,
     pedidos: pedidos || [],
     clientes: clientes || [],
     vendedores: vendedores || [],

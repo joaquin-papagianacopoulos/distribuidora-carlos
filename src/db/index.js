@@ -10,7 +10,8 @@ const DB_NAME = 'distribuidoraDB';
 // v9 — REQ-HPR: store cambiosPrecio (historial de cambios de precio). Solo se agrega.
 // v10 — REQ-INA/REQ-CPR: ingresosCostos, cuentaProveedores, comprobantesPendientes y
 //       pedidosProveedor. Solo se AGREGAN stores; no se migra ni se borra nada.
-const DB_VERSION = 10;
+// v11 — REQ-REN: rendiciones y cuentaClientes (saldo a favor). Solo se AGREGAN stores.
+const DB_VERSION = 11;
 
 let db = null;
 
@@ -150,6 +151,25 @@ export const initDB = () => new Promise((resolve, reject) => {
       if (pp && typeof pp.createIndex === 'function') {
         pp.createIndex('proveedorId', 'proveedorId', { unique: false });
         pp.createIndex('estado', 'estado', { unique: false });
+      }
+    }
+
+    // v11 — REQ-REN. Solo se AGREGAN stores (clave UUID / id determinista). rendiciones: documento
+    // inmutable (solo se anula). cuentaClientes: ledger privado de saldo a favor (solo se agregan filas).
+    if (!d.objectStoreNames.contains('rendiciones')) {
+      const rs = d.createObjectStore('rendiciones', { keyPath: 'id' });
+      if (rs && typeof rs.createIndex === 'function') {
+        rs.createIndex('pedidoId', 'pedidoId', { unique: false });
+        rs.createIndex('clienteId', 'clienteId', { unique: false });
+        rs.createIndex('fecha', 'fecha', { unique: false });
+        rs.createIndex('estado', 'estado', { unique: false });
+      }
+    }
+    if (!d.objectStoreNames.contains('cuentaClientes')) {
+      const cc = d.createObjectStore('cuentaClientes', { keyPath: 'id' });
+      if (cc && typeof cc.createIndex === 'function') {
+        cc.createIndex('clienteId', 'clienteId', { unique: false });
+        cc.createIndex('rendicionId', 'rendicionId', { unique: false });
       }
     }
 
@@ -895,6 +915,32 @@ export const clearCuentaProveedoresPendingSync = (enviados) => clearPendingSiNoC
 export const getPedidosProveedor = () => getAllFrom('pedidosProveedor');
 export const putPedidosProveedorRaw = (rows) => putManyInto('pedidosProveedor', rows);
 export const clearPedidosProveedorPendingSync = (enviados) => clearPendingSiNoCambio('pedidosProveedor', enviados);
+
+// ---- RENDICIONES Y SALDO A FAVOR DE CLIENTES (REQ-REN) ----
+// Datos financieros: suben solo con PIN de admin (RPC de la 014). pendingSync hasta que el servidor
+// confirma; se limpia SOLO de los ids confirmados.
+export const getRendiciones = () => getAllFrom('rendiciones');
+export const putRendicionesRaw = (rows) => putManyInto('rendiciones', rows);
+export const clearRendicionesPendingSync = (enviados) => clearPendingSiNoCambio('rendiciones', enviados);
+export const getCuentaClientes = () => getAllFrom('cuentaClientes');
+export const putCuentaClientesRaw = (rows) => putManyInto('cuentaClientes', rows);
+export const clearCuentaClientesPendingSync = (ids) => clearPendingIn('cuentaClientes', ids);
+
+// AC-REN-2: rendicion + sus movimientos de stock en UNA transaccion (patron addIngresoConMovimientos):
+// nunca una rendicion sin sus movimientos ni al reves. add() falla si el id ya existe (no pisa).
+export const addRendicionConMovimientos = async (rendicion, movimientos = []) => {
+  const d = await getDB();
+  const now = Date.now();
+  return new Promise((res, rej) => {
+    const t = d.transaction(['rendiciones', 'movimientosStock'], 'readwrite');
+    t.objectStore('rendiciones').add({ ...rendicion, pendingSync: true, updatedAt: now });
+    const ms = t.objectStore('movimientosStock');
+    for (const m of movimientos) ms.add({ ...m, pendingSync: true, createdAt: now });
+    t.oncomplete = () => res({ ok: true });
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+};
 
 // Adjuntos de pagos aun no subidos a Storage: { id (= id del pago), blob, mime, size }.
 export const getComprobantesPendientes = () => getAllFrom('comprobantesPendientes');

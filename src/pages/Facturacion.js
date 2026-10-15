@@ -26,6 +26,8 @@ import { normalizarGrupos } from '../domain/gruposFactura';
 import { filasTiposFacturaRpc, ETIQUETA_TIPO_FACTURA } from '../domain/facturacionAB';
 import { guardarTiposFacturaLocal, subirTiposFactura } from '../services/facturacionService';
 import { credencialesAdminProductos } from '../services/productosAdminService';
+import { cargarRendicionesLocales } from '../services/rendicionService';
+import { pedidoTieneRendicionVigente, MSG_PEDIDO_CON_RENDICION, saldoAFavorCliente, cuentaParaBoleta } from '../domain/rendicion';
 
 // REQ-COM (AC-COM-13): texto extra para confirmar cambios sobre un pedido que
 // ya esta en un cierre de comisiones vigente.
@@ -276,6 +278,13 @@ const Facturacion = () => {
   const [pinTipos, setPinTipos] = useState('');
   const [tiposMsg, setTiposMsg] = useState('');
   const draftRef = useRef({});
+  // REQ-REN: rendiciones y saldo a favor locales (guardas y boleta). Sin store => listas vacias.
+  const [rendLocal, setRendLocal] = useState({ rendiciones: [], cuenta: [] });
+  useEffect(() => {
+    let vivo = true;
+    cargarRendicionesLocales().then(r => { if (vivo && r) setRendLocal(r); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [pedidos]);
   // S-BUL-07: espejo de itemsEdit para calcular "± Bulto" fuera del updater.
   const itemsEditRef = useRef([]);
   useEffect(() => { itemsEditRef.current = itemsEdit; }, [itemsEdit]);
@@ -326,7 +335,24 @@ const Facturacion = () => {
     );
   }
 
+  // REQ-REN (AC-REN-2/4): un pedido con rendicion vigente no se revierte, borra ni edita
+  // (devolveria el stock dos veces). Primero se anula la rendicion.
+  const bloqueadoPorRendicion = (p) => {
+    if (!pedidoTieneRendicionVigente(p, rendLocal.rendiciones)) return false;
+    alert(MSG_PEDIDO_CON_RENDICION);
+    return true;
+  };
+  // REQ-REN (AC-REN-3): deuda pendiente neta del saldo a favor del cliente (si tiene).
+  const cuentaBoleta = (p) => {
+    const deuda = getDeudaPendienteParaPedido(deudas, p);
+    const favor = saldoAFavorCliente(rendLocal.cuenta, p.clienteId);
+    if (!favor) return { deuda, extra: {} };
+    const c = cuentaParaBoleta(deuda, favor);
+    return { deuda: c.deudaPendiente, extra: c.saldoAFavor > 0 ? { saldoAFavor: c.saldoAFavor } : {} };
+  };
+
   const cancelarDesdeFacturar = async (p) => {
+    if (bloqueadoPorRendicion(p)) return;
     const msg = (p.estado === 'facturado'
       ? `Este pedido ya está FACTURADO. ¿Borrar igualmente el pedido de "${p.clienteNombre}"?`
       : '¿Borrar este pedido?') + (cierreDe(p) ? AVISO_CERRADO : '');
@@ -375,8 +401,8 @@ const Facturacion = () => {
     const files = [];
     for (const p of pedidosSel) {
       const cliente = (clientes || []).find(c => c.id === p.clienteId);
-      const deudaPendiente = getDeudaPendienteParaPedido(deudas, p);
-      files.push(await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente, null, { modoGrupos }));
+      const cb = cuentaBoleta(p);
+      files.push(await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, cb.deuda, null, { modoGrupos, ...cb.extra }));
     }
 
     try {
@@ -408,6 +434,7 @@ const Facturacion = () => {
   const hayGrupos = (pedidosDia || []).some(p => Array.isArray(p.grupos) && p.grupos.length > 0);
 
   const abrirEdicion = (p) => {
+    if (bloqueadoPorRendicion(p)) return;
     setPedidoEditando(p);
     setGruposEdit(Array.isArray(p.grupos) ? p.grupos.map(g => ({ ...g, itemIds: [...(g.itemIds || [])] })) : undefined);
     const sorted = sortItems(p.items.map(i => ({ ...i })));
@@ -815,8 +842,8 @@ const Facturacion = () => {
     // Abrimos una pestaña en el gesto del usuario y luego le asignamos el PDF blob.
     const w = window.open('', '_blank');
     try {
-      const deudaPendiente = getDeudaPendienteParaPedido(deudas, p);
-      const file = await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, deudaPendiente, null, { modoGrupos });
+      const cb = cuentaBoleta(p);
+      const file = await generarFacturaFile(p, cliente, { nombre: p.vendedorNombre }, cb.deuda, null, { modoGrupos, ...cb.extra });
       const url = URL.createObjectURL(file);
       if (w) w.location.href = url;
       else window.location.href = url;
@@ -880,6 +907,7 @@ const Facturacion = () => {
   };
 
   const marcarPendiente = async (p) => {
+    if (bloqueadoPorRendicion(p)) return;
     if (!window.confirm(`¿Revertir el pedido de "${p.clienteNombre}" a pendiente?${cierreDe(p) ? AVISO_CERRADO : ''}`)) return;
     try {
       // Si el pedido ya tenia deuda: se quita (salvo que ya se haya cobrado algo).

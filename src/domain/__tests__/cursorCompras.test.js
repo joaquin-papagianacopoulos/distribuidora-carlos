@@ -32,3 +32,16 @@ describe('S-012-02 cursor de compras', () => {
     expect(avanzarCursorCompras({}, { pedidos: [{ id: 'x', updated_at: '2026-10-12T10:00:00Z' }] }).cursor).toEqual({});
   });
 });
+
+// REQ-REN (RUN 20261015-1630): el mismo cursor sirve para rendiciones y saldo a favor.
+describe('AC-REN-4 cursor de rendiciones (tablas propias)', () => {
+  const { TABLAS_CURSOR_RENDICION, leerCursorCompras: leer, cursorConSolape: solape, avanzarCursorCompras: avanzar } = require('../cursorCompras');
+  it('AC-REN-4 lee, solapa y avanza solo las tablas de rendición', () => {
+    const txt = JSON.stringify({ rendiciones: { ts: '2026-10-15T10:00:00Z', id: 'a' }, costos: { ts: '2026-10-15T10:00:00Z', id: 'x' } });
+    expect(leer(txt, TABLAS_CURSOR_RENDICION)).toEqual({ rendiciones: { ts: '2026-10-15T10:00:00Z', id: 'a' } });
+    expect(solape({ rendiciones: { ts: '2026-10-15T10:05:00.000Z' } }, 5 * 60 * 1000, TABLAS_CURSOR_RENDICION)).toEqual({ rendiciones: { ts: '2026-10-15T10:00:00.000Z', id: '' } });
+    const r = avanzar({}, { rendiciones: [{ id: 'b', synced_at: '2026-10-15T11:00:00Z' }], cuenta: [{ id: 'c', synced_at: '2026-10-15T12:00:00Z' }] }, 1, { tablas: TABLAS_CURSOR_RENDICION });
+    expect(r.cursor).toEqual({ rendiciones: { ts: '2026-10-15T11:00:00Z', id: 'b' }, cuenta: { ts: '2026-10-15T12:00:00Z', id: 'c' } });
+    expect(r.llenas).toEqual(['rendiciones', 'cuenta']);
+  });
+});

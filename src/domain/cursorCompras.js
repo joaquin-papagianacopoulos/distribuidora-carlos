@@ -4,17 +4,19 @@
 // demas; el id desempata filas con el mismo instante en el borde de pagina. Funciones puras.
 
 export const TABLAS_CURSOR = Object.freeze({ costos: 'ingreso_id', cuenta: 'id', pedidos: 'id' });
+// REQ-REN: mismo cursor para la bajada de rendiciones y saldo a favor (admin_rendiciones_bajar, 014).
+export const TABLAS_CURSOR_RENDICION = Object.freeze({ rendiciones: 'id', cuenta: 'id' });
 
 const tsValido = (v) => typeof v === 'string' && v.length <= 64 && Number.isFinite(Date.parse(v));
 
 /** Lee el cursor guardado (JSON). Formatos viejos o invalidos => {} (baja todo: es idempotente). */
-export const leerCursorCompras = (texto) => {
+export const leerCursorCompras = (texto, tablas = TABLAS_CURSOR) => {
   if (!texto || typeof texto !== 'string') return {};
   let crudo;
   try { crudo = JSON.parse(texto); } catch { return {}; }
   if (!crudo || typeof crudo !== 'object' || Array.isArray(crudo)) return {};
   const out = {};
-  for (const t of Object.keys(TABLAS_CURSOR)) {
+  for (const t of Object.keys(tablas)) {
     const c = crudo[t];
     if (c && tsValido(c.ts)) out[t] = { ts: c.ts, id: typeof c.id === 'string' ? c.id.slice(0, 64) : '' };
   }
@@ -25,9 +27,9 @@ export const leerCursorCompras = (texto) => {
  * Cursor para pedir al servidor: cada tabla arranca `solapeMs` antes (y sin id) para cubrir
  * transacciones que confirmaron tarde. Lo que se re-baja se vuelve a guardar igual (idempotente).
  */
-export const cursorConSolape = (cursor = {}, solapeMs = 5 * 60 * 1000) => {
+export const cursorConSolape = (cursor = {}, solapeMs = 5 * 60 * 1000, tablas = TABLAS_CURSOR) => {
   const out = {};
-  for (const t of Object.keys(TABLAS_CURSOR)) {
+  for (const t of Object.keys(tablas)) {
     const c = cursor?.[t];
     if (c && tsValido(c.ts)) out[t] = { ts: new Date(Date.parse(c.ts) - solapeMs).toISOString(), id: '' };
   }
@@ -45,10 +47,10 @@ const ultimaFila = (filas, campoId) => {
  * Avanza el cursor con una pagina { costos, cuenta, pedidos } (filas ordenadas por synced_at, id).
  * `soloAdelante` evita retroceder (para el cursor que se guarda). Devuelve { cursor, llenas }.
  */
-export const avanzarCursorCompras = (cursor = {}, parte = {}, pagina = 1000, { soloAdelante = false } = {}) => {
+export const avanzarCursorCompras = (cursor = {}, parte = {}, pagina = 1000, { soloAdelante = false, tablas = TABLAS_CURSOR } = {}) => {
   const out = { ...cursor };
   const llenas = [];
-  for (const [t, campoId] of Object.entries(TABLAS_CURSOR)) {
+  for (const [t, campoId] of Object.entries(tablas)) {
     const filas = Array.isArray(parte?.[t]) ? parte[t] : [];
     const u = ultimaFila(filas, campoId);
     if (u) {

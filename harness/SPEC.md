@@ -543,3 +543,13 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 - **AC-STB-1** Campo nuevo de producto **"Stock mínimo"** (`stockMinimo`, punto de reposición). Si está vacío se usa "Mínimo venta" como hoy (AC-STK-7 sigue valiendo).
 - **AC-STB-2** Pantalla Stock: buscador por nombre/código/marca (sin tildes ni mayúsculas, palabras en cualquier orden) y filtros por rubro, marca, proveedor y estado (**sin stock / bajo / ok / negativo**).
 - **AC-STB-3** Avisos: contador "N productos con stock bajo" visible en la pestaña Stock y arriba de la pantalla; lista de stock bajo con botón "Agregar al pedido al proveedor" (REQ-CPR) por producto o todos los de un proveedor.
+
+---
+
+## REQ-REN — Rendición: notas de crédito, devoluciones y cambios
+- **AC-REN-1** Sección **"Rendición"** (admin): se anota sobre un pedido facturado (buscar por cliente/n.º/fecha) uno de: **Devolución** (productos y cantidades ≤ lo facturado menos lo ya devuelto, motivo), **Cambio** (sale producto X / entra producto Y con cantidades; diferencia de precio calculada) o **Nota de crédito** (monto y motivo, sin mercadería; opcional Factura A/B y n.º de NC).
+- **AC-REN-2** Stock: devolución → movimientos `devolucion` positivos (vuelven al stock); cambio → `devolucion` del que vuelve + `venta` del que sale. Idempotente (reintentos o dos dispositivos no duplican), con UUID, como el resto del ledger. Opción por renglón "no vuelve al stock (roto/vencido)" → no genera movimiento y queda registrado como merma.
+- **AC-REN-3** Plata: el crédito (devolución, NC o diferencia del cambio) se descuenta de la deuda pendiente del cliente si tiene; si no, queda como **saldo a favor** que se muestra en su próxima boleta. Una diferencia a pagar por el cliente en un cambio suma a su deuda.
+- **AC-REN-4** Rendición del día: lista por fecha con totales (devuelto, NC, cambios, mermas) y **PDF**. Anular una rendición con motivo revierte sus movimientos de stock y su efecto en la cuenta del cliente (sin borrar nada).
+- **AC-REN-5** Comisiones (REQ-COM/COMR): una devolución o NC sobre un pedido ya cerrado aparece como **ajuste pendiente** (AC-COM-13); si no está cerrado, baja la comisión del período.
+- **AC-REN-6** Cálculos (cantidades disponibles para devolver, montos, saldo a favor, efecto en comisión) en funciones puras con tests.

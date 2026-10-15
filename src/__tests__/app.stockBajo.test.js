@@ -21,6 +21,7 @@ jest.mock('../pages/OrdenEntrega', () => ({ __esModule: true, default: () => 'PA
 jest.mock('../pages/Armado', () => ({ __esModule: true, default: () => 'PAGINA-Armado' }));
 jest.mock('../pages/Comisiones', () => ({ __esModule: true, default: () => 'PAGINA-Comisiones' }));
 jest.mock('../pages/FacturasAEmitir', () => ({ __esModule: true, default: () => 'PAGINA-FacturasAEmitir' }));
+jest.mock('../pages/Rendicion', () => ({ __esModule: true, default: () => 'PAGINA-Rendicion' })); // REQ-REN (RUN 20261015-1630)
 jest.mock('../pages/PedidosWeb', () => ({ __esModule: true, default: () => 'PAGINA-PedidosWeb' }));
 jest.mock('../pages/Stock', () => ({ __esModule: true, default: ({ precarga }) => `STOCK:${precarga ? JSON.stringify(precarga) : 'sin-precarga'}` }));
 jest.mock('../pages/Proveedores', () => ({
@@ -94,5 +95,20 @@ describe('AC-CPR-4 recibir un pedido abre el Ingreso precargado', () => {
     await render();
     await click(tab('Stock'));
     expect(container.querySelector('main').textContent).toBe('STOCK:sin-precarga');
+  });
+});
+
+// REQ-REN (AC-REN-1): pestaña Rendición solo para el admin.
+describe('AC-REN-1 pestaña Rendición', () => {
+  it('AC-REN-1 el admin la ve y la abre; un vendedor no', async () => {
+    await render();
+    await click(tab('Rendición'));
+    expect(container.textContent).toContain('PAGINA-Rendicion');
+    act(() => { root.unmount(); });
+    root = createRoot(container);
+    mockApp.vendedorActual = { id: 2, nombre: 'Vend', permiso: 2 };
+    await render();
+    expect(tab('Rendición')).toBeUndefined();
+    expect(container.textContent).not.toContain('PAGINA-Rendicion');
   });
 });

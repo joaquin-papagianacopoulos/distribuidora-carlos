@@ -16,6 +16,7 @@ import Comisiones from './pages/Comisiones';
 import FacturasAEmitir from './pages/FacturasAEmitir';
 import PedidosWeb from './pages/PedidosWeb';
 import Proveedores from './pages/Proveedores';
+import Rendicion from './pages/Rendicion';
 import { contarPorRevisar } from './domain/pedidosWeb';
 import { contarStockBajo } from './domain/stockBajo';
 import SelectorVendedor from './components/SelectorVendedor';
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'proveedores', label: 'Proveedores', icon: '\u{1F69A}' }, // 🚚 solo admin (REQ-CPR)
   { id: 'faltantes', label: 'Faltantes', icon: '\u26A0\uFE0F' }, // ⚠️
   { id: 'deudas', label: 'Deudas', icon: '\u{1F4B0}' }, // 💰
+  { id: 'rendicion', label: 'Rendición', icon: '↩️' }, // ↩️ solo admin (REQ-REN)
   { id: 'ordenentrega', label: 'Orden', icon: '\u{1F5FA}️' }, // 🗺️
   { id: 'resumen', label: 'Resumen', icon: '\u{1F4CA}' }, // 📊
   { id: 'comisiones', label: 'Comisiones', icon: '\u{1F4B5}' }, // solo admin (REQ-COM)
@@ -233,6 +235,7 @@ const AppContent = () => {
         {tab === 'proveedores' && isAdmin && <Proveedores onAbrirIngreso={(form) => { setIngresoPrecargado(form); setTab('stock'); }} />}
         {tab === 'faltantes' && <Faltantes />}
         {tab === 'deudas' && <Deudas />}
+        {tab === 'rendicion' && isAdmin && <Rendicion />}
         {tab === 'ordenentrega' && <OrdenEntrega />}
         {tab === 'resumen' && <ResumenDia />}
         {tab === 'reportes' && <ReportesVentas />}

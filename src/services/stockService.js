@@ -5,10 +5,11 @@ import {
   getMovimientosStock, addMovimientosStock, putMovimientosRemotos, clearMovimientosPendingSync,
   rekeyMovimientosRef, getIngresos, putIngresosRemotos, clearIngresosPendingSync,
   addIngresoConMovimientos, addIngresoCompleto, updateProducto, getProveedores, putProveedoresRemotos, clearProveedoresPendingSync, deleteProveedor,
+  getRendiciones,
 } from '../db';
 import {
   calcularStock, revisarMovimientosPedido, mensajeMovimientosInvalidos, verificarStock, decidirFacturacion, movimientoAjuste,
-  validarIngreso, refsPedido, STOCK_POLICY,
+  validarIngreso, refsPedido, STOCK_POLICY, esRefRendicion, idRendicionDeRef,
   movimientoToRemote, movimientoFromRemote, ingresoToRemote, ingresoFromRemote,
 } from '../domain/stock';
 import { proveedorToRemote, proveedorFromRemote } from '../domain/proveedores';
@@ -133,6 +134,19 @@ export const esErrorDeDato = (error) => ES_ERROR_DE_DATO.includes(String(error?.
 // que el pedido sincroniza y se re-keyean a "pedido:<remoteId>" (B3 / S-11).
 export const esRefLocal = (row) => String(row?.ref || '').startsWith('pedido-local:');
 
+// REQ-REN (AC-REN-2): los movimientos de una rendicion ('rendicion:<uuid>') NO se suben hasta que
+// el servidor confirmo la rendicion (el trigger de la 014 exige la cabecera). Si la rendicion no esta
+// en este dispositivo o sigue pendiente/rechazada, se retienen.
+export const retenerMovimientoRendicion = (row, rendicionesPorId = new Map()) => {
+  if (!esRefRendicion(row)) return false;
+  const r = rendicionesPorId.get(idRendicionDeRef(row.ref));
+  return !r || r.syncEstado !== 'confirmada';
+};
+
+const leerRendiciones = async () => {
+  try { return typeof getRendiciones === 'function' ? (await getRendiciones()) || [] : []; } catch { return []; }
+};
+
 const pushPendientes = async (rows, table, toRemote, clear, { retener = () => false } = {}) => {
   const pend = rows.filter(r => r.pendingSync && !retener(r));
   const fallidos = [];
@@ -181,11 +195,13 @@ const mergeRemotos = (remotos, locales, fromRemote) => {
  */
 export const syncStock = async ({ full = false } = {}) => {
   try {
-    const [provs, ings, movs] = await Promise.all([getProveedores(), getIngresos(), getMovimientosStock()]);
+    const [provs, ings, movs, rends] = await Promise.all([getProveedores(), getIngresos(), getMovimientosStock(), leerRendiciones()]);
+    const rendPorId = new Map(rends.map(r => [String(r.id), r]));
+    const retener = (row) => esRefLocal(row) || retenerMovimientoRendicion(row, rendPorId);
     const subidos = {
       proveedores: await pushPendientes(provs, 'proveedores', proveedorToRemote, clearProveedoresPendingSync),
       ingresos: await pushPendientes(ings, 'ingresos_mercaderia', ingresoToRemote, clearIngresosPendingSync),
-      movimientos: await pushPendientes(movs, 'movimientos_stock', movimientoToRemote, clearMovimientosPendingSync, { retener: esRefLocal }),
+      movimientos: await pushPendientes(movs, 'movimientos_stock', movimientoToRemote, clearMovimientosPendingSync, { retener }),
     };
 
     // Cursor con 5 min de solape: una transaccion que confirmo tarde no se
