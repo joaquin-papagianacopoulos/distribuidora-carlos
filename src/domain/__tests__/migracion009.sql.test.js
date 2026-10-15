@@ -57,7 +57,7 @@ describe('migración 009 portada de la tienda', () => {
   it('AC-POR-2 admin_tienda_guardar valida en el servidor (color, URLs https, destinos, topes y producto existente)', () => {
     const c = cuerpo('admin_tienda_guardar');
     expect(c).toMatch(/\^#\[0-9a-f\]\{6\}\$/);
-    expect(c).toMatch(/!~\* '\^https:\/\/'/);
+    expect(c).toMatch(/!~\* '\^https:\/\/\[\^\[:space:\]/);
     expect(c).toMatch(/not in \('rubro', 'marca', 'producto', 'ofertas'\)/);
     expect(c).toMatch(/jsonb_array_length\(v_b\) > 10/);
     expect(c).toMatch(/jsonb_array_length\(v_o\) > 200/);
@@ -66,7 +66,7 @@ describe('migración 009 portada de la tienda', () => {
   });
 
   it('AC-POR-3 ofertas con precio opcional > 0 y vigencia; el catálogo marca precio anterior con el precio que cobra el servidor', () => {
-    expect(sql).toMatch(/precio\s+numeric\(14,2\) check \(precio is null or precio > 0\)/);
+    expect(sql).toMatch(/precio\s+numeric\(14,2\) check \(precio is null or \(precio > 0 and precio <> 'NaN'::numeric\)\)/); // SEC-POR-3
     expect(sql).toMatch(/desde\s+date not null/);
     expect(sql).toMatch(/check \(desde <= hasta\)/);
     const cat = cuerpo('tienda_catalogo');
@@ -75,6 +75,17 @@ describe('migración 009 portada de la tienda', () => {
     expect(cat).toMatch(/'enOferta'/);
     for (const prohibido of ['costo', 'ganancia', 'descuento', 'precio_venta2', 'proveedor']) expect(cat).not.toMatch(new RegExp(prohibido));
     expect(cat).not.toMatch(/'stock'/);
+  });
+
+  it('AC-POR-2 SEC-POR-2 las URLs se validan en el servidor con la regla estricta (sin espacios, comillas ni <>)', () => {
+    const estricta = `'^https://[^[:space:]"''<>]+$'`;
+    expect(sql.split(estricta).length - 1).toBe(4); // logo_url, imagen_url y las 2 de admin_tienda_guardar
+    expect(sinComentarios).not.toMatch(/~\* '\^https:\/\/'/); // ya no queda la regla floja
+  });
+
+  it('AC-POR-3 SEC-POR-4 tienda_portada no publica ofertas de productos ocultos ni sin precio', () => {
+    const c = cuerpo('tienda_portada');
+    expect(c).toMatch(/p\.id::text = o\.producto_id and coalesce\(p\.visible_tienda, true\) and p\.precio > 0/);
   });
 
   it('AC-POR-4 bucket "tienda" público, 2 MB, solo jpg/png/webp; insert solo con nombre habilitado; sin update ni delete', () => {

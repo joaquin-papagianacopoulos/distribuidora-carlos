@@ -5,11 +5,13 @@ import SelectorRubro from './SelectorRubro';
 import SelectorMarca from './SelectorMarca';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta, validarProducto } from '../domain/productos';
+import { validarImagen } from '../domain/tiendaPortada';
 
 const str = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
 // rubros (REQ-COMR, AC-COMR-3/4): rubros existentes para el selector de Rubro.
-const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubros = [], marcas = [], stockActual = 0, onGuardar, onCancelar }) => {
+// subirFoto (REQ-FOT): async (pin, file) => { ok, url, mensaje }. Sin ella no se muestra el bloque de foto.
+const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubros = [], marcas = [], stockActual = 0, onGuardar, onCancelar, subirFoto = null }) => {
   const [valores, setValores] = useState(() => ({
     codigo: str(inicial?.codigo),
     nombre: str(inicial?.nombre),
@@ -40,6 +42,23 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
   const [stockMostrado] = useState(stockActual);
   const [errores, setErrores] = useState({});
   const [guardando, setGuardando] = useState(false);
+  // REQ-FOT: foto del producto (bucket "tienda"). El PIN solo vive en este estado.
+  const [foto, setFoto] = useState(() => inicial?.imagen_url || '');
+  const [fotoPin, setFotoPin] = useState('');
+  const [fotoMsg, setFotoMsg] = useState('');
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+
+  const elegirFoto = async (file) => {
+    const v = validarImagen(file);
+    if (!v.ok) { setFotoMsg(v.error); return; }
+    if (!fotoPin) { setFotoMsg('Ingresá tu PIN de admin para subir la foto.'); return; }
+    setSubiendoFoto(true); setFotoMsg('Subiendo foto...');
+    const r = await subirFoto(fotoPin, file);
+    setSubiendoFoto(false);
+    if (!r || !r.ok) { setFotoMsg(r?.mensaje || 'No se pudo subir la foto.'); return; }
+    setFoto(r.url);
+    setFotoMsg('Foto subida. Guardá el producto para que quede.');
+  };
 
   const { costoNeto, precioVenta1 } = useMemo(() => calcularPrecioVenta(valores), [valores]);
 
@@ -64,7 +83,8 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     // contra el ledger actual, que el sync pudo haber cambiado mientras tanto).
     const base = inicial ? stockMostrado : 0;
     const cambioStock = inicial ? String(valores.stock).trim() !== String(stockMostrado) : r.stock !== null;
-    try { await onGuardar(r.producto, cambioStock ? r.stock : null, base); } finally { setGuardando(false); }
+    const producto = subirFoto ? { ...r.producto, imagen_url: foto || null } : r.producto;
+    try { await onGuardar(producto, cambioStock ? r.stock : null, base); } finally { setGuardando(false); }
   };
 
   const fmt = (n) => `$${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -94,6 +114,24 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
             : 'Stock inicial (opcional). Después se suma con "Ingreso de mercadería".',
         }}
       />
+      {subirFoto && (
+        <div className="input-group" data-testid="foto-producto">
+          <label className="input-label">Foto del producto</label>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/^https?:\/\//i.test(foto)
+              ? <img src={foto} alt="" style={{ width: 72, height: 72, objectFit: 'contain', borderRadius: 8, background: 'var(--bg3)' }} data-testid="foto-preview" />
+              : <div style={{ width: 72, height: 72, borderRadius: 8, background: 'var(--bg3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--text3)' }}>Sin foto</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 180 }}>
+              <input className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin"
+                value={fotoPin} onChange={e => setFotoPin(e.target.value)} data-testid="foto-pin" />
+              <input type="file" accept="image/jpeg,image/png,image/webp" disabled={subiendoFoto} data-testid="foto-input"
+                onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) elegirFoto(f); }} />
+              {foto && <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => { setFoto(''); setFotoMsg('Foto quitada. Guardá para confirmar.'); }}>Quitar foto</button>}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Se ve en la tienda online.'}</div>
+        </div>
+      )}
       {precioManual && (
         <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}
           onClick={() => { setPrecioManual(false); setValores(v => ({ ...v, precio: String(precioVenta1) })); }}>

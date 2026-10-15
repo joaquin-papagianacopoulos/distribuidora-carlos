@@ -13,6 +13,8 @@
 --    insert solo acepta ese nombre. No hay policy de update ni delete: nadie con la
 --    anon key puede pisar ni borrar imagenes.
 --  * admin_tienda_guardar valida todo en el servidor (no confia en el navegador).
+--    SEC-POR-2: las URLs se validan con la misma regla estricta que urlSegura (https,
+--    sin espacios, comillas ni <>), tanto en los checks de tabla como en la RPC.
 
 begin;
 
@@ -32,7 +34,7 @@ end $$;
 -- 1. Config de la tienda (columnas nuevas de tienda_config)
 -- =====================================================================
 alter table public.tienda_config add column if not exists nombre     text  not null default 'Tienda' check (char_length(nombre) between 1 and 60);
-alter table public.tienda_config add column if not exists logo_url   text  check (logo_url is null or (logo_url ~* '^https://' and char_length(logo_url) <= 500));
+alter table public.tienda_config add column if not exists logo_url   text  check (logo_url is null or (logo_url ~* '^https://[^[:space:]"''<>]+$' and char_length(logo_url) <= 500));
 alter table public.tienda_config add column if not exists color      text  not null default '#0f766e' check (color ~ '^#[0-9a-f]{6}$');
 alter table public.tienda_config add column if not exists bienvenida text  not null default '' check (char_length(bienvenida) <= 300);
 alter table public.tienda_config add column if not exists contacto   text  not null default '' check (char_length(contacto) <= 200);
@@ -45,7 +47,7 @@ alter table public.tienda_config add column if not exists destacados jsonb not n
 create table if not exists public.tienda_banners (
   id            uuid primary key default gen_random_uuid(),
   orden         integer not null default 0,
-  imagen_url    text not null check (imagen_url ~* '^https://' and char_length(imagen_url) <= 500),
+  imagen_url    text not null check (imagen_url ~* '^https://[^[:space:]"''<>]+$' and char_length(imagen_url) <= 500),
   titulo        text not null default '' check (char_length(titulo) <= 60),
   subtitulo     text not null default '' check (char_length(subtitulo) <= 120),
   destino_tipo  text not null check (destino_tipo in ('rubro', 'marca', 'producto', 'ofertas')),
@@ -61,7 +63,7 @@ create table if not exists public.tienda_banners (
 create table if not exists public.tienda_ofertas (
   id          uuid primary key default gen_random_uuid(),
   producto_id text not null check (char_length(producto_id) <= 64),
-  precio      numeric(14,2) check (precio is null or precio > 0),
+  precio      numeric(14,2) check (precio is null or (precio > 0 and precio <> 'NaN'::numeric)), -- SEC-POR-3: NaN > 0 es true en Postgres
   desde       date not null,
   hasta       date not null,
   check (desde <= hasta)
@@ -139,7 +141,10 @@ begin
     'ofertas', coalesce((
       select jsonb_agg(jsonb_build_object('productoId', o.producto_id, 'precio', o.precio, 'desde', o.desde, 'hasta', o.hasta))
         from public.tienda_ofertas o
-       where o.desde <= v_hoy and o.hasta >= v_hoy), '[]'::jsonb)
+       where o.desde <= v_hoy and o.hasta >= v_hoy
+         -- SEC-POR-4: no publicar ofertas de productos ocultos o sin precio.
+         and exists (select 1 from public.productos p
+                      where p.id::text = o.producto_id and coalesce(p.visible_tienda, true) and p.precio > 0)), '[]'::jsonb)
   );
 end $$;
 
@@ -252,7 +257,7 @@ begin
   if coalesce(v_c->>'color', '') !~ '^#[0-9a-f]{6}$' then
     return jsonb_build_object('ok', false, 'motivo', 'invalido', 'campo', 'color');
   end if;
-  if nullif(v_c->>'logo', '') is not null and ((v_c->>'logo') !~* '^https://' or char_length(v_c->>'logo') > 500) then
+  if nullif(v_c->>'logo', '') is not null and ((v_c->>'logo') !~* '^https://[^[:space:]"''<>]+$' or char_length(v_c->>'logo') > 500) then
     return jsonb_build_object('ok', false, 'motivo', 'invalido', 'campo', 'logo');
   end if;
   if char_length(coalesce(v_c->>'bienvenida', '')) > 300 or char_length(coalesce(v_c->>'contacto', '')) > 200
@@ -284,7 +289,7 @@ begin
   -- Banners: alta/baja/orden = se reemplaza la lista completa (el orden es la posicion).
   delete from public.tienda_banners where true; -- "where true": compatible con pg_safeupdate
   for v_x in select * from jsonb_array_elements(v_b) loop
-    if coalesce(v_x->>'imagen', '') !~* '^https://' or char_length(v_x->>'imagen') > 500
+    if coalesce(v_x->>'imagen', '') !~* '^https://[^[:space:]"''<>]+$' or char_length(v_x->>'imagen') > 500
        or coalesce(v_x->'destino'->>'tipo', '') not in ('rubro', 'marca', 'producto', 'ofertas')
        or (v_x->'destino'->>'tipo' <> 'ofertas' and char_length(trim(coalesce(v_x->'destino'->>'valor', ''))) = 0)
        or char_length(coalesce(v_x->>'titulo', '')) > 60 or char_length(coalesce(v_x->>'subtitulo', '')) > 120

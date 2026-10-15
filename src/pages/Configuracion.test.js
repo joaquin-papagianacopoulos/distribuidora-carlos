@@ -255,3 +255,13 @@ describe('Borrar producto', () => {
     expect(boton.textContent).toBe('×');
   });
 });
+
+// REQ-FOT: productos sin foto marcados en la lista.
+describe('Fotos de productos', () => {
+  test('AC-FOT-3 marca los productos sin foto y cuenta cuántos faltan', async () => {
+    mockApp.productos = [{ ...PRODUCTOS[0], imagen_url: 'https://x.supabase.co/storage/v1/object/public/tienda/img/a.png' }, PRODUCTOS[1], PRODUCTOS[2]];
+    await render();
+    expect(container.querySelectorAll('[data-testid="producto-sin-foto"]').length).toBe(2);
+    expect(container.querySelector('[data-testid="contador-sin-foto"]').textContent).toContain('2 sin foto');
+  });
+});

@@ -2,8 +2,8 @@
 import React from 'react';
 import { formatearPesos, textoBulto, hrefTienda } from '../domain/tienda';
 
-// Solo se muestran imágenes http(s): nada de javascript: ni data:.
-export const imagenSegura = (url) => (typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null);
+// Solo se muestran imágenes https (SEC-POR-7: sin contenido mixto): nada de http, javascript: ni data:.
+export const imagenSegura = (url) => (typeof url === 'string' && /^https:\/\//i.test(url) ? url : null);
 
 export const puedeAgregar = (prod, permitirSinStock) => !!prod.disponible || !!permitirSinStock;
 

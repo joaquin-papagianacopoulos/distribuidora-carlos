@@ -10,6 +10,8 @@ import {
 import ClienteForm from '../components/ClienteForm';
 import LinksTienda from '../components/LinksTienda';
 import ConfigTienda from '../components/ConfigTienda';
+import ImportarPreciosPdf from '../components/ImportarPreciosPdf';
+import { subirImagenTienda } from '../services/tiendaConfigService';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
 import ComisionRubroGrid from '../components/ComisionRubroGrid';
@@ -243,6 +245,23 @@ const Configuracion = () => {
     }
     await recargar();
     cerrarForm();
+  };
+
+  // REQ-PDF (AC-PDF-3): solo actualiza precios de productos existentes. En modo
+  // "costo" cambia costo_final (columna extra) => extrasDirty como el formulario.
+  const aplicarPreciosPdf = async (cambios, modo) => {
+    const actuales = await getProductos();
+    const porId = new Map(actuales.map(p => [String(p.id), p]));
+    for (const c of cambios) {
+      const p = porId.get(String(c.id));
+      if (!p) continue;
+      await updateProducto({ ...p, ...c.cambios, ...(modo === 'costo' ? { extrasDirty: true } : {}) });
+    }
+    await recargar();
+    if (navigator.onLine) {
+      try { await syncProductos(); } catch { /* queda pendingSync: se sube en el próximo sync */ }
+      await refrescarPendientesProd();
+    }
   };
 
   // REQ-PROV
@@ -672,6 +691,8 @@ const Configuracion = () => {
             </button>
           </div>
           <ResultadoImport r={resultadoCSV} testId="resultado-productos" />
+          {/* REQ-PDF: precios desde la lista del proveedor en PDF */}
+          <ImportarPreciosPdf productos={productos} onAplicar={aplicarPreciosPdf} />
 
           {progresoImagenes && !progresoImagenes.done && (
             <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text3)' }}>
@@ -736,7 +757,12 @@ const Configuracion = () => {
       {tab !== 'tienda' && (
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{lista.length} {tab}</span>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>
+            {lista.length} {tab}
+            {tab === 'productos' && productos.some(p => !p.imagen_url) && (
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text3)' }} data-testid="contador-sin-foto"> · {productos.filter(p => !p.imagen_url).length} sin foto</span>
+            )}
+          </span>
           <button className="btn btn-primary btn-sm" onClick={openAdd}>+ Agregar</button>
         </div>
 
@@ -783,6 +809,10 @@ const Configuracion = () => {
               </div>
               <div className="list-item-sub">
                 {tab === 'productos' && `$${item.precio?.toLocaleString('es-AR')} · ${item.unidad || ''} ${item.codigo ? `· ${item.codigo}` : ''} · Stock: ${stockDe(stockMap, item.id)}`}
+                {/* REQ-FOT: los productos sin foto se marcan para completarlos */}
+                {tab === 'productos' && !item.imagen_url && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--text3)' }} data-testid="producto-sin-foto">📷 SIN FOTO</span>
+                )}
                 {tab === 'productos' && item.syncRechazo && (
                   <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--danger)' }} data-testid="producto-rechazado">
                     ⚠ RECHAZADO POR EL SERVIDOR
@@ -891,6 +921,7 @@ const Configuracion = () => {
           stockActual={editItem ? stockDe(stockMap, editItem.id) : 0}
           onGuardar={guardarProducto}
           onCancelar={cerrarForm}
+          subirFoto={subirImagenTienda}
         />
       )}
       {showForm && tab === 'proveedores' && (

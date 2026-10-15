@@ -75,7 +75,7 @@ describe('SEC SQL 009: validación servidor', () => {
   it('config: color hex estricto, https, whatsapp solo dígitos, topes', () => {
     const c = fn('admin_tienda_guardar');
     expect(c).toContain("!~ '^#[0-9a-f]{6}$'");
-    expect(c).toMatch(/!~\* '\^https:\/\/'/);
+    expect(c).toMatch(/!~\* '\^https:\/\/\[\^\[:space:\]/);
     expect(c).toContain("!~ '^[0-9]{0,15}$'");
     expect(c).toMatch(/jsonb_array_length\(v_b\) > 10/);
     expect(c).toMatch(/jsonb_array_length\(v_o\) > 200/);
@@ -83,11 +83,11 @@ describe('SEC SQL 009: validación servidor', () => {
   });
 
   it('las tablas repiten los checks (defensa en profundidad)', () => {
-    expect(code).toMatch(/logo_url[^\n]*~\* '\^https:\/\/'/);
-    expect(code).toMatch(/imagen_url[^\n]*~\* '\^https:\/\/'/);
+    expect(code).toMatch(/logo_url[^\n]*~\* '\^https:\/\/\[\^\[:space:\]/);
+    expect(code).toMatch(/imagen_url[^\n]*~\* '\^https:\/\/\[\^\[:space:\]/);
     expect(code).toMatch(/color[^\n]*check \(color ~ '\^#\[0-9a-f\]\{6\}\$'\)/);
     expect(code).toMatch(/destino_tipo in \('rubro', 'marca', 'producto', 'ofertas'\)/);
-    expect(code).toMatch(/precio is null or precio > 0/);
+    expect(code).toMatch(/precio is null or \(precio > 0 and precio <> 'NaN'::numeric\)/); // SEC-POR-3
     expect(code).toMatch(/check \(desde <= hasta\)/);
   });
 
