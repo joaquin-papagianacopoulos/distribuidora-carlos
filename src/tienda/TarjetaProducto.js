@@ -20,6 +20,7 @@ const TarjetaProducto = ({ prod, permitirSinStock = false, onAgregar, navegar, s
       <div className="t-card-body">
         {prod.marca ? <div className="t-marca">{prod.marca}</div> : null}
         <a className="t-nombre" href={href} onClick={(e) => { e.preventDefault(); navegar(href); }}>{prod.nombre}</a>
+        {prod.precioAnterior ? <s className="t-precio-anterior" data-testid="precio-anterior">{formatearPesos(prod.precioAnterior)}</s> : null}
         <div className="t-precio">{formatearPesos(prod.precio)} <small>por unidad</small></div>
         {bulto ? <div className="t-bulto">{bulto}</div> : null}
         <button type="button" className="t-btn t-btn-primario" disabled={!ok} onClick={() => onAgregar(prod)}>

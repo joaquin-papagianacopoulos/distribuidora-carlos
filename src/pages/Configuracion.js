@@ -9,6 +9,7 @@ import {
 } from '../db';
 import ClienteForm from '../components/ClienteForm';
 import LinksTienda from '../components/LinksTienda';
+import ConfigTienda from '../components/ConfigTienda';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
 import ComisionRubroGrid from '../components/ComisionRubroGrid';
@@ -33,7 +34,7 @@ import {
 import { isImageSearchConfigured } from '../services/imageSearch';
 import { normalize } from '../utils/fuzzy';
 import { detectarMarca } from '../utils/brands';
-const TABS = ['productos', 'clientes', 'proveedores', 'vendedores'];
+const TABS = ['productos', 'clientes', 'proveedores', 'vendedores', 'tienda'];
 
 
 // REQ-PLA (iteracion 2): la lectura del archivo (CSV/XLSX, limites, Worker,
@@ -732,6 +733,7 @@ const Configuracion = () => {
       )}
 
       {/* Lista */}
+      {tab !== 'tienda' && (
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{lista.length} {tab}</span>
@@ -814,6 +816,10 @@ const Configuracion = () => {
           </div>
         ))}
       </div>
+      )}
+
+      {/* REQ-POR (AC-POR-2..5): Configuración → Tienda */}
+      {tab === 'tienda' && <ConfigTienda productos={productos} stockDe={id => stockDe(stockMap, id)} online={!!online} />}
 
       {/* REQ-WEB (AC-WEB-7): links de tienda por vendedor */}
       {tab === 'vendedores' && <LinksTienda vendedores={filtrarActivos(vendedores)} online={!!online} />}

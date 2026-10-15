@@ -240,8 +240,9 @@ const porNombre = (a, b) => String(a.nombre || '').localeCompare(String(b.nombre
 
 export const ORDENES = Object.freeze(['relevancia', 'precio_asc', 'precio_desc', 'nombre']);
 
-export function filtrarCatalogo(cat, { q = '', rubros = [], marcas = [], orden = 'relevancia' } = {}) {
-  const lista = Array.isArray(cat) ? cat : [];
+export function filtrarCatalogo(cat, { q = '', rubros = [], marcas = [], orden = 'relevancia', ofertas = false } = {}) {
+  // REQ-POR (AC-POR-1): el banner "ofertas" lleva a ?ofertas=1.
+  const lista = (Array.isArray(cat) ? cat : []).filter(p => !ofertas || (p && p.enOferta));
   const rs = new Set(rubros);
   const ms = new Set(marcas);
   const base = lista.filter(p => p && coincide(p, q));
@@ -274,6 +275,7 @@ export function filtrosDesdeQuery(search) {
     marcas: sp.getAll('marca').filter(Boolean),
     orden: ORDENES.includes(orden) ? orden : 'relevancia',
     v: sp.get('v') || '',
+    ...(sp.get('ofertas') === '1' ? { ofertas: true } : {}),
   };
 }
 
@@ -283,6 +285,7 @@ export function filtrosAQuery(f = {}) {
   if (f.q) sp.set('q', f.q);
   for (const r of f.rubros || []) sp.append('rubro', r);
   for (const m of f.marcas || []) sp.append('marca', m);
+  if (f.ofertas) sp.set('ofertas', '1');
   if (f.orden && f.orden !== 'relevancia') sp.set('orden', f.orden);
   const s = sp.toString();
   return s ? `?${s}` : '';

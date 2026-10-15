@@ -7,7 +7,7 @@ import { getUsuarioSesion } from './sesion';
 import { esAdmin, validarPinIngresado } from '../domain/permisos';
 import { construirLinkTienda, parsearRespuestaToken } from '../domain/tiendaLinks';
 
-const adminCred = async (pin) => {
+export const adminCred = async (pin) => {
   const sesion = getUsuarioSesion();
   if (!sesion || !esAdmin(sesion.permiso)) return { ok: false, mensaje: 'Solo el admin gestiona los links.' };
   const v = validarPinIngresado(pin);

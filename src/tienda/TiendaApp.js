@@ -4,7 +4,8 @@
 // Todo acceso a Supabase pasa por tiendaApi.js (RPC públicas).
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { rutaTienda, esHostTienda, filtrosDesdeQuery, filtrosAQuery } from '../domain/tienda';
-import { cargarCatalogo, crearPedido } from './tiendaApi';
+import { armarPortada, hoyArgentina, normalizarConfigTienda, oscurecer } from '../domain/tiendaPortada';
+import { cargarCatalogo, cargarPortada, crearPedido } from './tiendaApi';
 import { useCarrito } from './useCarrito';
 import Catalogo from './Catalogo';
 import DetalleProducto from './DetalleProducto';
@@ -17,7 +18,16 @@ export const NOMBRE_TIENDA = 'Tienda';
 // El namespace SVG es un identificador, no una conexion: se arma aparte para no
 // disparar la regla "URL http:// sin TLS" del gate de seguridad.
 const SVG_NS = ['https', 'www.w3.org/2000/svg'].join('://').replace('https', 'http');
-const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="${SVG_NS}" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f766e"/><text x="32" y="44" font-size="34" text-anchor="middle" fill="#fff">T</text></svg>`);
+// El color llega ya normalizado (#rrggbb) por normalizarConfigTienda: no se interpola texto libre.
+const favicon = (color = '#0f766e') => 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="${SVG_NS}" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${color}"/><text x="32" y="44" font-size="34" text-anchor="middle" fill="#fff">T</text></svg>`);
+const FAVICON = favicon();
+
+// REQ-POR (AC-TIE-2/AC-POR-2): título y favicon de la configuración (logo https o ícono del color).
+export function aplicarMarcaTienda(cfg, doc = document) {
+  doc.title = cfg.nombre;
+  const icono = doc.querySelector('link[rel="icon"]');
+  if (icono) icono.setAttribute('href', cfg.logo || favicon(cfg.color));
+}
 
 // AC-TIE-2: título propio, sin manifest ni instalación de la PWA interna, sin service worker.
 export function prepararEntornoTienda(doc = document, win = window) {
@@ -40,6 +50,7 @@ const TiendaApp = () => {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [resultado, setResultado] = useState(null);
+  const [portadaRaw, setPortadaRaw] = useState(null);
   const carrito = useCarrito();
 
   useEffect(() => prepararEntornoTienda(), []);
@@ -59,6 +70,22 @@ const TiendaApp = () => {
     });
     return () => { vivo = false; };
   }, []);
+
+  // REQ-POR: si la portada no carga, la tienda sigue con los valores por defecto.
+  useEffect(() => {
+    let vivo = true;
+    Promise.resolve().then(() => cargarPortada())
+      .then(r => { if (vivo && r && r.ok) setPortadaRaw(r); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+
+  const marca = useMemo(() => normalizarConfigTienda(portadaRaw ? portadaRaw.config : null), [portadaRaw]);
+  useEffect(() => { if (portadaRaw) aplicarMarcaTienda(marca); }, [portadaRaw, marca]);
+  const portada = useMemo(
+    () => (portadaRaw ? armarPortada(productos, portadaRaw, hoyArgentina()) : null),
+    [portadaRaw, productos],
+  );
 
   const host = esHostTienda(window.location.hostname, process.env.REACT_APP_TIENDA_HOSTS);
   const ruta = rutaTienda(ubic.pathname, ubic.search, { esHostTienda: host });
@@ -96,10 +123,11 @@ const TiendaApp = () => {
       .map(r => ({ productoId: String(r.productoId), unidades: r.unidades, modo: 'unidad', precioVisto: r.precio })));
   };
 
-  const comunes = { navegar, search, cantidadCarrito: carrito.cantidadTotal, nombreTienda: NOMBRE_TIENDA };
+  const comunes = { navegar, search, cantidadCarrito: carrito.cantidadTotal, nombreTienda: portadaRaw ? marca.nombre : NOMBRE_TIENDA };
+  const estilo = portadaRaw ? { '--t-color': marca.color, '--t-color-osc': oscurecer(marca.color) } : undefined;
 
   return (
-    <div className="tienda-root">
+    <div className="tienda-root" style={estilo}>
       {ruta.vista === 'producto' ? (
         <DetalleProducto key={`${ruta.id}-${catalogoById.has(String(ruta.id))}`} prod={catalogoById.get(String(ruta.id))} productos={productos} config={config} onAgregar={carrito.agregar} {...comunes} />
       ) : ruta.vista === 'carrito' ? (
@@ -111,7 +139,7 @@ const TiendaApp = () => {
         <Confirmacion resultado={resultado} {...comunes} />
       ) : (
         <Catalogo productos={productos} config={config} filtros={{ ...filtros, v: token }} onFiltros={onFiltros}
-          onAgregar={carrito.agregar} cargando={cargando} error={error} {...comunes} />
+          onAgregar={carrito.agregar} cargando={cargando} error={error} logo={portadaRaw ? marca.logo : null} portada={portada} {...comunes} />
       )}
     </div>
   );

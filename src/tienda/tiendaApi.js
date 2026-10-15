@@ -1,5 +1,5 @@
 // src/tienda/tiendaApi.js — único acceso a Supabase de la tienda pública (REQ-TIE).
-// Solo usa RPC públicas security definer (tienda_catalogo, tienda_crear_pedido);
+// Solo usa RPC públicas security definer (tienda_catalogo, tienda_portada, tienda_crear_pedido);
 // nunca .from(): el rol anon no lee ni escribe tablas directamente.
 import { supabase } from '../lib/supabase';
 
@@ -17,6 +17,18 @@ export async function cargarCatalogo() {
     return { ok: true, productos: Array.isArray(data.productos) ? data.productos : [], config: data.config || {} };
   } catch {
     return { ok: false, mensaje: 'No pudimos cargar el catálogo. Probá de nuevo.' };
+  }
+}
+
+// REQ-POR (AC-POR-5): portada y personalización. Si falla (o falta la migración 009),
+// la tienda sigue andando con los valores por defecto.
+export async function cargarPortada() {
+  try {
+    const { data, error } = await supabase.rpc('tienda_portada');
+    if (error || !data || data.ok === false) return { ok: false, config: {}, banners: [], ofertas: [] };
+    return { ok: true, config: data.config || {}, banners: Array.isArray(data.banners) ? data.banners : [], ofertas: Array.isArray(data.ofertas) ? data.ofertas : [] };
+  } catch {
+    return { ok: false, config: {}, banners: [], ofertas: [] };
   }
 }
 

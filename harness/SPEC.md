@@ -419,3 +419,29 @@ Migración `supabase/migrations/008_tienda.sql` (se aplica a mano; la 006 ya es 
 - ¿Los vendedores también ven/aceptan los pedidos web de su propio link, o solo el admin? (por ahora: solo admin).
 - ¿Se manda un aviso (WhatsApp/notificación) al admin cuando entra un pedido web? (por ahora: solo el contador en la pestaña).
 
+---
+
+## REQ-POR — Portada y personalización de la tienda
+
+> Pedido del dueño 2026-10-14 (`harness/pedidos/2026-10-14_REQ-TIE.md`). Corrida 3 de 3. Depende de REQ-TIE/REQ-WEB (ya implementados, migración 008). La app interna no usa Supabase Auth: "solo admin" se resuelve igual que en 008, con RPC `security definer` que verifican id + PIN del admin (`tienda_admin_ok`).
+
+- **AC-POR-1** Portada: banners rotativos arriba (imagen, título, subtítulo y destino: un rubro, una marca, un producto o la búsqueda de ofertas), fila de **Ofertas**, filas de **Destacados** por rubro y acceso a todos los rubros.
+- **AC-POR-2** Configuración → Tienda (solo admin): nombre de la tienda, logo, color principal (con control de contraste legible), texto de bienvenida, datos de contacto/WhatsApp en el pie, permitir o no pedir sin stock, límite de pedidos por hora, banners (alta/baja/orden/vigencia) y filas de destacados.
+- **AC-POR-3** Ofertas: el admin elige productos, un **precio de oferta por unidad** opcional y vigencia desde/hasta. Mientras esté vigente, la tienda muestra el precio anterior tachado y el de oferta, y **el servidor cobra el de oferta** (AC-TIE-13). Fuera de vigencia desaparece sola.
+- **AC-POR-4** Imágenes de logo y banners en un bucket de Supabase Storage `tienda`: lectura pública, escritura solo admin, solo jpg/png/webp y máx. 2 MB (validado en el navegador y en las políticas del bucket).
+- **AC-POR-5** Vista previa de la tienda desde Configuración antes de publicar los cambios. La configuración se guarda en Supabase (tabla `tienda_config`, escritura solo admin, lectura pública vía RPC `tienda_portada`).
+
+### Supabase (REQ-POR)
+
+Migración `supabase/migrations/009_tienda_portada.sql` (se aplica a mano, después de la 008; idempotente y no destructiva):
+- columnas nuevas de `tienda_config` (nombre, logo, color, bienvenida, contacto, WhatsApp, destacados); tablas `tienda_banners`, `tienda_ofertas` (la 008 ya cobra la oferta vigente vía `tienda_precio_vigente`) y `tienda_subidas` (permisos de subida de un solo nombre, con vencimiento);
+- RPC pública `tienda_portada` (solo datos de vitrina); RPC admin `admin_tienda_leer`, `admin_tienda_guardar` (valida en el servidor) y `admin_tienda_subida` (habilita subir UNA imagen a un nombre aleatorio por 10 minutos); `tienda_catalogo` suma `precioAnterior`/`enOferta`;
+- bucket `tienda` público con `file_size_limit` 2 MB y `allowed_mime_types` jpg/png/webp; `anon` solo puede insertar en un nombre habilitado por `admin_tienda_subida`, sin update ni delete;
+- RLS: `anon` sin acceso directo a ninguna tabla nueva.
+
+### Tests y revisión (OBLIGATORIO)
+1. **Trazabilidad:** cada `AC-POR-*` tiene al menos un test que lo nombra.
+2. **Dominio (`src/domain/tiendaPortada.js`):** contraste legible, vigencia de banners y ofertas (incluido el borde del día), destinos de banner, armado de la portada, validación de config, ofertas e imágenes (tipo y tamaño).
+3. **UI:** portada con banners/ofertas/destacados/rubros y precio tachado; Configuración → Tienda con error de contraste y vista previa.
+4. **Seguridad:** chequeo estático de la migración 009 (RPC `security definer` con `search_path` fijo, admin con PIN, sin grants directos a `anon`, políticas del bucket). Recomendado `/auditar-seguridad`.
+5. **Gates** en verde. Pasos manuales: correr la 009 en el SQL Editor.

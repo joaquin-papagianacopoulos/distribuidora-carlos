@@ -4,10 +4,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { filtrarCatalogo, DEBOUNCE_BUSQUEDA_MS } from '../domain/tienda';
 import TarjetaProducto from './TarjetaProducto';
 import Filtros from './Filtros';
+import Portada, { Pie } from './Portada';
 
-export const Encabezado = ({ texto, onTexto, cantidadCarrito, navegar, search, nombreTienda }) => (
+export const Encabezado = ({ texto, onTexto, cantidadCarrito, navegar, search, nombreTienda, logo }) => (
   <header className="t-header">
-    <a className="t-logo" href="/tienda" onClick={(e) => { e.preventDefault(); navegar(`/tienda${search}`); }}>{nombreTienda}</a>
+    <a className="t-logo" href="/tienda" onClick={(e) => { e.preventDefault(); navegar(`/tienda${search}`); }}>
+      {logo ? <img className="t-logo-img" src={logo} alt="" /> : null}{nombreTienda}
+    </a>
     {onTexto ? (
       <input
         className="t-buscador" type="search" placeholder="Buscar productos" aria-label="Buscar productos"
@@ -33,7 +36,7 @@ export const Encabezado = ({ texto, onTexto, cantidadCarrito, navegar, search, n
   </header>
 );
 
-const Catalogo = ({ productos, config, filtros, onFiltros, onAgregar, navegar, cantidadCarrito, cargando, error, nombreTienda }) => {
+const Catalogo = ({ productos, config, filtros, onFiltros, onAgregar, navegar, cantidadCarrito, cargando, error, nombreTienda, logo, portada }) => {
   const [texto, setTexto] = useState(filtros.q);
   const [panel, setPanel] = useState(false);
   const search = filtros.v ? `?v=${encodeURIComponent(filtros.v)}` : '';
@@ -46,11 +49,19 @@ const Catalogo = ({ productos, config, filtros, onFiltros, onAgregar, navegar, c
   }, [texto, filtros, onFiltros]);
 
   const { items, contadores } = useMemo(() => filtrarCatalogo(productos, filtros), [productos, filtros]);
+  // REQ-POR (AC-POR-1): la portada se muestra en el inicio, sin búsqueda ni filtros activos.
+  const enInicio = !filtros.q && !texto && filtros.rubros.length === 0 && filtros.marcas.length === 0 && !filtros.ofertas;
 
   return (
     <div className="t-pagina">
-      <Encabezado texto={texto} onTexto={setTexto} cantidadCarrito={cantidadCarrito} navegar={navegar} search={search} nombreTienda={nombreTienda} />
+      <Encabezado texto={texto} onTexto={setTexto} cantidadCarrito={cantidadCarrito} navegar={navegar} search={search} nombreTienda={nombreTienda} logo={logo} />
+      {enInicio && portada ? (
+        <Portada portada={portada} permitirSinStock={config.permitirSinStock} onAgregar={onAgregar} navegar={navegar} token={filtros.v} />
+      ) : null}
       <main className="t-main">
+        {filtros.ofertas ? (
+          <p className="t-chip-activo">Mostrando ofertas <button type="button" className="t-btn-link" onClick={() => onFiltros({ ...filtros, ofertas: false })}>Quitar</button></p>
+        ) : null}
         <Filtros filtros={filtros} contadores={contadores} abierto={panel} onToggle={() => setPanel(p => !p)} onCambio={onFiltros} cantidad={items.length} />
         <div className="t-resultados">
           <p className="t-contador-resultados" data-testid="contador-resultados">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
@@ -64,6 +75,7 @@ const Catalogo = ({ productos, config, filtros, onFiltros, onAgregar, navegar, c
           </div>
         </div>
       </main>
+      {portada ? <Pie config={portada.config} /> : null}
     </div>
   );
 };
