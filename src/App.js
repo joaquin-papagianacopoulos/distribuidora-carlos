@@ -17,6 +17,7 @@ import FacturasAEmitir from './pages/FacturasAEmitir';
 import PedidosWeb from './pages/PedidosWeb';
 import Proveedores from './pages/Proveedores';
 import Rendicion from './pages/Rendicion';
+import Panel from './pages/Panel';
 import { contarPorRevisar } from './domain/pedidosWeb';
 import { contarStockBajo } from './domain/stockBajo';
 import SelectorVendedor from './components/SelectorVendedor';
@@ -35,6 +36,7 @@ const TABS = [
   { id: 'faltantes', label: 'Faltantes', icon: '\u26A0\uFE0F' }, // ⚠️
   { id: 'deudas', label: 'Deudas', icon: '\u{1F4B0}' }, // 💰
   { id: 'rendicion', label: 'Rendición', icon: '↩️' }, // ↩️ solo admin (REQ-REN)
+  { id: 'panel', label: 'Panel', icon: '\u{1F4C9}' }, // 📉 solo admin (REQ-PAN)
   { id: 'ordenentrega', label: 'Orden', icon: '\u{1F5FA}️' }, // 🗺️
   { id: 'resumen', label: 'Resumen', icon: '\u{1F4CA}' }, // 📊
   { id: 'comisiones', label: 'Comisiones', icon: '\u{1F4B5}' }, // solo admin (REQ-COM)
@@ -236,6 +238,7 @@ const AppContent = () => {
         {tab === 'faltantes' && <Faltantes />}
         {tab === 'deudas' && <Deudas />}
         {tab === 'rendicion' && isAdmin && <Rendicion />}
+        {tab === 'panel' && isAdmin && <Panel />}
         {tab === 'ordenentrega' && <OrdenEntrega />}
         {tab === 'resumen' && <ResumenDia />}
         {tab === 'reportes' && <ReportesVentas />}

@@ -44,8 +44,8 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
 
   it('AC-REN-2 desde v10 crea SOLO rendiciones y cuentaClientes, keyPath id (sin autoIncrement) e índices', async () => {
     const r = await correr(V10);
-    expect(r.version).toBe(11);
-    expect(r.creados).toEqual([['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }]]);
+    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta.
+    expect(r.creados).toEqual([['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }], ['costosVenta', { keyPath: 'pedidoId' }]]);
     expect(r.indices).toEqual([
       ['rendiciones', 'pedidoId', 'pedidoId', { unique: false }],
       ['rendiciones', 'clienteId', 'clienteId', { unique: false }],
@@ -61,7 +61,7 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
     expect(r.borrados).toEqual([]);
     expect(r.clears).toEqual([]);
     expect(r.tocados).toEqual([]);
-    const r2 = await correr([...V10, 'rendiciones', 'cuentaClientes']);
+    const r2 = await correr([...V10, 'rendiciones', 'cuentaClientes', 'costosVenta']);
     expect(r2.creados).toEqual([]);
   });
 
@@ -70,9 +70,9 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
     const path = require('path');
     const src = readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
-    for (const s of ['rendiciones', 'cuentaClientes']) expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
+    for (const s of ['rendiciones', 'cuentaClientes', 'costosVenta']) expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 11;/);
+    expect(src).toMatch(/const DB_VERSION = 12;/);
   });
 });
 

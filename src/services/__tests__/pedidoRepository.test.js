@@ -184,3 +184,14 @@ describe('S-20 firma de movimientos', () => {
     expect(aplicarStockPedido).toHaveBeenCalledWith(expect.anything(), { usuario: 'Vendedor Juan' });
   });
 });
+
+describe('AC-PAN-1 (seguridad) costos nunca viajan en pedidos.items', () => {
+  it('AC-PAN-1 toRemoteRow no emite costoUnitario ni descuentos aunque el item local los tenga', async () => {
+    setOnline(true);
+    const conCosto = { ...PEDIDO, items: [{ productoId: 1, cantidad: 3, precio: 100, costoUnitario: 60, costoFinal: 70, descuento1: 5 }] };
+    await guardarPedidoOnlineFirst(conCosto);
+    const enviado = JSON.stringify(mockSb.calls[0].row);
+    expect(enviado).not.toMatch(/costoUnitario|costoFinal|descuento1/);
+    expect(mockSb.calls[0].row.items[0]).toEqual({ productoId: 1, cantidad: 3, precio: 100 });
+  });
+});

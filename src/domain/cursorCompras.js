@@ -6,6 +6,8 @@
 export const TABLAS_CURSOR = Object.freeze({ costos: 'ingreso_id', cuenta: 'id', pedidos: 'id' });
 // REQ-REN: mismo cursor para la bajada de rendiciones y saldo a favor (admin_rendiciones_bajar, 014).
 export const TABLAS_CURSOR_RENDICION = Object.freeze({ rendiciones: 'id', cuenta: 'id' });
+// REQ-PAN: cursor de la bajada de costos de venta (admin_costos_venta_bajar, 015).
+export const TABLAS_CURSOR_PANEL = Object.freeze({ costos: 'pedido_id' });
 
 const tsValido = (v) => typeof v === 'string' && v.length <= 64 && Number.isFinite(Date.parse(v));
 

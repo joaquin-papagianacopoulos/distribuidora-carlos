@@ -553,3 +553,13 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 - **AC-REN-4** Rendición del día: lista por fecha con totales (devuelto, NC, cambios, mermas) y **PDF**. Anular una rendición con motivo revierte sus movimientos de stock y su efecto en la cuenta del cliente (sin borrar nada).
 - **AC-REN-5** Comisiones (REQ-COM/COMR): una devolución o NC sobre un pedido ya cerrado aparece como **ajuste pendiente** (AC-COM-13); si no está cerrado, baja la comisión del período.
 - **AC-REN-6** Cálculos (cantidades disponibles para devolver, montos, saldo a favor, efecto en comisión) en funciones puras con tests.
+
+---
+
+## REQ-PAN — Panel de ganancia y rentabilidad
+- **AC-PAN-1** Al facturar, cada renglón guarda su **costo unitario** del momento (`costoUnitario`: costo final neto de descuentos del producto, misma fórmula que `calcularPrecioVenta`). Pedidos viejos sin ese dato usan el costo actual y se marcan "costo estimado".
+- **AC-PAN-2** Sección **"Panel"** (admin), período elegible (default mes en curso) con comparación contra el período anterior: ventas, costo, **ganancia bruta**, **margen %**, cantidad de pedidos y ticket promedio. Netos de devoluciones y NC (REQ-REN).
+- **AC-PAN-3** Rentabilidad por **producto**, **rubro** y **marca** (ventas, unidades, ganancia, margen %), ordenable; y por vendedor y cliente.
+- **AC-PAN-4** **Más vendidos** (top 10 por unidades y por importe), **en alza / en baja** (variación vs período anterior), **sin ventas** en el período y **tendencia** semanal/mensual (gráfico de barras simple en SVG, sin librerías nuevas).
+- **AC-PAN-5** Avisos: productos con margen negativo o sin costo cargado.
+- **AC-PAN-6** Todo el cálculo en `src/domain/panel.js` puro con tests (centavos, períodos vacíos, productos borrados, costo estimado). Rendimiento: con 20.000 renglones el cálculo tarda < 1 s (test).

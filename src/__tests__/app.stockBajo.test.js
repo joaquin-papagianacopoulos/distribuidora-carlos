@@ -22,6 +22,7 @@ jest.mock('../pages/Armado', () => ({ __esModule: true, default: () => 'PAGINA-A
 jest.mock('../pages/Comisiones', () => ({ __esModule: true, default: () => 'PAGINA-Comisiones' }));
 jest.mock('../pages/FacturasAEmitir', () => ({ __esModule: true, default: () => 'PAGINA-FacturasAEmitir' }));
 jest.mock('../pages/Rendicion', () => ({ __esModule: true, default: () => 'PAGINA-Rendicion' })); // REQ-REN (RUN 20261015-1630)
+jest.mock('../pages/Panel', () => ({ __esModule: true, default: () => 'PAGINA-Panel' })); // REQ-PAN (RUN 20261015-2019)
 jest.mock('../pages/PedidosWeb', () => ({ __esModule: true, default: () => 'PAGINA-PedidosWeb' }));
 jest.mock('../pages/Stock', () => ({ __esModule: true, default: ({ precarga }) => `STOCK:${precarga ? JSON.stringify(precarga) : 'sin-precarga'}` }));
 jest.mock('../pages/Proveedores', () => ({
@@ -110,5 +111,19 @@ describe('AC-REN-1 pestaña Rendición', () => {
     await render();
     expect(tab('Rendición')).toBeUndefined();
     expect(container.textContent).not.toContain('PAGINA-Rendicion');
+  });
+});
+
+describe('AC-PAN-2 la pestaña Panel es solo para admin', () => {
+  it('AC-PAN-2 el admin ve la pestaña y la página', async () => {
+    await render();
+    await click(tab('Panel'));
+    expect(container.querySelector('main').textContent).toBe('PAGINA-Panel');
+  });
+  it.each([[2], [3]])('AC-PAN-2 rol %s no ve la pestaña Panel', async (permiso) => {
+    mockApp.vendedorActual = { id: 9, nombre: 'X', permiso };
+    await render();
+    expect(tab('Panel')).toBeUndefined();
+    expect(container.textContent).not.toContain('PAGINA-Panel');
   });
 });

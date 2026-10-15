@@ -43,7 +43,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
 
   it('AC-INA-1 desde v9 crea SOLO los 4 stores nuevos, con keyPath id (UUID) e índices', async () => {
     const r = await correr(V9);
-    expect(r.version).toBe(11); // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([
       ['ingresosCostos', { keyPath: 'id' }],
       ['cuentaProveedores', { keyPath: 'id' }],
@@ -52,6 +52,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
       // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
       ['rendiciones', { keyPath: 'id' }],
       ['cuentaClientes', { keyPath: 'id' }],
+      ['costosVenta', { keyPath: 'pedidoId' }], // MOD (RUN 20261015-2019, REQ-PAN)
     ]);
     expect(r.creados.every(c => c[1].autoIncrement === undefined)).toBe(true);
     expect(r.indices).toEqual([
@@ -79,7 +80,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
   });
 
   it('AC-INA-5 es idempotente: si los stores ya existen no crea nada', async () => {
-    const r = await correr([...V9, 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes']);
+    const r = await correr([...V9, 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes', 'costosVenta']);
     expect(r.creados).toEqual([]);
     expect(r.borrados).toEqual([]);
   });
@@ -96,11 +97,11 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
     const path = require('path');
     const src = readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
-    for (const s of ['ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes']) {
+    for (const s of ['ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes', 'costosVenta']) {
       expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
     }
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 11;/);
+    expect(src).toMatch(/const DB_VERSION = 12;/);
   });
 });
 

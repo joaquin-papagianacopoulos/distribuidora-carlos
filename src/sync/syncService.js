@@ -11,6 +11,7 @@ import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
 
 import { pedidoEntregaToRemote, pedidoEntregaFromRemote, sinColumnasEntrega } from '../domain/comisiones';
 import { esColumnaInexistente, esEscrituraDenegada } from './tolerancia';
+import { itemsSinCostos } from '../domain/panel';
 import { gruposToRemote, gruposFromRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
 import { vendedorDesdeRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO, COLUMNAS_VENDEDOR_LEGACY } from '../domain/vendedores';
@@ -158,7 +159,7 @@ const pedidoToRemoteRow = (pedido) => {
     vendedor:       p.vendedor      ?? p.vendedorNombre ?? '',
     zona:           p.zona          ?? '',
     fecha:          normalizePedidoFecha(p.fecha) || null,
-    items:          p.items         ?? [],
+    items:          itemsSinCostos(p.items) ?? [],
     total:          p.total         ?? 0,
     estado:         p.estado        ?? 'pendiente',
     // Armado (preparacion del pedido): campo independiente de "estado", no lo pisa.

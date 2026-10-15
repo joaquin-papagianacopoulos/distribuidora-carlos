@@ -12,6 +12,7 @@ import { aplicarStockPedido } from './stockService';
 import { getNombreUsuarioSesion, getUsuarioSesion } from './sesion';
 import { marcarEntregado, pedidoEntregaToRemote, sinColumnasEntrega, validarCambioEntrega } from '../domain/comisiones';
 import { esColumnaInexistente } from '../sync/tolerancia';
+import { itemsSinCostos } from '../domain/panel';
 import { gruposToRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 
 const toRemoteRow = (pedido) => {
@@ -22,7 +23,7 @@ const toRemoteRow = (pedido) => {
     vendedor: p.vendedor ?? p.vendedorNombre ?? '',
     zona: p.zona ?? '',
     fecha: normalizePedidoFecha(p.fecha) || null,
-    items: p.items ?? [],
+    items: itemsSinCostos(p.items) ?? [],
     total: p.total ?? 0,
     estado: p.estado ?? 'pendiente',
     // Armado (preparacion del pedido): campo independiente de "estado", no lo pisa.

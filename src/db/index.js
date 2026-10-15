@@ -11,7 +11,8 @@ const DB_NAME = 'distribuidoraDB';
 // v10 — REQ-INA/REQ-CPR: ingresosCostos, cuentaProveedores, comprobantesPendientes y
 //       pedidosProveedor. Solo se AGREGAN stores; no se migra ni se borra nada.
 // v11 — REQ-REN: rendiciones y cuentaClientes (saldo a favor). Solo se AGREGAN stores.
-const DB_VERSION = 11;
+// v12 — REQ-PAN: costosVenta (cache de solo lectura de los costos capturados por el servidor).
+const DB_VERSION = 12;
 
 let db = null;
 
@@ -171,6 +172,12 @@ export const initDB = () => new Promise((resolve, reject) => {
         cc.createIndex('clienteId', 'clienteId', { unique: false });
         cc.createIndex('rendicionId', 'rendicionId', { unique: false });
       }
+    }
+
+    // v12 — REQ-PAN. Solo se AGREGA un store. costosVenta: cache de solo lectura (clave pedidoId) de
+    // los costos unitarios que captura el servidor al facturar; sin pendingSync, el cliente no escribe.
+    if (!d.objectStoreNames.contains('costosVenta')) {
+      d.createObjectStore('costosVenta', { keyPath: 'pedidoId' });
     }
 
     // v6 — S-COM-13 (login 100 % online). El PIN se verifica solo en el
@@ -922,6 +929,10 @@ export const clearPedidosProveedorPendingSync = (enviados) => clearPendingSiNoCa
 export const getRendiciones = () => getAllFrom('rendiciones');
 export const putRendicionesRaw = (rows) => putManyInto('rendiciones', rows);
 export const clearRendicionesPendingSync = (enviados) => clearPendingSiNoCambio('rendiciones', enviados);
+// ---- COSTOS DE VENTA (REQ-PAN) ----
+// Cache de solo lectura en el dispositivo admin: { pedidoId, costos, capturadoAt }. Sin pendingSync.
+export const getCostosVenta = () => getAllFrom('costosVenta');
+export const putCostosVentaBatch = (rows) => putManyInto('costosVenta', rows);
 export const getCuentaClientes = () => getAllFrom('cuentaClientes');
 export const putCuentaClientesRaw = (rows) => putManyInto('cuentaClientes', rows);
 export const clearCuentaClientesPendingSync = (ids) => clearPendingIn('cuentaClientes', ids);

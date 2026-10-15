@@ -124,7 +124,7 @@ describe('AC-SEC-4 S-COM-13 cliente del PASO 2 de la 002 (login 100 % online)', 
   // MOD (RUN 20261014-1449, AC-COMR-7): antes DB_VERSION = 6; ahora 7 (REQ-COMR
   // solo agrega el store comisionesRubro). El paso v5 -> v6 sigue igual (oldVersion < 6).
   it('AC-SEC-4 S-COM-13 AC-COMR-7 IndexedDB: el paso a v6 borra SOLO la propiedad pin (sin borrar registros ni stores); versión actual 8', () => {
-    expect(DB).toMatch(/const DB_VERSION = 11;/); // MOD (RUN 20261015-1630, REQ-REN): versión 11
+    expect(DB).toMatch(/const DB_VERSION = 12;/); // MOD (RUN 20261015-1630, REQ-REN): versión 12 (RUN 20261015-2019, REQ-PAN)
     expect(DB).toMatch(/\(e\.oldVersion \?\? 0\) < 6/);
     expect(DB).toMatch(/cursor\.update\(sinPinLocal\(cursor\.value\)\)/);
     expect(DB).not.toMatch(/deleteObjectStore|cursor\.delete\(/);

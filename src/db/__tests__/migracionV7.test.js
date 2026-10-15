@@ -54,10 +54,10 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
   it('AC-COMR-7 desde v6 crea SOLO comisionesRubro con keyPath id (UUID, sin autoIncrement) e índices vendedorId y clave', async () => {
     const r = await correr({ existentes: V6 });
     // MOD (RUN 20261014-2100, REQ-WEB): la versión pasó a 8; desde v6 también se crea pedidosWebAcciones.
-    expect(r.version).toBe(11); // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([['pedidosWebAcciones', { keyPath: 'id' }], ['comisionesRubro', { keyPath: 'id' }], ['cambiosPrecio', { keyPath: 'id' }],
       // MOD (RUN 20261015-1541, REQ-INA/REQ-CPR): v10 suma 4 stores.
-      ['ingresosCostos', { keyPath: 'id' }], ['cuentaProveedores', { keyPath: 'id' }], ['comprobantesPendientes', { keyPath: 'id' }], ['pedidosProveedor', { keyPath: 'id' }], ['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }]]);
+      ['ingresosCostos', { keyPath: 'id' }], ['cuentaProveedores', { keyPath: 'id' }], ['comprobantesPendientes', { keyPath: 'id' }], ['pedidosProveedor', { keyPath: 'id' }], ['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }], ['costosVenta', { keyPath: 'pedidoId' }]]);
     expect(r.creados[1][1].autoIncrement).toBeUndefined();
     expect(r.indices).toEqual([
       ['pedidosWebAcciones', 'pedidoRemoteId', 'pedidoRemoteId', { unique: false }],
@@ -90,7 +90,7 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
   });
 
   it('AC-COMR-7 es idempotente: si comisionesRubro ya existe no crea nada', async () => {
-    const r = await correr({ existentes: [...V6, 'comisionesRubro', 'pedidosWebAcciones', 'cambiosPrecio', 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes'] });
+    const r = await correr({ existentes: [...V6, 'comisionesRubro', 'pedidosWebAcciones', 'cambiosPrecio', 'ingresosCostos', 'cuentaProveedores', 'comprobantesPendientes', 'pedidosProveedor', 'rendiciones', 'cuentaClientes', 'costosVenta'] });
     expect(r.creados).toEqual([]);
     expect(r.borrados).toEqual([]);
   });
@@ -102,6 +102,6 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     expect(upgrade).toContain("if (!d.objectStoreNames.contains('comisionesRubro'))");
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 11;/);
+    expect(src).toMatch(/const DB_VERSION = 12;/);
   });
 });
