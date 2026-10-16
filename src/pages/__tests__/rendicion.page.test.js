@@ -27,7 +27,7 @@ import Rendicion from '../Rendicion';
 // eslint-disable-next-line import/first
 import { hoyISO } from '../../domain/validacion';
 
-const PED = { id: 7, remoteId: 70, clienteId: 5, clienteNombre: 'Kiosco Pepe', estado: 'facturado', fecha: '2026-10-14', total: 1000, items: [{ productoId: 1, nombre: 'Alfajor', cantidad: 10, precio: 100 }] };
+const PED = { id: 7, remoteId: 70, clienteId: 5, clienteNombre: 'Kiosco Pepe', estado: 'facturado', fecha: hoyISO(), total: 1000, items: [{ productoId: 1, nombre: 'Alfajor', cantidad: 10, precio: 100 }] };
 let container;
 let root;
 const render = async () => { await act(async () => { root.render(<Rendicion />); }); await act(async () => {}); };
@@ -137,5 +137,28 @@ describe('AC-REN-4 rendición del día', () => {
     await click(boton('Anular'));
     expect(mockLlamadas.anular).toHaveLength(1);
     prompt.mockRestore();
+  });
+});
+
+describe('AC-REN-1 búsqueda de pedidos por fecha (por defecto, hoy)', () => {
+  const VIEJO = { ...PED, id: 9, remoteId: 90, clienteNombre: 'Almacén Viejo', fecha: '2026-01-02' };
+
+  it('AC-REN-1 arranca en hoy y muestra solo los facturados de ese día', async () => {
+    setApp({ pedidos: [PED, VIEJO] });
+    await render();
+    expect(container.querySelector('[aria-label="Fecha del pedido"]').value).toBe(hoyISO());
+    expect(container.querySelector('[data-testid="pedido-7"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="pedido-9"]')).toBeNull();
+  });
+
+  it('AC-REN-1 al cambiar la fecha aparecen los pedidos de ese día; sin fecha pide elegir una', async () => {
+    setApp({ pedidos: [PED, VIEJO] });
+    await render();
+    await tipear(container.querySelector('[aria-label="Fecha del pedido"]'), '2026-01-02');
+    expect(container.querySelector('[data-testid="pedido-9"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="pedido-7"]')).toBeNull();
+    await tipear(container.querySelector('[aria-label="Fecha del pedido"]'), '');
+    expect(container.querySelector('[data-testid="pedido-7"]')).toBeNull();
+    expect(container.querySelector('[data-testid="sin-pedidos-fecha"]').textContent).toMatch(/Elegí la fecha/);
   });
 });

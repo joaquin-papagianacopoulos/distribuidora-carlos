@@ -27,7 +27,8 @@ const Rendicion = () => {
   const [locales, setLocales] = useState({ rendiciones: [], cuenta: [] });
   const [pendientes, setPendientes] = useState(null);
   const [busqueda, setBusqueda] = useState('');
-  const [fechaPedido, setFechaPedido] = useState('');
+  // Los pedidos se buscan siempre dentro de un día (por defecto, hoy): nunca la lista entera.
+  const [fechaPedido, setFechaPedido] = useState(hoyISO());
   const [pedidoSel, setPedidoSel] = useState(null);
   const [form, setForm] = useState(formVacio());
   const [saleQ, setSaleQ] = useState('');
@@ -45,10 +46,11 @@ const Rendicion = () => {
 
   const candidatos = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
+    if (!fechaPedido) return [];
     return (pedidos || [])
       .filter(isPedidoVisible)
       .filter(p => String(p.estado || '').toLowerCase() === 'facturado')
-      .filter(p => !fechaPedido || normalizePedidoFecha(p.fecha) === fechaPedido)
+      .filter(p => normalizePedidoFecha(p.fecha) === fechaPedido)
       .filter(p => !q || String(p.clienteNombre || '').toLowerCase().includes(q) || String(p.remoteId ?? '') === q || String(p.id) === q)
       .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
       .slice(0, 20);
@@ -180,15 +182,19 @@ const Rendicion = () => {
       {!pedidoSel && (
         <div className="card" style={{ padding: '12px 14px', marginBottom: 14 }}>
           <div style={{ fontWeight: 800, marginBottom: 6 }}>Buscar pedido facturado</div>
-          <input className="input" aria-label="Buscar pedido" placeholder="Cliente o n.º de pedido" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-          <input className="input" aria-label="Fecha del pedido" type="date" value={fechaPedido} onChange={e => setFechaPedido(e.target.value)} style={{ marginTop: 6 }} />
+          <input className="input" aria-label="Fecha del pedido" type="date" value={fechaPedido} onChange={e => setFechaPedido(e.target.value)} />
+          <input className="input" aria-label="Buscar pedido" placeholder="Cliente o n.º de pedido (de ese día)" value={busqueda} onChange={e => setBusqueda(e.target.value)} style={{ marginTop: 6 }} />
           {candidatos.map(p => (
             <button key={p.id} className="btn btn-ghost btn-sm" data-testid={`pedido-${p.id}`} style={{ width: '100%', marginTop: 6, textAlign: 'left' }}
               onClick={() => { setPedidoSel(p); setForm(formVacio()); setErrores({}); }}>
               {p.clienteNombre} · Pedido {p.remoteId ?? `${p.id} (sin sincronizar)`} · {fechaCorta(p.fecha)} · ${Number(p.total || 0).toLocaleString('es-AR')}
             </button>
           ))}
-          {candidatos.length === 0 && <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 6 }}>No hay pedidos facturados que coincidan.</div>}
+          {candidatos.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 6 }} data-testid="sin-pedidos-fecha">
+              {fechaPedido ? `No hay pedidos facturados del ${fechaCorta(fechaPedido)} que coincidan.` : 'Elegí la fecha del pedido para ver los facturados de ese día.'}
+            </div>
+          )}
         </div>
       )}
 

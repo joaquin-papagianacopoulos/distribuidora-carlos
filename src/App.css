@@ -351,6 +351,13 @@ body {
   margin: 0 auto 20px;
 }
 .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+/* Variante centrada en pantallas medianas y grandes (en el celular sigue saliendo desde abajo). */
+.modal-centrada .modal > .card { margin-top: 0 !important; border: 0; box-shadow: none; padding: 0; background: transparent; }
+@media (min-width: 700px) {
+  .modal-centrada { align-items: center; justify-content: center; padding: 24px; }
+  .modal-centrada .modal { max-width: 560px; border-radius: 16px; max-height: 85vh; }
+  .modal-centrada .modal-handle { display: none; }
+}
 
 /* EMPTY STATE */
 .empty-state {

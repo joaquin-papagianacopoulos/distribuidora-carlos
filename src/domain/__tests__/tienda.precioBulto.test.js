@@ -33,3 +33,23 @@ describe('tienda: precio por bulto y mínimo', () => {
     expect(validarRenglon({ cantidad: 2, modo: 'unidad' }, alfajor, { permitirSinStock: true }).ok).toBe(true);
   });
 });
+
+describe('AC-PBU-4 precioDelBulto (precio grande al comprar por bulto)', () => {
+  // eslint-disable-next-line global-require
+  const { precioDelBulto } = require('../tienda');
+
+  it('AC-PBU-4 con precio llevando bulto: total del bulto, c/u aplicado y ahorro', () => {
+    expect(precioDelBulto(conPrecioBulto)).toEqual({ bultoX: 16, nombre: 'Display', unitario: 800, total: 12800, sinDescuento: 14400, off: 11 });
+  });
+
+  it('AC-PBU-4 sin precio por bulto: total = precio por unidad × bulto y sin % OFF', () => {
+    expect(precioDelBulto(dosCorazones)).toMatchObject({ total: 14400, unitario: 900, off: null });
+  });
+
+  it('AC-PBU-4 solo por unidad, sin bulto o sin precio válido: null', () => {
+    expect(precioDelBulto({ ...gaseosa, ventaPor: 'unidad' })).toBeNull();
+    expect(precioDelBulto({ ...conPrecioBulto, bultoX: 1 })).toBeNull();
+    expect(precioDelBulto({ ...conPrecioBulto, precio: 'x' })).toBeNull();
+    expect(precioDelBulto(null)).toBeNull();
+  });
+});

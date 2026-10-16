@@ -1,7 +1,7 @@
 // src/tienda/DetalleProducto.js — AC-TIE-8 y AC-TIE-9: detalle compartible con selector de cantidad.
 import React, { useState } from 'react';
 import {
-  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe, textoPrecioBulto, precioUnitarioTienda, porcentajeOff,
+  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe, textoPrecioBulto, precioUnitarioTienda, porcentajeOff, precioDelBulto,
 } from '../domain/tienda';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { normalizarBultoX } from '../domain/bultos';
@@ -31,6 +31,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
   const img = imagenSegura(prod.imagen);
   const bulto = textoBulto(prod);
   const precioBultoTxt = textoPrecioBulto(prod);
+  const precioBultoSel = modo === 'bulto' || vp === 'bulto' ? precioDelBulto(prod) : null;
   const relacionados = productos.filter(p => p.rubro && p.rubro === prod.rubro && String(p.id) !== String(prod.id)).slice(0, 4);
 
   const mas = () => setUnidades(u => u + paso);
@@ -48,13 +49,27 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
           <h1>{prod.nombre}</h1>
           {prod.codigo ? <div className="t-codigo">Código {prod.codigo}</div> : null}
           {prod.rubro ? <div className="t-codigo">Rubro {prod.rubro}</div> : null}
-          {prod.precioAnterior ? <s className="t-precio-anterior">{formatearPesos(prod.precioAnterior)}</s> : null}
-          <div className="t-precio t-precio-grande">
-            {formatearPesos(prod.precio)} <small>por unidad</small>
-            {porcentajeOff(prod) ? <span className="t-off">{porcentajeOff(prod)}% OFF</span> : null}
-          </div>
-          {bulto ? <div className="t-bulto">{bulto}</div> : null}
-          {precioBultoTxt ? <div className="t-bulto" data-testid="precio-bulto">{precioBultoTxt}</div> : null}
+          {precioBultoSel ? (
+            // Comprando por bulto: el precio grande es el del bulto entero.
+            <>
+              {precioBultoSel.off ? <s className="t-precio-anterior">{formatearPesos(precioBultoSel.sinDescuento)}</s> : null}
+              <div className="t-precio t-precio-grande" data-testid="precio-principal">
+                {formatearPesos(precioBultoSel.total)} <small>por {precioBultoSel.nombre} x{precioBultoSel.bultoX} · {formatearPesos(precioBultoSel.unitario)} c/u</small>
+                {precioBultoSel.off ? <span className="t-off">{precioBultoSel.off}% OFF</span> : null}
+              </div>
+              <div className="t-bulto">Por unidad: {formatearPesos(prod.precio)}</div>
+            </>
+          ) : (
+            <>
+              {prod.precioAnterior ? <s className="t-precio-anterior">{formatearPesos(prod.precioAnterior)}</s> : null}
+              <div className="t-precio t-precio-grande" data-testid="precio-principal">
+                {formatearPesos(prod.precio)} <small>por unidad</small>
+                {porcentajeOff(prod) ? <span className="t-off">{porcentajeOff(prod)}% OFF</span> : null}
+              </div>
+              {bulto ? <div className="t-bulto">{bulto}</div> : null}
+              {precioBultoTxt ? <div className="t-bulto" data-testid="precio-bulto">{precioBultoTxt}</div> : null}
+            </>
+          )}
           {min > 1 ? <div className="t-aviso">Compra mínima: {min} u.</div> : null}
 
           {vp === 'ambos' ? (

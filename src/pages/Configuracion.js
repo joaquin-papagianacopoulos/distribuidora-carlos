@@ -1,5 +1,5 @@
 // src/pages/Configuracion.js
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import {
   addProductoLocal, updateProducto, deleteProducto,
@@ -187,6 +187,13 @@ const Configuracion = () => {
   const [borrarProdPin, setBorrarProdPin] = useState('');
   // REQ-COMR (AC-COMR-6): grilla Rubro -> % del vendedor elegido (solo admin).
   const [rubroVendedor, setRubroVendedor] = useState(null);
+  // La ventana de % por rubro se cierra con Escape.
+  useEffect(() => {
+    if (!rubroVendedor) return undefined;
+    const alTeclear = (e) => { if (e.key === 'Escape') setRubroVendedor(null); };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [rubroVendedor]);
   const csvRef = useRef(null);
   // REQ-PLA
   const [resultadoClientes, setResultadoClientes] = useState(null);
@@ -889,14 +896,21 @@ const Configuracion = () => {
       {tab === 'vendedores' && <LinksTienda vendedores={filtrarActivos(vendedores)} online={!!online} />}
 
       {/* REQ-COMR (AC-COMR-6): % de comisión por rubro del vendedor */}
+      {/* Se abre como ventana encima de la lista: no hace falta scrollear hasta el final. */}
       {rubroVendedor && tab === 'vendedores' && (
-        <ComisionRubroGrid
-          key={rubroVendedor.id}
-          vendedor={rubroVendedor}
-          rubros={listarRubros(productos)}
-          online={!!online}
-          onCerrar={() => setRubroVendedor(null)}
-        />
+        <div className="modal-overlay modal-centrada" data-testid="modal-rubro-vendedor" role="presentation"
+          onClick={(e) => { if (e.target === e.currentTarget) setRubroVendedor(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label={`% de comisión por rubro de ${rubroVendedor.nombre}`}>
+            <div className="modal-handle" />
+            <ComisionRubroGrid
+              key={rubroVendedor.id}
+              vendedor={rubroVendedor}
+              rubros={listarRubros(productos)}
+              online={!!online}
+              onCerrar={() => setRubroVendedor(null)}
+            />
+          </div>
+        </div>
       )}
 
       {/* REQ-VEN: confirmar baja de vendedor con el PIN del admin */}

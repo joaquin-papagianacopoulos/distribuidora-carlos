@@ -81,6 +81,21 @@ describe('AC-COMR-6 Configuración -> Vendedores -> % por rubro', () => {
     expect($('[data-testid="comision-rubro-grid"]')).toBeNull();
   });
 
+  it('AC-COMR-6 la grilla se abre como ventana encima de la lista y se cierra con Escape o tocando el fondo', async () => {
+    setApp(ADMIN);
+    await render();
+    await click(tab('vendedores'));
+    await click($('[data-testid="pct-rubro-2"]'));
+    const modal = $('[data-testid="modal-rubro-vendedor"]');
+    expect(modal).not.toBeNull();
+    expect(modal.querySelector('[role="dialog"] [data-testid="comision-rubro-grid"]')).not.toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect($('[data-testid="modal-rubro-vendedor"]')).toBeNull();
+    await click($('[data-testid="pct-rubro-1"]'));
+    await click($('[data-testid="modal-rubro-vendedor"]'));
+    expect($('[data-testid="modal-rubro-vendedor"]')).toBeNull();
+  });
+
   it.each([[VEND], [ARM]])('AC-COMR-6 un vendedor o armador (%o) no ve Configuración ni la grilla', async (usuario) => {
     setApp(usuario);
     await render();

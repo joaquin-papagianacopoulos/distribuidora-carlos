@@ -207,6 +207,28 @@ export function textoPrecioBulto(prod) {
   return `Llevando el ${normalizarBultoNombre(prod.bultoNombre).toLowerCase()}: ${formatearPesos(deCentavos(pb))} c/u`;
 }
 
+// Precio de un bulto completo con la misma regla que cobra el servidor (AC-PBU-4):
+// total del bulto, precio por unidad aplicado y lo que costaría a precio por unidad.
+// null si el producto se vende solo por unidad o no tiene bulto/precio válido.
+export function precioDelBulto(prod) {
+  if (!prod || ventaPorEfectivo(prod) === 'unidad') return null;
+  const bx = normalizarBultoX(prod.bultoX);
+  const lista = aCentavos(prod.precio);
+  const unit = aCentavos(precioUnitarioTienda(prod, bx));
+  if (bx === null || lista === null || unit === null) return null;
+  const total = unit * bx;
+  const sinDescuento = lista * bx;
+  const off = total < sinDescuento ? Math.round((1 - total / sinDescuento) * 100) : null;
+  return {
+    bultoX: bx,
+    nombre: normalizarBultoNombre(prod.bultoNombre),
+    unitario: deCentavos(unit),
+    total: deCentavos(total),
+    sinDescuento: deCentavos(sinDescuento),
+    off: off && off >= 1 ? Math.min(off, 99) : null,
+  };
+}
+
 // "48 u. (3 Display)" o "20 u. (1 Display + 4 u.)"
 export function textoEquivalencia(unidades, prod) {
   const bx = normalizarBultoX(prod && prod.bultoX);
