@@ -320,3 +320,104 @@ a.t-linea-nombre:hover { color: var(--t-accion); }
   }
   .t-card:hover, .t-sugerencia:hover, .t-rubros a:hover { transform: none; }
 }
+
+/* ======================================================================
+   Celulares y tablets. Mobile-first quedó para la base; acá se compacta lo
+   que en pantallas chicas estorba: encabezado más bajo, menos cajas anidadas
+   y la acción principal (agregar / continuar) fija abajo, al alcance del pulgar.
+   ====================================================================== */
+.t-fila-scroll, .t-sugerencias-fila { scrollbar-width: none; }
+.t-fila-scroll::-webkit-scrollbar, .t-sugerencias-fila::-webkit-scrollbar { display: none; }
+.tienda-root img { height: auto; }
+.t-card-img img, .t-detalle-img img, .t-linea-foto img, .t-sugerencia-img img, .t-aviso-foto img, .t-banner img { height: 100%; }
+
+@media (max-width: 699px) {
+  /* Encabezado: logo + carrito arriba, buscador abajo; los rubros se ven en la portada y en Filtros. */
+  .t-header-fila { padding: 8px 10px 10px; gap: 8px; }
+  .t-logo { font-size: 17px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .t-menu-rubros { display: none; }
+  .t-buscador { padding: 9px 10px; }
+
+  .t-main { padding: 10px 8px 24px; }
+  .t-panel { padding: 12px; }
+  .tienda-root h1 { font-size: 21px; margin-bottom: 10px; }
+  .tienda-root h2 { font-size: 18px; }
+
+  /* Portada: la franja de la marca acompaña la altura del encabezado del celular. */
+  .t-portada { background-size: 100% 120px; background-image: linear-gradient(var(--t-color), var(--t-color)); }
+  .t-banner { aspect-ratio: 16 / 9; }
+  .t-banner-texto { padding: 10px 12px 20px; }
+  .t-fila { padding: 12px 0 12px 12px; }
+  .t-fila-cab { padding-right: 12px; }
+  .t-fila-scroll { grid-auto-columns: minmax(140px, 44%); gap: 8px; }
+
+  /* Catálogo: barra de filtros a lo ancho, tarjetas más compactas. */
+  .t-filtros-toggle { width: 100%; background: var(--t-panel); color: var(--t-accion) !important; box-shadow: var(--t-sombra); text-align: left; }
+  .t-grilla { gap: 8px; }
+  .t-card-img { padding: 8px; }
+  .t-card-body { padding: 10px; }
+  .t-precio { font-size: 21px; }
+  .t-precio-grande { font-size: 30px; }
+  .t-card .t-btn { padding: 9px 10px; font-size: 14px; }
+  .t-card:hover { transform: none; }
+
+  /* Ficha: foto contenida y barra fija con subtotal y "Agregar al carrito". */
+  .t-detalle { gap: 10px; }
+  .t-detalle-img { aspect-ratio: auto; height: min(46vh, 340px); padding: 12px; }
+  .t-detalle-accion {
+    position: sticky; bottom: 0; z-index: 5; margin: 12px -12px -12px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 12px; background: var(--t-panel);
+    border-top: 1px solid var(--t-borde); box-shadow: 0 -6px 16px rgba(0, 0, 0, .08); border-radius: 0 0 var(--t-radio) var(--t-radio);
+  }
+  .t-detalle-accion .t-subtotal { margin: 0; font-size: 14px; flex: 0 0 auto; max-width: 42%; }
+  .t-detalle-accion .t-btn { flex: 1; }
+  .tienda-root:has(.t-detalle-accion) .t-aviso-agregado { bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+  /* Carrito: renglones más justos y el resumen como barra fija abajo. */
+  .t-linea { grid-template-columns: 60px 1fr; gap: 10px; }
+  .t-linea-foto { width: 60px; height: 60px; padding: 6px; }
+  .t-linea-montos .t-subtotal { font-size: 18px; }
+  .t-resumen {
+    position: sticky; bottom: 0; z-index: 5; margin: 0 -8px; border-radius: 0;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px;
+    box-shadow: 0 -6px 16px rgba(0, 0, 0, .1);
+  }
+  .t-resumen h2 { display: none; }
+  .t-resumen-fila { grid-column: 1; margin: 0; font-size: 13px; }
+  .t-resumen .t-total { grid-column: 1; margin: 0; font-size: 18px; }
+  .t-resumen .t-btn { grid-column: 2; grid-row: 1 / span 3; width: auto; padding: 12px 22px; }
+  .t-resumen .t-error { grid-column: 1 / -1; }
+  .t-sugerencias-fila { grid-auto-columns: minmax(136px, 42%); gap: 8px; }
+
+  /* Checkout: el total arriba bien visible y el botón a lo ancho. */
+  .t-checkout .t-total { flex-wrap: wrap; gap: 4px 10px; justify-content: flex-start; }
+  .t-checkout form .t-btn { width: 100%; padding: 13px; }
+  .t-checkout form { padding: 14px 12px; }
+
+  .t-aviso-agregado { left: 8px; right: 8px; bottom: calc(10px + env(safe-area-inset-bottom)); }
+}
+
+/* Celulares muy chicos (iPhone SE, Android de 320 px). */
+@media (max-width: 359px) {
+  .t-logo { font-size: 15px; }
+  .t-grilla { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .t-card-body { padding: 8px; }
+  .t-precio { font-size: 18px; }
+  .t-off { font-size: 12px; }
+  .t-nombre { font-size: 13px; }
+  .t-pildora > span { min-width: 64px; }
+  .t-resumen .t-btn { padding: 12px 14px; }
+}
+
+/* Tablets (iPad vertical): 3 columnas y filtros desplegables. */
+@media (min-width: 700px) and (max-width: 899px) {
+  .t-main { padding: 14px 16px 28px; }
+  .t-filtros-toggle { background: var(--t-panel); box-shadow: var(--t-sombra); }
+}
+
+/* Pantallas grandes: el contenido no se estira de más y la grilla respira. */
+@media (min-width: 1600px) {
+  .t-header-fila, .t-menu-rubros, .t-main, .t-banners { max-width: 1400px; }
+  .t-grilla { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}

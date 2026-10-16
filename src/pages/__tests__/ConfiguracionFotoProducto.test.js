@@ -108,4 +108,19 @@ describe('editar producto con foto', () => {
     expect(subirProductosConPin).not.toHaveBeenCalled();
     expect(tid('productos-msg').textContent).toMatch(/Subir productos/);
   });
+
+  it('AC-MIN-1 AC-FOT-1 cambiar solo el mínimo con el PIN (junto a Guardar) lo sube y la tienda lo ve', async () => {
+    await render();
+    await click(lapiz());
+    // El PIN está fuera del bloque de foto, al lado de Guardar.
+    expect(tid('pin-producto').contains(tid('foto-pin'))).toBe(true);
+    expect(tid('foto-producto').contains(tid('foto-pin'))).toBe(false);
+    await setValue(container.querySelector('#campo-minimoVenta'), '6');
+    await setValue(tid('foto-pin'), '1234');
+    await click(guardar());
+    await flush();
+    expect(updateProducto.mock.calls[0][0]).toMatchObject({ id: 1, minimoVenta: 6, extrasDirty: true });
+    expect(subirProductosConPin).toHaveBeenCalledWith('1234');
+    expect(tid('productos-msg').textContent).toMatch(/ya se ve en la tienda/);
+  });
 });

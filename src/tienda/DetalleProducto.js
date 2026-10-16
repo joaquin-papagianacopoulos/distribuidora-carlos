@@ -70,10 +70,13 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
             <span data-testid="cantidad-detalle">{textoEquivalencia(unidades, prod)}</span>
             <button type="button" aria-label="Más" onClick={mas}>+</button>
           </div>
-          <div className="t-subtotal">Subtotal {formatearPesos(Math.round(precioUnitarioTienda(prod, unidades) * 100) * unidades / 100)}</div>
-          <button type="button" className="t-btn t-btn-primario t-btn-ancho" disabled={!ok} onClick={(e) => onAgregar(prod, unidades, vp === 'bulto' ? 'bulto' : modo, e.currentTarget)}>
-            {ok ? 'Agregar al carrito' : 'Sin stock'}
-          </button>
+          {/* En el celular esta barra queda fija abajo de la pantalla (como en los marketplaces). */}
+          <div className="t-detalle-accion">
+            <div className="t-subtotal">Subtotal {formatearPesos(Math.round(precioUnitarioTienda(prod, unidades) * 100) * unidades / 100)}</div>
+            <button type="button" className="t-btn t-btn-primario t-btn-ancho" disabled={!ok} onClick={(e) => onAgregar(prod, unidades, vp === 'bulto' ? 'bulto' : modo, e.currentTarget)}>
+              {ok ? 'Agregar al carrito' : 'Sin stock'}
+            </button>
+          </div>
         </div>
         {relacionados.length ? (
           <section className="t-relacionados">

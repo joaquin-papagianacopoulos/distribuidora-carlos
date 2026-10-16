@@ -130,14 +130,12 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
               ? <img src={foto} alt="" style={{ width: 72, height: 72, objectFit: 'contain', borderRadius: 8, background: 'var(--bg3)' }} data-testid="foto-preview" />
               : <div style={{ width: 72, height: 72, borderRadius: 8, background: 'var(--bg3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--text3)' }}>Sin foto</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 180 }}>
-              <input className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin" aria-label="Tu PIN de admin"
-                value={fotoPin} onChange={e => setFotoPin(e.target.value)} data-testid="foto-pin" />
               <input type="file" accept="image/jpeg,image/png,image/webp" disabled={subiendoFoto} data-testid="foto-input"
                 onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) elegirFoto(f); }} />
               {foto && <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => { setFoto(''); setFotoMsg('Foto quitada. Guardá para confirmar.'); }}>Quitar foto</button>}
             </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Con tu PIN, al guardar el producto se publica en la tienda.'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Para subirla, poné tu PIN de admin abajo.'}</div>
         </div>
       )}
       {precioManual && (
@@ -145,6 +143,18 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
           onClick={() => { setPrecioManual(false); setValores(v => ({ ...v, precio: String(precioVenta1) })); }}>
           Usar precio calculado ({fmt(precioVenta1)})
         </button>
+      )}
+      {subirFoto && (
+        // Cualquier cambio (precio, mínimo, foto...) queda solo en este dispositivo hasta subirlo
+        // con el PIN (migración 007): con el PIN acá, Guardar lo sube a Supabase y la tienda lo ve.
+        <div className="input-group" data-testid="pin-producto">
+          <label className="input-label" htmlFor="pin-producto">Tu PIN de admin (para publicar el cambio)</label>
+          <input id="pin-producto" className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin" aria-label="Tu PIN de admin"
+            value={fotoPin} onChange={e => setFotoPin(e.target.value)} data-testid="foto-pin" />
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>
+            Con el PIN, al guardar el cambio se sube y se ve en la tienda y en los otros dispositivos. Sin PIN queda en este dispositivo hasta que toques "Subir productos".
+          </div>
+        </div>
       )}
       <div style={{ display: 'flex', gap: 10, marginBottom: 80 }}>
         <button className="btn btn-ghost" onClick={onCancelar} disabled={guardando}>Cancelar</button>
