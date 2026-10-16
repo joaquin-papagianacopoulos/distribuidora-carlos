@@ -133,7 +133,9 @@ const AppContent = () => {
             <span
               style={{ fontSize: 11, color: 'var(--danger)', cursor: 'pointer' }}
               title={error}
-              onClick={syncNow}
+              // En el celular no hay tooltip: al tocar se muestra el detalle y se reintenta.
+              onClick={() => { window.alert(`No se pudo sincronizar:\n\n${error}\n\nAl aceptar se reintenta.`); syncNow(); }}
+              data-testid="error-sync"
             >
               {'\u26A0\uFE0F'} Error sync
             </span>

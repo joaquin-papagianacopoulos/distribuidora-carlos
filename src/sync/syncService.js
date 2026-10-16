@@ -4,13 +4,16 @@ import { isPedidoOculto, makePedidoEliminado, normalizePedidoFecha } from '../ut
 import { fetchProductImage, isImageSearchConfigured, ImageSearchQuotaError } from '../services/imageSearch';
 import { detectarMarca } from '../utils/brands';
 import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
-import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote, COLUMNAS_PRODUCTO_PUBLICAS, columnasSinFaltante } from '../domain/productos';
+import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote, COLUMNAS_PRODUCTO_PUBLICAS, columnasSinFaltante, columnasSinLaMasNueva } from '../domain/productos';
 import { bajarCambiosPrecio } from '../services/cambiosPrecioService';
 import { normalizarBultoNombre } from '../domain/unidadVenta';
 import { pedidoWebFromRemote, accionWebToRpc } from '../domain/pedidosWeb';
 
 import { pedidoEntregaToRemote, pedidoEntregaFromRemote, sinColumnasEntrega } from '../domain/comisiones';
-import { esColumnaInexistente, esEscrituraDenegada } from './tolerancia';
+import { esColumnaInexistente, esEscrituraDenegada, esPermisoDenegado } from './tolerancia';
+
+// Aviso unico por sesion: columnas de productos sin grant (falta correr la 016).
+let avisoGrants016 = false;
 import { itemsSinCostos } from '../domain/panel';
 import { gruposToRemote, gruposFromRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
@@ -1075,6 +1078,17 @@ export const downloadMaestros = async () => {
       if (error) {
         const menos = Array.isArray(columnas) && esColumnaInexistente(error) ? columnasSinFaltante(columnas, error) : null;
         if (menos) { columnas = menos; continue; }
+        // 016: columna nueva sin grant (migracion corrida despues de la 013). Se baja sin ella
+        // (el campo se conserva del dispositivo) en vez de cortar todo el sync, y se avisa.
+        const sinNueva = Array.isArray(columnas) && esPermisoDenegado(error) ? columnasSinLaMasNueva(columnas) : null;
+        if (sinNueva) {
+          if (!avisoGrants016) {
+            avisoGrants016 = true;
+            console.warn(`Supabase: sin permiso de lectura en alguna columna de ${table}. Correr supabase/migrations/016_productos_grants_columnas.sql.`);
+          }
+          columnas = sinNueva;
+          continue;
+        }
         throw error;
       }
       out = out.concat(data || []);

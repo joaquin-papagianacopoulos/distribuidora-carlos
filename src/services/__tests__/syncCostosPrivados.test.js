@@ -25,7 +25,7 @@ jest.mock('../../services/imageSearch', () => ({
 }));
 
 // Supabase falso: registra las columnas pedidas y simula columnas inexistentes / costos privados.
-const mockSb = { selects: [], remoto: {}, faltan: [], rpcs: [], rpcResp: [] };
+const mockSb = { selects: [], remoto: {}, faltan: [], sinGrant: [], rpcs: [], rpcResp: [] };
 jest.mock('../../lib/supabase', () => ({
   supabase: {
     rpc: (fn, args) => {
@@ -42,7 +42,9 @@ jest.mock('../../lib/supabase', () => ({
           if (table === 'productos') {
             const lista = String(cols).split(',');
             const falta = mockSb.faltan.find(f => lista.includes(f));
-            if (cols === '*' || /costo_final|descuento1|ganancia|precio_venta2/.test(cols)) {
+            // 016: columna agregada despues de la 013, sin grant => 42501 sin decir cual.
+            const sinGrant = mockSb.sinGrant.some(f => lista.includes(f));
+            if (cols === '*' || sinGrant || /costo_final|descuento1|ganancia|precio_venta2/.test(cols)) {
               out = { data: null, error: { code: '42501', message: 'permission denied for table productos' } };
             } else if (falta) {
               out = { data: null, error: { code: '42703', message: `column productos.${falta} does not exist` } };
@@ -70,7 +72,7 @@ let warnSpy;
 let logSpy;
 beforeEach(() => {
   for (const k of Object.keys(db.__impl)) db[k].mockImplementation(db.__impl[k]);
-  Object.assign(mockSb, { selects: [], remoto: {}, faltan: [], rpcs: [], rpcResp: [] });
+  Object.assign(mockSb, { selects: [], remoto: {}, faltan: [], sinGrant: [], rpcs: [], rpcResp: [] });
   mockLocal.clientes = [];
   mockLocal.productos = [];
   warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -114,6 +116,27 @@ describe('S-012-01 pull de productos sin PIN', () => {
     expect(sel).toHaveLength(2);
     expect(sel[1].cols).not.toMatch(/stock_minimo/);
     expect(mockLocal.productos[0]).toMatchObject({ id: 3, nombre: 'Alfajor' });
+  });
+});
+
+describe('016 columnas sin grant (migracion corrida despues de la 013)', () => {
+  it('S-012-01 016 permiso denegado: reintenta sin las columnas nuevas y el sync no se corta', async () => {
+    mockSb.sinGrant = ['venta_por'];
+    mockLocal.productos = [{ id: 3, nombre: 'Viejo', precio: 800, ventaPor: 'bulto', visibleTienda: false, pendingSync: false }];
+    mockSb.remoto.productos = [{ id: 3, nombre: 'Alfajor', precio: 900, venta_por: 'unidad', visible_tienda: true }];
+    await downloadMaestros();
+    const sel = mockSb.selects.filter(s => s.table === 'productos');
+    const ultima = sel[sel.length - 1].cols;
+    expect(ultima).not.toMatch(/venta_por/);
+    expect(ultima).toMatch(/^id,nombre,codigo,precio,unidad,categoria,imagen_url/);
+    // Bajo lo que se pudo leer; lo que no se pudo leer se conserva del dispositivo.
+    expect(mockLocal.productos[0]).toMatchObject({ nombre: 'Alfajor', precio: 900, ventaPor: 'bulto' });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/016_productos_grants_columnas/));
+  });
+
+  it('S-012-01 016 sin permiso ni en las columnas base, el error sale (no se inventan datos)', async () => {
+    mockSb.sinGrant = ['id'];
+    await expect(downloadMaestros()).rejects.toMatchObject({ code: '42501' });
   });
 });
 

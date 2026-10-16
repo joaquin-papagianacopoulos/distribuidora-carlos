@@ -12,6 +12,10 @@ export const esFuncionInexistente = (error) =>
   String(error?.code) === 'PGRST202' || String(error?.code) === '42883' ||
   /could not find the function/i.test(String(error?.message || ''));
 
+// 016: lectura denegada (grant de tabla o de columna faltante). PostgREST: 42501 / HTTP 401-403.
+export const esPermisoDenegado = (error) =>
+  String(error?.code) === '42501' || /permission denied/i.test(String(error?.message || ''));
+
 // S-VTA-01: la escritura directa esta cerrada (grants revocados / RLS).
 export const esEscrituraDenegada = (error) =>
   String(error?.code) === '42501' ||

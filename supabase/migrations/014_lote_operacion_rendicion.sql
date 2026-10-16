@@ -1041,10 +1041,11 @@ begin
       v_dif := (v_parte->>'monto')::numeric - v_cerrado_v;
       v_env := null;
       select pa into v_env from jsonb_array_elements(r->'partes') pa where pa->>'vendedor_id' = v_parte->>'vendedor_id';
+      -- Entre paréntesis: PL/pgSQL corta la condición del IF en el primer THEN (el del CASE).
       if v_env is null
-         or case when jsonb_typeof(v_env->'monto') = 'number'
-                 then round((v_env->>'monto')::numeric, 2) <> v_dif
-                 else true end then
+         or (case when jsonb_typeof(v_env->'monto') = 'number'
+                  then round((v_env->>'monto')::numeric, 2) <> v_dif
+                  else true end) then
         v_invalidos := array_append(v_invalidos, v_pid);
       end if;
       v_suma := v_suma + v_dif;

@@ -1,6 +1,7 @@
 // S-012-01 (migracion 013): costos de productos privados. Dominio puro.
 import {
   COLUMNAS_PRODUCTO_PUBLICAS, COSTOS_PRODUCTO, columnasSinFaltante, conservarCostosDesconocidos,
+  columnasSinLaMasNueva, COLUMNAS_PRODUCTO_BASE,
   productoExtraToRemote, productoExtraFromRemote, aplicarCostosRemotos,
 } from '../productos';
 
@@ -21,6 +22,19 @@ describe('S-012-01 columnas publicas de productos', () => {
     expect(columnasSinFaltante(cols, { message: 'permission denied for table productos' })).toBeNull();
     expect(columnasSinFaltante(cols, { message: 'column productos.id does not exist' })).toBeNull();
     expect(columnasSinFaltante(cols, { message: 'column productos.otra does not exist' })).toBeNull();
+  });
+});
+
+describe('016 columnas sin grant', () => {
+  it('S-012-01 016 columnasSinLaMasNueva saca la columna mas nueva y nunca las base', () => {
+    expect(columnasSinLaMasNueva(['id', 'nombre', 'bulto_x', 'stock_minimo'])).toEqual(['id', 'nombre', 'bulto_x']);
+    expect(columnasSinLaMasNueva([...COLUMNAS_PRODUCTO_BASE])).toBeNull();
+    expect(columnasSinLaMasNueva(['id', 'marca', 'nombre'])).toEqual(['id', 'nombre']);
+    expect(columnasSinLaMasNueva(null)).toBeNull();
+    // Aplicada en loop sobre la lista publica, termina en las base.
+    let cols = [...COLUMNAS_PRODUCTO_PUBLICAS];
+    for (let n = 0; n < 50; n++) { const s = columnasSinLaMasNueva(cols); if (!s) break; cols = s; }
+    expect(cols).toEqual([...COLUMNAS_PRODUCTO_BASE]);
   });
 });
 

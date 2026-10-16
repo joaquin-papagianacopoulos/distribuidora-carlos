@@ -159,6 +159,22 @@ export const COLUMNAS_PRODUCTO_PUBLICAS = Object.freeze([
   'precio_bulto', 'stock_minimo',
 ]);
 
+// Columnas de la 001 (base): sin estas no se puede bajar la lista de productos.
+export const COLUMNAS_PRODUCTO_BASE = Object.freeze(['id', 'nombre', 'codigo', 'precio', 'unidad', 'categoria', 'imagen_url']);
+
+/**
+ * Migracion 016: si una columna agregada DESPUES de la 013 quedo sin grant, PostgREST responde
+ * 42501 "permission denied for table productos" (no dice cual). Se descarta la columna mas nueva
+ * (la lista va de vieja a nueva) para reintentar; nunca las base. Sin nada para sacar, null.
+ */
+export const columnasSinLaMasNueva = (columnas = []) => {
+  const lista = Array.isArray(columnas) ? columnas : [];
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (!COLUMNAS_PRODUCTO_BASE.includes(lista[i])) return lista.filter((_, k) => k !== i);
+  }
+  return null;
+};
+
 /**
  * S-012-01: si el error de PostgREST nombra una columna inexistente de la lista, devuelve la
  * lista sin esa columna (para reintentar). Si no se puede identificar, null.

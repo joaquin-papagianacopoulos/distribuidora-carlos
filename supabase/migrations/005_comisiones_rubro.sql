@@ -200,10 +200,11 @@ begin
     if coalesce(jsonb_typeof(f->'pct'), 'null') not in ('number', 'null')
        or length(coalesce(v_vend, '')) not between 1 and 64
        or v_clave is null
-       or case when jsonb_typeof(f->'pct') = 'number'
-               then (f->>'pct')::numeric < 0 or (f->>'pct')::numeric > 100
-                    or (f->>'pct')::numeric <> round((f->>'pct')::numeric, 2)
-               else false end then
+       -- Entre paréntesis: PL/pgSQL corta la condición del IF en el primer THEN (el del CASE).
+       or (case when jsonb_typeof(f->'pct') = 'number'
+                then (f->>'pct')::numeric < 0 or (f->>'pct')::numeric > 100
+                     or (f->>'pct')::numeric <> round((f->>'pct')::numeric, 2)
+                else false end) then
       v_rechazadas := v_rechazadas || jsonb_build_array(jsonb_build_object('id', v_id, 'motivo', 'fila_invalida'));
       continue;
     end if;
@@ -757,10 +758,11 @@ begin
       v_dif := (v_parte->>'monto')::numeric - v_cerrado_v;
       v_env := null;
       select pa into v_env from jsonb_array_elements(r->'partes') pa where pa->>'vendedor_id' = v_parte->>'vendedor_id';
+      -- Entre paréntesis: PL/pgSQL corta la condición del IF en el primer THEN (el del CASE).
       if v_env is null
-         or case when jsonb_typeof(v_env->'monto') = 'number'
-                 then round((v_env->>'monto')::numeric, 2) <> v_dif
-                 else true end then
+         or (case when jsonb_typeof(v_env->'monto') = 'number'
+                  then round((v_env->>'monto')::numeric, 2) <> v_dif
+                  else true end) then
         v_invalidos := array_append(v_invalidos, v_pid);
       end if;
       v_suma := v_suma + v_dif;
