@@ -33,7 +33,7 @@ const idRemotoAdmin = async () => {
 
 export const cargarAcciones = () => getPedidosWebAcciones();
 
-// Encola aceptar/rechazar. `datos` para aceptar: { clienteId, clienteNombre, zona, vendedor, items, total };
+// Encola aceptar/rechazar. `datos` para aceptar: { clienteId, clienteNombre, zona, vendedor, items, total, fecha? };
 // para rechazar: { motivo }. Un pedido solo admite una acción sin subir.
 export const encolarAccion = async (pedido, tipo, datos = {}) => {
   const sesion = getUsuarioSesion();
@@ -57,6 +57,8 @@ export const encolarAccion = async (pedido, tipo, datos = {}) => {
     vendedor: tipo === 'aceptar' ? datos.vendedor : '',
     items: tipo === 'aceptar' ? (datos.items || pedido.items || []) : [],
     total: tipo === 'aceptar' ? Number(datos.total ?? pedido.total ?? 0) : 0,
+    // AC-WEB-8: fecha del pedido elegida al aceptar (null = no se cambia).
+    fecha: tipo === 'aceptar' ? (datos.fecha || null) : null,
     motivo: tipo === 'rechazar' ? String(datos.motivo).trim() : '',
     por: sesion.nombre || '',
     at: Date.now(),

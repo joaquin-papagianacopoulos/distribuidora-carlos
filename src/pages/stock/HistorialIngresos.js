@@ -2,7 +2,7 @@
 // Historial filtrable por proveedor, fechas y Factura A/B, con totales A vs B, vista por producto y PDF.
 // Los ingresos viejos (sin costo ni A/B) se siguen viendo como "sin dato".
 import React, { useMemo, useState } from 'react';
-import { filtrarHistorial, totalesHistorial, ingresosPorProducto } from '../../domain/compras';
+import { filtrarHistorial, totalesHistorial, ingresosPorProducto, ETIQUETA_TIPO_COMPRA } from '../../domain/compras';
 import { formatearCentavos } from '../../domain/cuentaProveedores';
 import { buscarProductos } from '../../domain/stockBajo';
 import { generarIngresosFile } from '../../utils/pdfGen';
@@ -17,6 +17,7 @@ const resumen = (s) => {
   const partes = [];
   if (s.A.unidades) partes.push(`A: ${s.A.unidades} u. ${formatearCentavos(s.A.costoCentavos)}`);
   if (s.B.unidades) partes.push(`B: ${s.B.unidades} u. ${formatearCentavos(s.B.costoCentavos)}`);
+  if (s.N?.unidades) partes.push(`en negro: ${s.N.unidades} u. ${formatearCentavos(s.N.costoCentavos)}`);
   if (s.sinDato.unidades) partes.push(`sin dato: ${s.sinDato.unidades} u.`);
   return partes.join(' · ');
 };
@@ -51,9 +52,10 @@ const HistorialIngresos = ({ ingresos = [], costos = [], productos = [], proveed
           {proveedores.map(p => <option key={p.id} value={p.id}>{p.descripcion}</option>)}
         </select>
         <select className="input" aria-label="Filtrar ingresos por tipo de factura" value={tipo} onChange={e => setTipo(e.target.value)} style={{ flex: 1, minWidth: 110 }}>
-          <option value="todas">A y B</option>
+          <option value="todas">Todas</option>
           <option value="A">Solo Factura A</option>
           <option value="B">Solo Factura B</option>
+          <option value="N">Solo en negro</option>
           <option value="sinDato">Sin dato</option>
         </select>
         <input className="input" type="date" aria-label="Ingresos desde" value={desde} onChange={e => setDesde(e.target.value)} style={{ flex: 1, minWidth: 130 }} />
@@ -63,6 +65,7 @@ const HistorialIngresos = ({ ingresos = [], costos = [], productos = [], proveed
       <div data-testid="totales-historial" style={{ fontSize: 13, marginBottom: 10 }}>
         <div>Total Factura A: <strong>{totales.A.unidades}</strong> u. · {formatearCentavos(totales.A.costoCentavos)}</div>
         <div>Total Factura B: <strong>{totales.B.unidades}</strong> u. · {formatearCentavos(totales.B.costoCentavos)}</div>
+        {totales.N?.unidades > 0 && <div>Total en negro: <strong>{totales.N.unidades}</strong> u. · {formatearCentavos(totales.N.costoCentavos)}</div>}
         {totales.sinDato.unidades > 0 && <div>Sin dato: <strong>{totales.sinDato.unidades}</strong> u.</div>}
         <div style={{ fontWeight: 700 }}>Total: {totales.total.unidades} u. · {formatearCentavos(totales.total.costoCentavos)}</div>
         <div style={{ color: 'var(--text3)', fontSize: 12, marginTop: 4 }}>Los costos cargados en otros dispositivos se ven después de “Bajar de otros dispositivos” en Proveedores.</div>
@@ -113,7 +116,7 @@ const HistorialIngresos = ({ ingresos = [], costos = [], productos = [], proveed
             {porProducto.map(x => (
               <div key={x.ingresoId} className="list-item" data-testid="fila-ingreso-producto">
                 <div>
-                  <div className="list-item-name">{x.tipo ? `Factura ${x.tipo}` : 'Sin dato'} · +{x.unidades} u.</div>
+                  <div className="list-item-name">{x.tipo ? (ETIQUETA_TIPO_COMPRA[x.tipo] || `Factura ${x.tipo}`) : 'Sin dato'} · +{x.unidades} u.</div>
                   <div className="list-item-sub">{fechaCorta(x.fecha)} · {x.proveedorNombre} · Fact. {x.factura}</div>
                 </div>
                 <div style={{ fontSize: 13 }}>{x.costoUnitario !== null ? `$${x.costoUnitario.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}</div>

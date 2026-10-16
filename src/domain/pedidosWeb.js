@@ -3,7 +3,7 @@
 // NO entra a Armado/Facturación/Comisiones y NO mueve stock (AC-WEB-1).
 // Pedidos viejos (sin `origen`) son internos.
 import { clienteVacio } from './clientes';
-import { texto, soloDigitos, redondear2 } from './validacion';
+import { texto, soloDigitos, redondear2, esFechaISO, hoyISO } from './validacion';
 import { congelarBultosItems, validarMultiplosItems } from './unidadVenta';
 
 export const WEB_ESTADOS = Object.freeze(['por_revisar', 'aceptado', 'rechazado']);
@@ -76,7 +76,24 @@ export function vendedorAlAceptar(pedido, cliente, elegido) {
   return { vendedor: null, requiereElegir: true };
 }
 
-export function validarAccionWeb(tipo, datos = {}) {
+// REQ-WEB (AC-WEB-8): al aceptar se puede mover la fecha del pedido (p. ej. entregarlo otro día).
+// Mismo rango que valida el servidor (admin_resolver_pedido_web, migración 018).
+export const DIAS_ATRAS_FECHA_WEB = 60;
+export const DIAS_ADELANTE_FECHA_WEB = 90;
+const sumarDias = (iso, n) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return hoyISO(new Date(y, m - 1, d + n));
+};
+export function validarFechaWeb(fecha, now = new Date()) {
+  if (fecha === undefined || fecha === null || fecha === '') return { ok: true, fecha: null };
+  if (!esFechaISO(fecha)) return { ok: false, error: 'Fecha inválida' };
+  const hoy = hoyISO(now);
+  if (fecha < sumarDias(hoy, -DIAS_ATRAS_FECHA_WEB)) return { ok: false, error: `La fecha no puede ser de hace más de ${DIAS_ATRAS_FECHA_WEB} días` };
+  if (fecha > sumarDias(hoy, DIAS_ADELANTE_FECHA_WEB)) return { ok: false, error: `La fecha no puede ser a más de ${DIAS_ADELANTE_FECHA_WEB} días` };
+  return { ok: true, fecha };
+}
+
+export function validarAccionWeb(tipo, datos = {}, { now = new Date() } = {}) {
   const errores = {};
   if (tipo === 'rechazar') {
     const m = texto(datos.motivo, 1000);
@@ -85,6 +102,8 @@ export function validarAccionWeb(tipo, datos = {}) {
   } else if (tipo === 'aceptar') {
     if (datos.clienteId === undefined || datos.clienteId === null || datos.clienteId === '') errores.clienteId = 'Vinculá o creá un cliente';
     if (!texto(datos.vendedor, 80)) errores.vendedor = 'Elegí el vendedor';
+    const f = validarFechaWeb(datos.fecha, now);
+    if (!f.ok) errores.fecha = f.error;
   } else {
     errores.tipo = 'Acción inválida';
   }
@@ -135,7 +154,9 @@ export function pedidoWebFromRemote(r = {}, local = null) {
 export function accionWebToRpc(a, cred) {
   const x = a || {};
   const datos = x.tipo === 'aceptar'
-    ? { cliente_id: x.clienteId ?? null, cliente_nombre: x.clienteNombre ?? '', zona: x.zona ?? '', vendedor: x.vendedor ?? '', items: x.items ?? [], total: x.total ?? 0 }
+    ? { cliente_id: x.clienteId ?? null, cliente_nombre: x.clienteNombre ?? '', zona: x.zona ?? '', vendedor: x.vendedor ?? '', items: x.items ?? [], total: x.total ?? 0,
+        // AC-WEB-8: solo viaja si se eligió (null = el servidor deja la fecha que tenía).
+        fecha: x.fecha || null }
     : { motivo: x.motivo ?? '' };
   return {
     p_admin_id: cred && cred.adminId,

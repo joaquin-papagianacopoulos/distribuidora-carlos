@@ -262,4 +262,35 @@ describe('bandeja Pedidos web', () => {
     expect(m.cont.textContent).toContain('Solo el admin');
     expect(m.cont.querySelector('[data-testid="pedido-web"]')).toBeNull();
   });
+
+  it('AC-WEB-8 la fecha arranca en la del pedido; si se cambia viaja al aceptar y se avisa que no es hoy', async () => {
+    await abrir();
+    await abrirDetalle();
+    const input = m.cont.querySelector('[data-testid="fecha-web"]');
+    expect(input.value).toBe('2026-10-14');
+    await click(porTexto(m.cont, 'button', 'Vincular'));
+    // Sin tocar la fecha no se manda (el servidor deja la que tenía).
+    await click(m.cont.querySelector('[data-testid="aceptar-web"]'));
+    await flush();
+    expect(encolarAccion.mock.calls[0][2].fecha).toBeNull();
+    const hoy = new Date();
+    const manana = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1);
+    const iso = `${manana.getFullYear()}-${String(manana.getMonth() + 1).padStart(2, '0')}-${String(manana.getDate()).padStart(2, '0')}`;
+    await escribir(m.cont.querySelector('[data-testid="fecha-web"]'), iso);
+    expect(m.cont.querySelector('[data-testid="aviso-fecha-web"]').textContent).toContain(iso.split('-').reverse().join('/'));
+    await click(m.cont.querySelector('[data-testid="aceptar-web"]'));
+    await flush();
+    expect(encolarAccion.mock.calls[1][2].fecha).toBe(iso);
+  });
+
+  it('AC-WEB-8 una fecha fuera de rango no se acepta (error claro, no se encola)', async () => {
+    await abrir();
+    await abrirDetalle();
+    await click(porTexto(m.cont, 'button', 'Vincular'));
+    await escribir(m.cont.querySelector('[data-testid="fecha-web"]'), '2020-01-01');
+    await click(m.cont.querySelector('[data-testid="aceptar-web"]'));
+    await flush();
+    expect(encolarAccion).not.toHaveBeenCalled();
+    expect(m.cont.querySelector('[data-testid="error-web"]').textContent).toMatch(/más de 60 días/);
+  });
 });

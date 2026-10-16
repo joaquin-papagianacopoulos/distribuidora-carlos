@@ -11,6 +11,8 @@ import {
 } from '../domain/pedidosWeb';
 import { filtrarActivos, vendedoresParaSelector } from '../domain/vendedores';
 import { esAdmin } from '../domain/permisos';
+import { hoyISO } from '../domain/validacion';
+import { normalizePedidoFecha } from '../utils/pedidos';
 import { encolarAccion, sincronizarAcciones, cargarAcciones, hayPinEnMemoria, cargarContactos } from '../services/pedidosWebService';
 
 const ETIQUETA_ESTADO = { por_revisar: 'Por revisar', pendiente_subir: 'Pendiente de subir', aceptado: 'Aceptado', rechazado: 'Rechazado' };
@@ -32,6 +34,9 @@ const Detalle = ({ pedido, acciones, clientes, vendedores, productos, onResuelto
   const [rechazando, setRechazando] = useState(false);
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
+  // AC-WEB-8: fecha con la que entra al flujo (Pedidos/Armado/Facturar filtran por fecha).
+  const fechaOriginal = normalizePedidoFecha(pedido.fecha) || hoyISO();
+  const [fecha, setFecha] = useState(fechaOriginal);
   const { recargar } = useApp();
 
   const sugeridos = useMemo(() => sugerirClientes(contacto, clientes), [contacto, clientes]);
@@ -60,7 +65,8 @@ const Detalle = ({ pedido, acciones, clientes, vendedores, productos, onResuelto
 
   const aceptar = async () => {
     setError('');
-    const datos = { clienteId, clienteNombre: cliente?.nombre || '', zona: cliente?.zona || '', vendedor: vend.vendedor, items: calculo.items, total: calculo.total };
+    const datos = { clienteId, clienteNombre: cliente?.nombre || '', zona: cliente?.zona || '', vendedor: vend.vendedor, items: calculo.items, total: calculo.total,
+      fecha: fecha !== fechaOriginal ? fecha : null };
     const v = validarAccionWeb('aceptar', datos);
     if (!v.ok) { setError(Object.values(v.errores)[0]); return; }
     if (calculo.items.length === 0) { setError('El pedido no puede quedar sin renglones: rechazalo si no se puede entregar.'); return; }
@@ -168,6 +174,16 @@ const Detalle = ({ pedido, acciones, clientes, vendedores, productos, onResuelto
               </select>
             </div>
           ) : (cliente ? <div style={{ fontSize: 13, marginTop: 6 }}>Vendedor: {vend.vendedor}</div> : null)}
+
+          <div style={{ marginTop: 10 }}>
+            <label className="input-label" htmlFor="fecha-web">Fecha del pedido (día de entrega)</label>
+            <input id="fecha-web" className="input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} data-testid="fecha-web" />
+            {fecha !== hoyISO() ? (
+              <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="aviso-fecha-web">
+                Al aceptarlo, en Pedidos, Armado y Facturar aparece en la fecha {fecha.split('-').reverse().join('/')} (no en la de hoy).
+              </div>
+            ) : null}
+          </div>
 
           {error ? <div role="alert" style={{ color: 'var(--danger)', marginTop: 8 }} data-testid="error-web">{error}</div> : null}
 

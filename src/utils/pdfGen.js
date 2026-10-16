@@ -587,6 +587,8 @@ const nuevoDocConTabla = async (opciones) => {
 const filaSubtotales = (s) => [
   ['Factura A', s.A.unidades, fmtCentPdf(s.A.costoCentavos)],
   ['Factura B', s.B.unidades, fmtCentPdf(s.B.costoCentavos)],
+  // REQ-NEG: compras sin factura.
+  ...(s.N?.unidades ? [['En negro', s.N.unidades, fmtCentPdf(s.N.costoCentavos)]] : []),
   ['Sin dato', s.sinDato.unidades, ''],
 ];
 
@@ -630,17 +632,18 @@ export const generarIngresosFile = async (filas, totales, { desde, hasta, tipo =
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   const periodo = !desde && !hasta ? 'todo el historial' : (!desde || desde === hasta ? fmtFechaPdf(desde || hasta) : `${fmtFechaPdf(desde)} a ${fmtFechaPdf(hasta)}`);
-  doc.text(`Período: ${periodo} · Tipo: ${tipo === 'todas' ? 'A y B' : tipo === 'sinDato' ? 'Sin dato' : `Factura ${tipo}`}${proveedor ? ` · Proveedor: ${proveedor}` : ''} · Ingresos: ${(filas || []).length}`, 14, 20);
+  doc.text(`Período: ${periodo} · Tipo: ${tipo === 'todas' ? 'Todas' : tipo === 'sinDato' ? 'Sin dato' : tipo === 'N' ? 'En negro' : `Factura ${tipo}`}${proveedor ? ` · Proveedor: ${proveedor}` : ''} · Ingresos: ${(filas || []).length}`, 14, 20);
   doc.autoTable({
     startY: 25,
-    head: [['Fecha', 'Proveedor', 'Factura', 'Fact. A', 'Fact. B', 'Un. A', 'Costo A', 'Un. B', 'Costo B', 'Sin dato', 'Total un.']],
+    head: [['Fecha', 'Proveedor', 'Factura', 'Fact. A', 'Fact. B', 'Un. A', 'Costo A', 'Un. B', 'Costo B', 'Un. negro', 'Costo negro', 'Sin dato', 'Total un.']],
     body: (filas || []).map(f => [
       fmtDiaPdf(f.fecha), f.proveedorNombre, f.factura, f.facturaA || '-', f.facturaB || '-',
       f.subtotales.A.unidades, fmtCentPdf(f.subtotales.A.costoCentavos),
       f.subtotales.B.unidades, fmtCentPdf(f.subtotales.B.costoCentavos),
+      f.subtotales.N?.unidades || 0, fmtCentPdf(f.subtotales.N?.costoCentavos || 0),
       f.subtotales.sinDato.unidades, f.subtotales.total.unidades,
     ]),
-    foot: totales ? [['TOTAL', '', '', '', '', totales.A.unidades, fmtCentPdf(totales.A.costoCentavos), totales.B.unidades, fmtCentPdf(totales.B.costoCentavos), totales.sinDato.unidades, totales.total.unidades]] : undefined,
+    foot: totales ? [['TOTAL', '', '', '', '', totales.A.unidades, fmtCentPdf(totales.A.costoCentavos), totales.B.unidades, fmtCentPdf(totales.B.costoCentavos), totales.N?.unidades || 0, fmtCentPdf(totales.N?.costoCentavos || 0), totales.sinDato.unidades, totales.total.unidades]] : undefined,
     theme: 'grid', styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [40, 40, 40] },
     footStyles: { fillColor: [235, 235, 235], textColor: 0, fontStyle: 'bold' },
   });

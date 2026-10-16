@@ -390,6 +390,7 @@ Una tienda tipo Mercado Libre (catálogo, buscador, filtros, carrito y checkout)
 - **AC-WEB-5** **Rechazar** con motivo obligatorio: queda registrado (quién, cuándo, motivo), no se borra y se ve en un historial filtrable (por revisar / aceptados / rechazados).
 - **AC-WEB-6** Los pedidos web llegan a la app interna por el sync existente (pull) sin romper el modelo offline-first; aceptar/rechazar offline queda `pendingSync` y se sube después. Dos admins aceptando el mismo pedido desde dos dispositivos no lo duplican ni lo vinculan a dos clientes (resolver en el servidor).
 - **AC-WEB-7** Links por vendedor: en Configuración → Vendedores, el admin genera, copia y **regenera** el link de tienda de cada vendedor (`token` aleatorio, no el nombre ni el id). Regenerar invalida el anterior. Un token inválido o de un vendedor borrado → la tienda funciona igual, como link general.
+- **AC-WEB-8** Al aceptar, el admin puede cambiar la **fecha del pedido** (día de entrega; por defecto la del pedido web, entre 60 días atrás y 90 adelante). El pedido entra a Pedidos/Armado/Facturar en esa fecha y se avisa si no es hoy. El servidor valida el rango (migración `018_pedidos_web_fecha.sql`); sin fecha se comporta como antes.
 
 ### Supabase (REQ-TIE + REQ-WEB)
 
@@ -563,3 +564,11 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 - **AC-PAN-4** **Más vendidos** (top 10 por unidades y por importe), **en alza / en baja** (variación vs período anterior), **sin ventas** en el período y **tendencia** semanal/mensual (gráfico de barras simple en SVG, sin librerías nuevas).
 - **AC-PAN-5** Avisos: productos con margen negativo o sin costo cargado.
 - **AC-PAN-6** Todo el cálculo en `src/domain/panel.js` puro con tests (centavos, períodos vacíos, productos borrados, costo estimado). Rendimiento: con 20.000 renglones el cálculo tarda < 1 s (test).
+
+## REQ-NEG — Compras "En negro" en el ingreso de mercadería
+
+> Pedido del dueño 2026-10-16: en Stock, el tipo de factura de un ingreso tiene que poder ser **"En negro"** (compra sin factura), además de Factura A y Factura B. Código interno `N`. Las notas de crédito de la rendición (REQ-REN) siguen siendo solo A/B.
+
+- **AC-NEG-1** En Ingreso de mercadería, el tipo de la cabecera y el de cada renglón ofrecen Factura A, Factura B y **En negro**; un valor fuera de esos tres se rechaza con error en el campo.
+- **AC-NEG-2** Subtotales del ingreso, historial (filtro "Solo en negro" y totales) y "qué entró de un producto" muestran En negro aparte de A y B; los PDF (comprobante e historial) suman la columna En negro. Ingresos viejos siguen igual.
+- **AC-NEG-3** Migración `017_compras_en_negro.sql`: `ingresos_costos.tipo_cabecera` y `admin_compras_guardar` aceptan `'N'` (validado en el servidor); idempotente y sin tocar datos.

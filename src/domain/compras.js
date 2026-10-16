@@ -1,4 +1,4 @@
-// src/domain/compras.js — REQ-INA: costo y Factura A/B de cada ingreso de mercadería.
+// src/domain/compras.js — REQ-INA: costo y Factura A/B (o "En negro", REQ-NEG) de cada ingreso de mercadería.
 // Funciones puras (sin React ni IndexedDB). Los costos NO van dentro del ingreso (que se sincroniza
 // con la anon key): se guardan aparte, en `ingresosCostos`, y suben con PIN de admin (migración 012).
 // Todo importe se calcula en centavos enteros.
@@ -14,6 +14,17 @@ export const normalizarTipoAB = (v) => {
   const s = String(v ?? '').trim().toUpperCase().replace(/^FACTURA\s+/, '');
   return s === 'A' || s === 'B' ? s : null;
 };
+
+// REQ-NEG: tipo de una COMPRA (ingreso de mercadería): Factura A, Factura B o "En negro" (sin factura).
+// Código interno 'N'. Las notas de crédito (rendición) siguen siendo solo A/B (normalizarTipoAB).
+export const TIPOS_COMPRA = Object.freeze(['A', 'B', 'N']);
+export const ETIQUETA_TIPO_COMPRA = Object.freeze({ A: 'Factura A', B: 'Factura B', N: 'En negro' });
+export const normalizarTipoCompra = (v) => {
+  const s = String(v ?? '').trim().toUpperCase().replace(/^FACTURA\s+/, '');
+  if (s === 'N' || s === 'NEGRO' || s === 'EN NEGRO') return 'N';
+  return s === 'A' || s === 'B' ? s : null;
+};
+const MSG_TIPO_COMPRA = 'Elegí Factura A, Factura B o En negro';
 
 export const aCentavos = (v) => {
   const n = toNum(v);
@@ -42,8 +53,8 @@ export const validarCostosIngreso = (form, { ingreso, now = new Date() } = {}) =
   const facturaA = texto(f.facturaA, 40);
   const facturaB = texto(f.facturaB, 40);
   const cabeceraCargada = !vacio(f.tipoCabecera);
-  const tipoCabecera = normalizarTipoAB(f.tipoCabecera);
-  if (cabeceraCargada && !tipoCabecera) errores.tipoCabecera = 'Elegí Factura A o Factura B';
+  const tipoCabecera = normalizarTipoCompra(f.tipoCabecera);
+  if (cabeceraCargada && !tipoCabecera) errores.tipoCabecera = MSG_TIPO_COMPRA;
 
   let hayDato = cabeceraCargada || !!facturaA || !!facturaB;
   const renglones = [];
@@ -62,14 +73,14 @@ export const validarCostosIngreso = (form, { ingreso, now = new Date() } = {}) =
     }
     let tipo = tipoCabecera;
     if (!vacio(e.tipoFactura)) {
-      tipo = normalizarTipoAB(e.tipoFactura);
+      tipo = normalizarTipoCompra(e.tipoFactura);
       if (!tipo && !errores[`item:${pid}`]) errores[`item:${pid}`] = `Tipo de factura inválido para "${it.descripcion || pid}"`;
       hayDato = true;
     }
     renglones.push({ productoId: pid, costoUnitario: costo, tipoFactura: tipo, unidades: Number(it.ingreso) || 0 });
   }
 
-  if (hayDato && !tipoCabecera && !errores.tipoCabecera) errores.tipoCabecera = 'Elegí Factura A o Factura B';
+  if (hayDato && !tipoCabecera && !errores.tipoCabecera) errores.tipoCabecera = MSG_TIPO_COMPRA;
   if (Object.keys(errores).length) return { ok: false, errores, costos: null };
   if (!hayDato || !ingreso?.id) return { ok: true, errores: {}, costos: null };
 
@@ -95,16 +106,16 @@ export const validarCostosIngreso = (form, { ingreso, now = new Date() } = {}) =
 const cero = () => ({ unidades: 0, costoCentavos: 0 });
 
 /**
- * AC-INA-2 / AC-INA-5: subtotales de un ingreso por Factura A, B y "sin dato" (ingresos viejos).
- * @returns {{ A: {unidades, costoCentavos}, B: {...}, sinDato: {unidades}, total: {unidades, costoCentavos}, renglonesSinCosto: number }}
+ * AC-INA-2 / AC-INA-5: subtotales de un ingreso por Factura A, B, En negro (N) y "sin dato" (ingresos viejos).
+ * @returns {{ A: {unidades, costoCentavos}, B: {...}, N: {...}, sinDato: {unidades}, total: {unidades, costoCentavos}, renglonesSinCosto: number }}
  */
 export const subtotalesIngreso = (ingreso, costos = null) => {
-  const out = { A: cero(), B: cero(), sinDato: { unidades: 0 }, total: cero(), renglonesSinCosto: 0 };
+  const out = { A: cero(), B: cero(), N: cero(), sinDato: { unidades: 0 }, total: cero(), renglonesSinCosto: 0 };
   const porProducto = new Map((Array.isArray(costos?.renglones) ? costos.renglones : []).map(r => [k(r.productoId), r]));
   for (const it of Array.isArray(ingreso?.items) ? ingreso.items : []) {
     const unidades = Number(it?.ingreso) || 0;
     const r = porProducto.get(k(it?.productoId));
-    const tipo = r ? normalizarTipoAB(r.tipoFactura) || normalizarTipoAB(costos?.tipoCabecera) : null;
+    const tipo = r ? normalizarTipoCompra(r.tipoFactura) || normalizarTipoCompra(costos?.tipoCabecera) : null;
     out.total.unidades += unidades;
     if (!tipo) { out.sinDato.unidades += unidades; continue; }
     out[tipo].unidades += unidades;
@@ -117,10 +128,10 @@ export const subtotalesIngreso = (ingreso, costos = null) => {
 };
 
 const soloTipo = (sub, tipo) => {
-  const otro = tipo === 'A' ? 'B' : 'A';
+  const otros = Object.fromEntries(TIPOS_COMPRA.filter(t => t !== tipo).map(t => [t, cero()]));
   return {
     ...sub,
-    [otro]: cero(),
+    ...otros,
     sinDato: { unidades: 0 },
     total: { unidades: sub[tipo].unidades, costoCentavos: sub[tipo].costoCentavos },
   };
@@ -135,8 +146,8 @@ const diaLocal = (iso) => {
 };
 
 /**
- * AC-INA-3: historial filtrable por proveedor, fechas (YYYY-MM-DD, inclusivas) y tipo A/B.
- * tipo: 'todas' | 'A' | 'B' | 'sinDato'. Con 'A' o 'B' los subtotales de la fila muestran solo ese tipo.
+ * AC-INA-3: historial filtrable por proveedor, fechas (YYYY-MM-DD, inclusivas) y tipo.
+ * tipo: 'todas' | 'A' | 'B' | 'N' (en negro) | 'sinDato'. Con un tipo, los subtotales de la fila muestran solo ese tipo.
  */
 export const filtrarHistorial = (ingresos = [], costosById = null, { proveedorId = '', desde = '', hasta = '', tipo = 'todas' } = {}) => {
   const filas = [];
@@ -148,7 +159,7 @@ export const filtrarHistorial = (ingresos = [], costosById = null, { proveedorId
     if (hasta && (!dia || dia > hasta)) continue;
     const costos = dePorId(costosById, ing.id);
     let sub = subtotalesIngreso(ing, costos);
-    if (tipo === 'A' || tipo === 'B') {
+    if (TIPOS_COMPRA.includes(tipo)) {
       if (sub[tipo].unidades <= 0) continue;
       sub = soloTipo(sub, tipo);
     } else if (tipo === 'sinDato') {
@@ -163,13 +174,14 @@ export const filtrarHistorial = (ingresos = [], costosById = null, { proveedorId
   return filas.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 };
 
-// AC-INA-3: totales A vs B del historial filtrado.
+// AC-INA-3: totales A vs B (y en negro) del historial filtrado.
 export const totalesHistorial = (filas = []) => {
-  const t = { A: cero(), B: cero(), sinDato: { unidades: 0 }, total: cero(), renglonesSinCosto: 0 };
+  const t = { A: cero(), B: cero(), N: cero(), sinDato: { unidades: 0 }, total: cero(), renglonesSinCosto: 0 };
   for (const f of Array.isArray(filas) ? filas : []) {
     const s = f?.subtotales;
     if (!s) continue;
-    for (const x of ['A', 'B']) { t[x].unidades += s[x].unidades; t[x].costoCentavos += s[x].costoCentavos; }
+    // Filas armadas antes de REQ-NEG pueden no traer N.
+    for (const x of TIPOS_COMPRA) { if (!s[x]) continue; t[x].unidades += s[x].unidades; t[x].costoCentavos += s[x].costoCentavos; }
     t.sinDato.unidades += s.sinDato.unidades;
     t.total.unidades += s.total.unidades;
     t.total.costoCentavos += s.total.costoCentavos;
@@ -178,7 +190,7 @@ export const totalesHistorial = (filas = []) => {
   return t;
 };
 
-/** AC-INA-3: qué entró de un producto y en qué factura (A / B / null = sin dato). */
+/** AC-INA-3: qué entró de un producto y en qué factura (A / B / N = en negro / null = sin dato). */
 export const ingresosPorProducto = (ingresos = [], costosById = null, productoId) => {
   const out = [];
   for (const ing of Array.isArray(ingresos) ? ingresos : []) {
@@ -188,7 +200,7 @@ export const ingresosPorProducto = (ingresos = [], costosById = null, productoId
     const r = (Array.isArray(costos?.renglones) ? costos.renglones : []).find(x => k(x.productoId) === k(productoId));
     out.push({
       ingresoId: ing.id, fecha: ing.fecha, proveedorNombre: ing.proveedorNombre || '', factura: ing.facturaProveedor || '',
-      tipo: r ? (normalizarTipoAB(r.tipoFactura) || normalizarTipoAB(costos?.tipoCabecera)) : null,
+      tipo: r ? (normalizarTipoCompra(r.tipoFactura) || normalizarTipoCompra(costos?.tipoCabecera)) : null,
       unidades: Number(it.ingreso) || 0,
       costoUnitario: r && r.costoUnitario !== null && r.costoUnitario !== undefined ? Number(r.costoUnitario) : null,
     });
@@ -260,7 +272,7 @@ export const costosFromRemote = (r = {}) => ({
   renglones: (Array.isArray(r.renglones) ? r.renglones : []).map(x => ({
     productoId: k(x.producto_id),
     costoUnitario: x.costo_unitario === null || x.costo_unitario === undefined ? null : Number(x.costo_unitario),
-    tipoFactura: normalizarTipoAB(x.tipo_factura),
+    tipoFactura: normalizarTipoCompra(x.tipo_factura),
     unidades: Number(x.unidades) || 0,
   })),
   usuario: '',

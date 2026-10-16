@@ -424,3 +424,55 @@ export function armarPayloadPedido(carrito, contacto, token, idem) {
     hp: c.hp || '',
   };
 }
+
+// ---- Sugerencias del carrito ----
+
+// Descuento entero (0–99) entre el precio anterior y el de oferta; null si no hay oferta real.
+export function porcentajeOff(prod) {
+  const antes = aCentavos(prod && prod.precioAnterior);
+  const ahora = aCentavos(prod && prod.precio);
+  if (antes === null || ahora === null || antes <= 0 || ahora >= antes) return null;
+  const pct = Math.round((1 - ahora / antes) * 100);
+  return pct >= 1 ? Math.min(pct, 99) : null;
+}
+
+// Productos de los mismos rubros que hay en el carrito y que el cliente todavía
+// no eligió. Se reparten por turnos entre los rubros (el de más renglones
+// primero) para no llenar la fila con uno solo; dentro de cada rubro van
+// primero las ofertas, después las marcas que ya compra y después por nombre.
+export function sugerenciasCarrito(lineas, productos, { max = 8, permitirSinStock = false } = {}) {
+  const lista = Array.isArray(productos) ? productos.filter(p => p && p.id !== undefined && p.id !== null) : [];
+  const ids = new Set((Array.isArray(lineas) ? lineas : []).map(l => String(l && l.productoId)));
+  const porId = new Map(lista.map(p => [String(p.id), p]));
+  const clave = (s) => normalizarBusqueda(s);
+
+  const rubros = new Map();
+  const marcas = new Set();
+  for (const id of ids) {
+    const p = porId.get(id);
+    if (!p) continue;
+    const r = clave(p.rubro);
+    if (r) rubros.set(r, (rubros.get(r) || 0) + 1);
+    const m = clave(p.marca);
+    if (m) marcas.add(m);
+  }
+  if (rubros.size === 0) return [];
+
+  const tope = Math.max(0, Math.floor(Number(max) || 0));
+  const orden = (a, b) => (porcentajeOff(b) !== null) - (porcentajeOff(a) !== null)
+    || marcas.has(clave(b.marca)) - marcas.has(clave(a.marca))
+    || porNombre(a, b);
+  const colas = Array.from(rubros.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
+    .map(([r]) => lista
+      .filter(p => clave(p.rubro) === r && !ids.has(String(p.id)) && (p.disponible || permitirSinStock))
+      .sort(orden));
+
+  const out = [];
+  for (let i = 0; out.length < tope && colas.some(c => i < c.length); i += 1) {
+    for (const c of colas) {
+      if (i < c.length && out.length < tope) out.push(c[i]);
+    }
+  }
+  return out;
+}

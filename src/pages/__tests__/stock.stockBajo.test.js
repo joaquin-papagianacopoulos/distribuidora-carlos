@@ -327,3 +327,38 @@ describe('AC-INA-3 / AC-INA-5 historial con A/B', () => {
     expect(descargarArchivo).toHaveBeenCalled();
   });
 });
+
+// REQ-NEG: compras "En negro" (sin factura).
+describe('AC-NEG-1 / AC-NEG-2 ingreso en negro', () => {
+  const irAIngreso = async () => { await renderStock(); await click(boton('Ingreso de mercadería')); };
+  const agregarProducto = async (busqueda) => {
+    await setValue(container.querySelector('#ing-buscar'), busqueda);
+    await click(container.querySelector('[data-testid="sugerido"]'));
+  };
+
+  it('AC-NEG-1 AC-NEG-2 la cabecera y el renglón ofrecen "En negro", el subtotal lo separa y se manda como tipo N', async () => {
+    registrarIngreso.mockResolvedValueOnce({ ok: true, errores: {}, ingreso: { facturaProveedor: 'S/F' }, movimientos: [{}, {}], costos: null });
+    await irAIngreso();
+    const opcionesCab = [...container.querySelector('#ing-tipo').options].map(o => [o.value, o.textContent]);
+    expect(opcionesCab).toEqual(expect.arrayContaining([['A', 'Factura A'], ['B', 'Factura B'], ['N', 'En negro']]));
+    await setValue(container.querySelector('#ing-factura'), 'S/F');
+    await setValue(container.querySelector('#ing-proveedor'), 'prov-1');
+    await setValue(container.querySelector('#ing-tipo'), 'N');
+    await agregarProducto('det');
+    await agregarProducto('jabon');
+    expect([...porLabel('Factura Jabón en polvo').options].map(o => o.textContent)).toEqual(['Cabecera (En negro)', 'A', 'B', 'En negro']);
+    await setValue(porLabel('Ingreso Detergente Limón'), '10');
+    await setValue(porLabel('Ingreso Jabón en polvo'), '5');
+    await setValue(porLabel('Costo unitario Detergente Limón'), '10');
+    await setValue(porLabel('Costo unitario Jabón en polvo'), '4');
+    await setValue(porLabel('Factura Jabón en polvo'), 'A');
+    const previo = container.querySelector('[data-testid="subtotales-previo"]').textContent;
+    expect(previo).toContain('En negro: 10 u. · $100,00');
+    expect(previo).toContain('Factura A: 5 u. · $20,00');
+    await click(boton('Confirmar ingreso'));
+    expect(registrarIngreso.mock.calls[0][0].costos).toMatchObject({
+      tipoCabecera: 'N',
+      items: [{ productoId: '1', costoUnitario: '10', tipoFactura: '' }, { productoId: '2', costoUnitario: '4', tipoFactura: 'A' }],
+    });
+  });
+});

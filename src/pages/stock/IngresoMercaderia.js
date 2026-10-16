@@ -4,7 +4,7 @@
 import React, { useMemo, useState } from 'react';
 import { registrarIngreso } from '../../services/stockService';
 import { stockDe } from '../../domain/stock';
-import { subtotalesIngreso } from '../../domain/compras';
+import { subtotalesIngreso, ETIQUETA_TIPO_COMPRA } from '../../domain/compras';
 import { formatearCentavos } from '../../domain/cuentaProveedores';
 import { toInt, toNum } from '../../domain/validacion';
 import { normalize } from '../../utils/fuzzy';
@@ -15,6 +15,8 @@ const TextoSubtotales = ({ s, testid }) => (
   <div data-testid={testid} style={{ fontSize: 13, display: 'grid', gap: 2 }}>
     <div>Factura A: <strong>{s.A.unidades}</strong> u. · {formatearCentavos(s.A.costoCentavos)}</div>
     <div>Factura B: <strong>{s.B.unidades}</strong> u. · {formatearCentavos(s.B.costoCentavos)}</div>
+    {/* REQ-NEG: compras sin factura */}
+    {s.N?.unidades > 0 && <div>En negro: <strong>{s.N.unidades}</strong> u. · {formatearCentavos(s.N.costoCentavos)}</div>}
     {s.sinDato.unidades > 0 && <div>Sin dato: <strong>{s.sinDato.unidades}</strong> u.</div>}
     <div style={{ fontWeight: 700 }}>Total: {s.total.unidades} u. · {formatearCentavos(s.total.costoCentavos)}</div>
     {s.renglonesSinCosto > 0 && <div style={{ color: 'var(--text3)' }}>{s.renglonesSinCosto} renglón(es) sin costo</div>}
@@ -140,6 +142,7 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
           <option value="">— Sin dato —</option>
           <option value="A">Factura A</option>
           <option value="B">Factura B</option>
+          <option value="N">En negro</option>
         </select>
         {err('tipoCabecera')}
       </div>
@@ -193,9 +196,10 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
                     <td><input className="qty-input" aria-label={`Costo unitario ${p?.nombre || ''}`} inputMode="decimal" placeholder="opcional" value={costos[r.productoId]?.costo ?? ''} onChange={e => setCosto(r.productoId, 'costo', e.target.value)} style={{ width: 84 }} /></td>
                     <td>
                       <select aria-label={`Factura ${p?.nombre || ''}`} className="input" value={costos[r.productoId]?.tipo ?? ''} onChange={e => setCosto(r.productoId, 'tipo', e.target.value)} style={{ width: 92 }}>
-                        <option value="">{tipoCabecera ? `Cabecera (${tipoCabecera})` : 'Sin dato'}</option>
+                        <option value="">{tipoCabecera ? `Cabecera (${ETIQUETA_TIPO_COMPRA[tipoCabecera] || tipoCabecera})` : 'Sin dato'}</option>
                         <option value="A">A</option>
                         <option value="B">B</option>
+                        <option value="N">En negro</option>
                       </select>
                     </td>
                     <td><button className="btn-icon" style={{ color: 'var(--danger)' }} onClick={() => quitar(r.productoId)} aria-label="Quitar">×</button></td>
