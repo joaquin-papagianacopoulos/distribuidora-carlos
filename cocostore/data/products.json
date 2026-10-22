@@ -1,0 +1,65 @@
+[
+  {
+    "id": "35c11c8c-48da-4783-ac79-89026c426a2b",
+    "nombre": "Elfbar ejemplo",
+    "precio": 27000,
+    "categoria": "Descartables",
+    "imagen": "/uploads/f499ec04-3edd-482b-8c21-aa4550a7307a.jpg",
+    "agotado": false,
+    "creado": 1792436034614
+  },
+  {
+    "id": "05be97cb-4d37-46e9-be73-7ef96b474c8d",
+    "nombre": "Perfume árabe 100ml (ejemplo)",
+    "precio": 0,
+    "categoria": "Perfumes",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918349
+  },
+  {
+    "id": "7fd9fcd0-1575-4a42-be06-a90db6573404",
+    "nombre": "Liquido salt nic 30ml (ejemplo)",
+    "precio": 9000,
+    "categoria": "Líquidos",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918346
+  },
+  {
+    "id": "176d84ca-f442-465b-96ae-2dc891faaf6c",
+    "nombre": "Pods de repuesto x2 (ejemplo)",
+    "precio": 12000,
+    "categoria": "Pods",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918341
+  },
+  {
+    "id": "ac4db07c-ef28-40e7-bce2-13b90d3e4fca",
+    "nombre": "Vape recargable kit inicial (ejemplo)",
+    "precio": 45000,
+    "categoria": "Recargables",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918336
+  },
+  {
+    "id": "1ddb7e55-cc65-4a23-bf4a-0f24d99fd79e",
+    "nombre": "Vape descartable Frutilla (ejemplo)",
+    "precio": 18000,
+    "categoria": "Descartables",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918332
+  },
+  {
+    "id": "6aebf28a-9d60-462a-8841-f90b15e2d9db",
+    "nombre": "Vape descartable Ice Mint (ejemplo)",
+    "precio": 18000,
+    "categoria": "Descartables",
+    "imagen": "",
+    "agotado": false,
+    "creado": 1792435918330
+  }
+]

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Panel Coco Store</title>
+<link rel="icon" href="/img/mascota.svg">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  body { background: var(--papel); }
+  .caja { background: var(--blanco); border: var(--borde); border-radius: var(--radio); padding: 24px; }
+  .panel { width: min(760px, 100% - 32px); margin: 24px auto 80px; display: grid; gap: 20px; }
+  .login { width: min(400px, 100% - 32px); margin: 12vh auto; text-align: center; }
+  .login img { height: 120px; margin: 0 auto 10px; }
+  h1 { font-size: 26px; font-weight: 900; letter-spacing: -.02em; }
+  h2 { font-size: 20px; font-weight: 900; letter-spacing: -.015em; margin-bottom: 14px; }
+  label.campo { display: block; font-weight: 700; font-size: 14px; margin-bottom: 14px; }
+  .campo input, .campo select { display: block; width: 100%; height: 48px; margin-top: 6px; border: var(--borde); border-radius: 12px; padding: 0 14px; font: 600 16px 'Montserrat', sans-serif; background: var(--blanco); }
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .foto-sel { display: grid; place-items: center; text-align: center; gap: 6px; border: 2px dashed var(--negro); border-radius: 14px; min-height: 180px; margin-bottom: 14px; cursor: pointer; font-weight: 700; padding: 12px; overflow: hidden; background: var(--papel); }
+  .foto-sel:hover { border-color: var(--rojo); }
+  .foto-sel img { max-height: 220px; border-radius: 10px; }
+  .foto-sel input { display: none; }
+  .foto-sel small { font-weight: 500; color: #555; }
+  .btn { width: 100%; }
+  .msg { font-weight: 700; margin-top: 10px; min-height: 1.4em; }
+  .msg.mal { color: var(--rojo); }
+  .barra { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .barra .btn { width: auto; height: 40px; font-size: 14px; }
+  .fila { display: grid; grid-template-columns: 72px 1fr auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 2px solid var(--papel); }
+  .fila:first-child { border-top: 0; }
+  .fila img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: var(--borde); background: var(--papel); }
+  .fila img.vacia { object-fit: contain; padding: 10px; }
+  .fila b { display: block; line-height: 1.25; }
+  .fila small { font-weight: 600; color: #555; }
+  .acc { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .acc button { height: 36px; padding: 0 12px; border: var(--borde); border-radius: 999px; background: var(--blanco); font-weight: 700; font-size: 13px; }
+  .acc button:hover { background: var(--negro); color: var(--blanco); }
+  .acc .borrar:hover { background: var(--rojo); border-color: var(--rojo); }
+  .btn.ghost { background: none; border: 0; color: var(--negro); font-weight: 700; text-decoration: underline; }
+  .btn.ghost:hover { background: none; color: var(--rojo); }
+  @media (max-width: 520px) { .fila { grid-template-columns: 60px 1fr; } .acc { grid-column: 1 / -1; justify-content: flex-start; } .dos { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<main class="login caja" id="login">
+  <img src="/img/logo.svg" alt="Coco Store BA">
+  <h1>Panel de productos</h1>
+  <form id="f-login" style="margin-top:18px;text-align:left">
+    <label class="campo">Contraseña<input type="password" id="pass" autocomplete="current-password" required></label>
+    <button class="btn" type="submit">Entrar</button>
+    <p class="msg mal" id="m-login" role="alert"></p>
+  </form>
+</main>
+
+<main class="panel" id="panel" hidden>
+  <div class="barra">
+    <h1>Mis productos</h1>
+    <div style="display:flex;gap:8px"><a class="btn negro" href="/" target="_blank">Ver la tienda</a><button class="btn ghost" id="salir" type="button">Salir</button></div>
+  </div>
+
+  <form class="caja" id="f-prod">
+    <h2 id="t-form">Subir un producto</h2>
+    <label class="foto-sel" id="zona">
+      <input type="file" id="foto" accept="image/*">
+      <span id="zona-txt"><b>Tocá acá para elegir la foto</b><br><small>Sacala del celular o la compu</small></span>
+      <img id="prev" alt="" hidden>
+    </label>
+    <label class="campo">Nombre<input id="nombre" maxlength="120" placeholder="Ej: Elfbar 5000 puffs Ice Mint" required></label>
+    <div class="dos">
+      <label class="campo">Precio (en pesos)<input id="precio" inputmode="numeric" placeholder="Ej: 18000"></label>
+      <label class="campo">Categoría<select id="cat"></select></label>
+    </div>
+    <button class="btn" type="submit" id="guardar">Subir producto</button>
+    <button class="btn ghost" type="button" id="cancelar" hidden style="margin-top:6px">Cancelar edición</button>
+    <p class="msg" id="m-prod" role="status"></p>
+  </form>
+
+  <section class="caja" id="lista-caja" style="padding:20px 24px">
+    <h2>Lo que tenés cargado</h2>
+    <div id="lista"></div>
+  </section>
+
+  <form class="caja" id="f-conf">
+    <h2>Tu WhatsApp</h2>
+    <label class="campo">Número con código de país, sin + ni espacios<input id="wa" inputmode="numeric" placeholder="Ej: 5491122334455"></label>
+    <button class="btn negro" type="submit">Guardar número</button>
+    <p class="msg" id="m-conf" role="status"></p>
+  </form>
+</main>
+
+<script src="/admin.js"></script>
+</body>
+</html>

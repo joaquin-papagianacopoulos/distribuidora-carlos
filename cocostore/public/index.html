@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coco Store BA</title>
+<meta name="description" content="Vapes descartables, recargables, pods y líquidos. Envíos a todo el país y moto en CABA y GBA.">
+<link rel="icon" href="/img/mascota.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="edad" id="edad" hidden role="dialog" aria-modal="true" aria-labelledby="edad-t">
+  <div>
+    <img src="/img/mascota.svg" alt="">
+    <h2 id="edad-t">¿Sos mayor de 18?</h2>
+    <p>Los productos de esta tienda son solo para adultos.</p>
+    <div class="fila">
+      <button class="btn negro" id="edad-si">Sí, soy mayor</button>
+      <a class="btn blanco" style="background:#fff;color:#000" href="https://www.google.com">No</a>
+    </div>
+  </div>
+</div>
+
+<div class="aviso">Envíos a todo el país · <b>Moto en CABA y GBA</b></div>
+
+<header class="cab">
+  <div class="wrap">
+    <a class="logo" href="/" aria-label="Coco Store BA, inicio"><img src="/img/logo.svg" alt="Coco Store BA"></a>
+    <label class="buscar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      <input id="q" type="search" placeholder="Buscar vapes, pods, líquidos" aria-label="Buscar productos">
+    </label>
+    <a class="btn" id="wa-cab" href="#" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2Zm5.2 14.1c-.2.6-1.300 1.200-1.800 1.200-.5.100-1 .2-3.300-.7-2.800-1.100-4.600-4-4.800-4.200-.1-.2-1.100-1.500-1.100-2.800s.7-2 1-2.300c.2-.3.500-.3.700-.3h.5c.2 0 .4 0 .6.500l.9 2.100c.1.200.1.400 0 .600l-.4.600c-.2.200-.3.400-.1.700.2.300.8 1.300 1.700 2.100 1.200 1 2.100 1.300 2.400 1.500.3.100.5.100.7-.1l1-1.200c.2-.3.400-.2.700-.1l2 1c.3.100.5.200.5.300.1.200.1.800-.1 1.400Z"/></svg>
+      <span>Escribinos</span>
+    </a>
+  </div>
+  <nav class="nav" aria-label="Categorías"><div class="wrap" id="nav"></div></nav>
+</header>
+
+<main>
+  <div class="hero" id="banner" role="region" aria-roledescription="carrusel" aria-label="Novedades">
+    <div class="slides">
+
+      <div class="slide s-zara on" data-t="7000">
+        <div class="wrap">
+          <div class="hero-txt">
+            <h1>Zaramay ya compró <span>en Coco Store.</span></h1>
+            <p>Perfumes importados y vapes, entregados en mano. Mirá el posteo en nuestro Instagram.</p>
+            <div class="acciones">
+              <a class="btn" href="https://www.instagram.com/p/DMobGvFJYV_/" target="_blank" rel="noopener">Ver el posteo</a>
+              <a class="btn blanco" href="#productos" data-filtro="Perfumes">Ver perfumes</a>
+            </div>
+          </div>
+          <div class="fotos">
+            <img class="f1" src="/img/zaramay-1.jpg" alt="Zaramay y el dueño de Coco Store con perfumes árabes sobre un auto" width="960" height="1280">
+            <img class="f2" src="/img/zaramay-2.jpg" alt="Zaramay y el dueño de Coco Store en la calle, con la bolsa del pedido" width="960" height="1278">
+          </div>
+        </div>
+      </div>
+
+      <div class="slide s-perf" data-t="6500">
+        <div class="wrap">
+          <div class="hero-txt">
+            <h1>Perfumes árabes, <span>de nicho y de diseñador.</span></h1>
+            <p>Fragancias importadas para todos los gustos. Elegí la tuya y te la llevamos.</p>
+            <div class="acciones">
+              <a class="btn" href="#productos" data-filtro="Perfumes">Ver perfumes</a>
+              <a class="btn blanco" data-wa href="#" target="_blank" rel="noopener">Consultar por WhatsApp</a>
+            </div>
+          </div>
+          <div class="frascos" aria-hidden="true">
+            <figure class="fr a">
+              <svg viewBox="0 0 120 200"><rect x="40" y="6" width="40" height="30" rx="6"/><rect x="50" y="36" width="20" height="16"/><path d="M60 52c-34 0-50 26-50 62 0 42 22 78 50 78s50-36 50-78c0-36-16-62-50-62Z"/><path class="brillo" d="M32 110c0-20 8-34 20-42"/></svg>
+              <figcaption>Árabes</figcaption>
+            </figure>
+            <figure class="fr b">
+              <svg viewBox="0 0 120 200"><rect x="28" y="6" width="64" height="34" rx="4"/><rect x="14" y="40" width="92" height="152" rx="10"/><rect class="etiqueta" x="30" y="86" width="60" height="50" rx="4"/><path class="brillo" d="M26 60v110"/></svg>
+              <figcaption>Nicho</figcaption>
+            </figure>
+            <figure class="fr c">
+              <svg viewBox="0 0 120 200"><rect x="44" y="6" width="32" height="40" rx="4"/><rect x="52" y="46" width="16" height="12"/><path d="M24 58h72l8 134H16Z"/><path class="brillo" d="M38 74l-6 104"/></svg>
+              <figcaption>Diseñador</figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide s-vape" data-t="6500">
+        <div class="wrap">
+          <div class="hero-txt">
+            <h1>Vapes originales <span>a tu puerta.</span></h1>
+            <p>Descartables, recargables, pods y líquidos. Elegí, escribinos por WhatsApp y te lo llevamos.</p>
+            <div class="acciones">
+              <a class="btn" href="#productos" data-filtro="Todos">Ver los vapes</a>
+              <a class="btn blanco" data-wa href="#" target="_blank" rel="noopener">Pedir por WhatsApp</a>
+            </div>
+          </div>
+          <div class="hero-img"><img src="/img/mascota.svg" alt="El coco de Coco Store dándole una patada a una pelota"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="mando wrap">
+      <button class="flecha" id="prev" type="button" aria-label="Banner anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg></button>
+      <div class="puntos" id="puntos" role="tablist" aria-label="Elegir banner"></div>
+      <button class="flecha" id="next" type="button" aria-label="Banner siguiente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></button>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <div class="titulo"><h2>Qué estás buscando</h2></div>
+      <div class="cats" id="cats"></div>
+    </div>
+  </section>
+
+  <section id="productos">
+    <div class="wrap">
+      <div class="titulo"><h2 id="t-prod">Todos los productos</h2><small id="cuenta"></small></div>
+      <div class="grilla" id="grilla" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="titulo"><h2>Cómo comprar</h2></div>
+      <ol class="pasos">
+        <li><b>Elegí tu producto</b><p>Mirá el catálogo y tocá “Pedir” en el que te guste.</p></li>
+        <li><b>Escribinos</b><p>Se abre WhatsApp con el pedido listo. Confirmamos stock y forma de pago.</p></li>
+        <li><b>Recibilo</b><p>Moto en CABA y GBA, o envío a todo el país.</p></li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <img src="/img/logo.svg" alt="Coco Store BA">
+      <p style="margin-top:14px;max-width:26em">Importados con envío a todo el país. Vapes, pods, líquidos y perfumes.</p>
+    </div>
+    <div>
+      <h4>Contacto</h4>
+      <a id="wa-pie" href="#" target="_blank" rel="noopener">WhatsApp</a>
+      <a href="https://www.instagram.com/cocostoreba/" target="_blank" rel="noopener">Instagram @cocostoreba</a>
+    </div>
+    <div>
+      <h4>Envíos</h4>
+      <p>Moto en CABA y GBA.</p>
+      <p>Correo a todo el país.</p>
+    </div>
+    <p class="legal">Venta exclusiva a mayores de 18 años. Los precios y el stock pueden cambiar sin aviso.</p>
+  </div>
+</footer>
+
+<a class="flota" id="wa-flota" href="#" target="_blank" rel="noopener" aria-label="Escribinos por WhatsApp">
+  <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2Zm5.2 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.300-.7-2.800-1.100-4.600-4-4.800-4.200-.1-.2-1.100-1.500-1.100-2.800s.7-2 1-2.300c.2-.3.500-.3.700-.3h.5c.2 0 .4 0 .6.500l.9 2.100c.1.200.1.400 0 .6l-.4.600c-.2.200-.3.400-.1.700.2.300.8 1.300 1.700 2.100 1.200 1 2.100 1.300 2.400 1.500.3.100.5.100.7-.1l1-1.200c.2-.3.400-.2.700-.1l2 1c.3.100.5.200.5.300.1.200.1.800-.1 1.400Z"/></svg>
+</a>
+
+<script src="/app.js"></script>
+</body>
+</html>
