@@ -265,10 +265,10 @@ describe('AC-PLA-4 / AC-PLA-2 clientes: texto de ayuda y comisión', () => {
   // BUG: BUG-PLA-04 (ver qa-report.md). Tras el cambio del dueño (AC-PLA-2: 16
   // columnas, sin Comisión) la tarjeta de importación de clientes sigue diciendo
   // "los 17 campos del alta de clientes" (Configuracion.js:582).
-  it('AC-PLA-2 BUG la ayuda de la tarjeta de clientes no dice "17 campos" (la plantilla tiene 16, sin Comisión)', async () => {
+  it('AC-PLA-2 AC-CON-2 la ayuda de la tarjeta de clientes dice "17 campos" (16 + Nombre de contacto, sin Comisión)', async () => {
     await irAClientes();
     const txt = container.querySelector('[data-testid="import-clientes"]').textContent;
-    expect(txt).not.toMatch(/17 campos/);
+    expect(txt).toMatch(/17 campos/);
   });
 
   it('AC-PLA-4 CSV con ";" y columna Comisión en el medio: se ignora, no corre las demas columnas y no pisa la ficha', async () => {

@@ -3,6 +3,7 @@ import { getOrdenEntrega } from './ordenEntrega';
 import { isPedidoVisible, normalizePedidoFecha } from './pedidos';
 import { filasPdfCierre } from '../domain/comisiones';
 import { filasBoleta } from '../domain/gruposFactura';
+import { totalesBoleta } from '../domain/precios';
 import { layoutPieBoleta, encabezadoTipoFactura } from '../domain/boletaLayout';
 
 const alpha = (a, b) =>
@@ -284,13 +285,8 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const filas = filasBoleta(pedido.items || [], pedido.grupos, { modo: opciones?.modoGrupos === 'solo_grupos' ? 'solo_grupos' : 'detalle' });
   const rows = filas.map(f => [f.nombre, f.cantidadTexto, f.precioTexto, `$${Number(f.subtotal).toLocaleString('es-AR')}`]);
 
-  const total = sortedItems.reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0);
-  const totalSinDesc = sortedItems.reduce((acc, i) => {
-    const base = (i?.precioOriginal !== undefined && i?.precioOriginal !== null) ? Number(i.precioOriginal) : Number(i.precio);
-    return acc + Number(i.cantidad) * Number(base);
-  }, 0);
-  const descuentoTotal = Math.max(0, totalSinDesc - total);
-  const descuentoPct = totalSinDesc > 0 ? Math.round((descuentoTotal / totalSinDesc) * 100) : 0;
+  // REQ-FRB: el precio de bulto no se muestra como descuento (base = precioBaseRenglon).
+  const { total, totalSinDescuento: totalSinDesc, descuento: descuentoTotal, descuentoPct } = totalesBoleta(sortedItems);
 
   doc.autoTable({
     startY: 28,

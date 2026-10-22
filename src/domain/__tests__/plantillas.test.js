@@ -47,11 +47,11 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
   // MOD (RUN 20261012-2106): antes esperaba los 17 campos de REQ-CLI. El dueño
   // decidio (AC-PLA-2, 2026-10-12) sacar Comisión de la plantilla: quedan 16,
   // en el mismo orden y con las mismas etiquetas del formulario.
-  it('AC-PLA-2 clientes: los 16 campos de REQ-CLI en orden (CAMPOS_CLIENTE sin Comisión)', () => {
+  it('AC-PLA-2 clientes: los 17 campos de REQ-CLI en orden (CAMPOS_CLIENTE sin Comisión)', () => {
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(LABELS_C);
-    expect(LABELS_C).toHaveLength(16);
+    expect(LABELS_C).toHaveLength(17);
     expect(LABELS_C[0]).toBe('Código cliente');
-    expect(LABELS_C[15]).toBe('Rubro');
+    expect(LABELS_C[16]).toBe('Rubro');
     expect(NOMBRE_ARCHIVO_PLANTILLA.clientes).toBe('plantilla_clientes.xlsx');
   });
 
@@ -64,7 +64,7 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
     // como alias legacy en CAMPOS_EXCLUIDOS_PLANTILLA.
     expect(CAMPOS_CLIENTE.map(c => c.key)).not.toContain('comision');
     const p = armarPlantilla('clientes');
-    expect(p.hojas[0].filas[0]).toHaveLength(16);
+    expect(p.hojas[0].filas[0]).toHaveLength(17);
     expect(p.hojas.flatMap(h => h.filas).flat().some(c => /comisi[oó]n/i.test(String(c)))).toBe(false);
     // El orden relativo del resto es el del formulario.
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
@@ -437,7 +437,7 @@ describe('AC-PLA-4 columna "Comisión" en el archivo de clientes se ignora y se 
   // ahora CAMPOS_CLIENTE no tiene Comisión, así que el archivo viejo se arma
   // explícito: las 16 etiquetas con 'Comisión' en su lugar original.
   const LABELS_C16 = CAMPOS_CLIENTE.map(c => c.label);
-  const LABELS_CON_COMISION = [...LABELS_C16.slice(0, 13), 'Comisión', ...LABELS_C16.slice(13)];
+  const LABELS_CON_COMISION = [...LABELS_C16.slice(0, 14), 'Comisión', ...LABELS_C16.slice(14)];
   const filaCC = (obj) => LABELS_CON_COMISION.map(l => obj[l] ?? '');
 
   it('AC-PLA-4 mapearEncabezados: "Comisión" va a excluidas (no a indices ni a ignoradas)', () => {
@@ -526,9 +526,9 @@ describe('AC-PLA-5 AC-PROD-3 C9 stock inicial fallido en una importación parcia
 // REQ-COMR (RUN 20261014-1449): plantillas e importación sin la comisión del
 // cliente (AC-COMR-2) y con el Rubro de productos normalizado (AC-COMR-4).
 describe('AC-COMR-2 AC-COMR-4 plantillas con el modelo por vendedor y rubro', () => {
-  it('AC-COMR-2 la plantilla de clientes no tiene Comisión: 16 columnas = CAMPOS_CLIENTE', () => {
+  it('AC-COMR-2 la plantilla de clientes no tiene Comisión: 17 columnas = CAMPOS_CLIENTE', () => {
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(CAMPOS_CLIENTE.map(c => c.label));
-    expect(armarPlantilla('clientes').hojas[0].filas[0]).toHaveLength(16);
+    expect(armarPlantilla('clientes').hojas[0].filas[0]).toHaveLength(17);
   });
 
   it('AC-COMR-2 un Excel viejo con "Comisión" se importa, avisa (informativo, texto nuevo) y no pisa la comision de existentes', () => {

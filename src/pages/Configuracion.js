@@ -21,6 +21,7 @@ import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
 import { nuevoId } from '../domain/validacion';
+import { resumenCliente } from '../domain/clientes';
 import { ordenZonaTrasCambioZona } from '../domain/zonas';
 import { stockDe } from '../domain/stock';
 import { planificarImportacion, resumirEntradas, textoResumen, avisoColumnasExcluidas } from '../domain/plantillas';
@@ -482,6 +483,7 @@ const Configuracion = () => {
           normalize(c.nombre || '').includes(q)
           || normalize(c.direccion || '').includes(q)
           || normalize(c.telefono || '').includes(q)
+          || normalize(c.contacto || '').includes(q)
           || normalize(c.alias || '').includes(q)
           || normalize(String(c.codigo || '')).includes(q)
           || normalize(String(c.cuit || '')).includes(q));
@@ -859,7 +861,7 @@ const Configuracion = () => {
                     ⚠ RECHAZADO POR EL SERVIDOR
                   </span>
                 )}
-                {tab === 'clientes' && `${item.codigo ? `${item.codigo} · ` : ''}${item.direccion || ''} ${item.telefono ? `· ${item.telefono}` : ''}`}
+                {tab === 'clientes' && resumenCliente(item)}
                 {tab === 'proveedores' && `Código ${item.codigo} · ${productos.filter(p => p.proveedorId === item.id).length} producto(s)`}
                 {tab === 'vendedores' && (item.zona ? `Zona: ${item.zona}` : '')}
               </div>

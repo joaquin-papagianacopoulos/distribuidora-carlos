@@ -26,7 +26,7 @@ const sembrar = (cantidad, extra = {}, vendedor = VENDEDOR) => {
   localStorage.setItem(`nuevoPedidoDraft:${vendedor.id}`, JSON.stringify({
     version: 1,
     clienteQ: 'Kiosco',
-    clienteNombre: 'Kiosco',
+    clienteNombre: 'Kiosco', direccion: 'Mitre 123',
     items: [{ productoId: 'p1', nombre: 'Coca 500', precio: 10, precioOriginal: 10, precioBultoOriginal: 8, precioBultoX: 12, precioPorBulto: false, cantidad, ...extra }],
   }));
 };

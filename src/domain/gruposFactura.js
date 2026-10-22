@@ -109,6 +109,10 @@ export const textoBultosGrupo = (renglones) => {
 
 const subtotalItem = (i) => Number(i?.cantidad) * Number(i?.precio);
 
+// REQ-FRB (AC-FRB-2): marca visible cuando el renglón tiene precio de bulto.
+export const SUFIJO_PRECIO_BULTO = ' (x precio de bulto)';
+const nombreConMarca = (i, nombre) => (i?.precioPorBulto === true ? `${nombre}${SUFIJO_PRECIO_BULTO}` : nombre);
+
 // Filas de la tabla de la boleta. El total del pedido es la suma de los items:
 // las filas "detalle" (renglones bajo un grupo) NO se suman de nuevo.
 //   tipo 'grupo' | 'detalle' | 'item'
@@ -122,14 +126,14 @@ export const filasBoleta = (items, grupos, { modo = 'detalle' } = {}) => {
   const top = [];
   for (const i of sueltos) {
     top.push({
-      orden: i.nombre, fila: { tipo: 'item', nombre: i.nombre, cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i) }, detalle: [],
+      orden: i.nombre, fila: { tipo: 'item', nombre: nombreConMarca(i, i.nombre), cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}) }, detalle: [],
     });
   }
   for (const g of gs) {
     const rengs = lista.filter(i => claveAGrupo.get(claveRenglon(i)) === g.id);
     if (!rengs.length) continue;
     const detalle = modo === 'solo_grupos' ? [] : [...rengs].sort((a, b) => alpha(a.nombre, b.nombre)).map(i => ({
-      tipo: 'detalle', nombre: `   ${i.nombre}`, cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i),
+      tipo: 'detalle', nombre: nombreConMarca(i, `   ${i.nombre}`), cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}),
     }));
     top.push({
       orden: g.nombre,

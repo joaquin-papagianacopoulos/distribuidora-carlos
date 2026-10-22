@@ -160,6 +160,22 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     // (el console.warn de "faltan columnas" se emite una sola vez por sesión)
   });
 
+  it('AC-CON-1 sin la columna contacto (019 sin correr) sube igual codigo/cuit y deja extras pendientes', async () => {
+    mockLocal.clientes = [{ ...CLIENTE, contacto: 'Pepe' }];
+    mockSb.respuestas = [{ error: { code: 'PGRST204', message: "Could not find the 'contacto' column of 'clientes' in the schema cache" } }, { error: null }];
+    await expect(syncClientes()).resolves.toEqual({ ok: true });
+    expect(mockSb.upserts[0].rows[0]).toHaveProperty('contacto', 'Pepe');
+    expect(mockSb.upserts[1].rows[0]).not.toHaveProperty('contacto');
+    expect(mockSb.upserts[1].rows[0]).toMatchObject({ id: 7, codigo: 'C7', cuit: '20-12345678-6' });
+    expect(mockLocal.clientes[0].extrasPendientes).toBe(true);
+  });
+
+  it('AC-CON-1 una fila solo básica (sin extras) no lleva la clave contacto', async () => {
+    mockLocal.clientes = [{ id: 9, nombre: 'Solo orden', direccion: 'X 1', pendingSync: true }];
+    await syncClientes();
+    expect(mockSb.upserts[0].rows[0]).not.toHaveProperty('contacto');
+  });
+
   it('AC-PROD-2 syncProductos sube precio (Precio venta 1) y los campos nuevos; tolera columna faltante', async () => {
     mockLocal.productos = [{ id: 3, nombre: 'Alfajor', precio: 1111.5, costoFinal: 1000, descuento1: 10, ganancia: 30, bultoX: 12, minimoVenta: 6, proveedorId: 'prov-1', pendingSync: true, extrasDirty: true }];
     mockSb.respuestas = [{ error: { code: 'PGRST204', message: "Could not find the 'costo_final' column" } }, { error: null }];

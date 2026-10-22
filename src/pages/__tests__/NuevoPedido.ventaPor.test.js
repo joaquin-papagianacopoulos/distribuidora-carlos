@@ -60,6 +60,7 @@ const agregar = async (nombre) => {
 };
 const ponerCliente = async () => {
   await escribir(container.querySelector('input[placeholder="Nombre del cliente..."]'), 'Kiosco');
+  await escribir(container.querySelector('#np-direccion'), 'Mitre 123');
 };
 
 beforeEach(() => {

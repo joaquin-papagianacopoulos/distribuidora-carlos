@@ -7,10 +7,10 @@ const base = { codigo: 'C001', nombre: 'Almacén Don José SRL', direccion: 'Av.
 describe('AC-CLI-1 campos del alta de clientes', () => {
   // MOD (RUN 20261014-1449, AC-COMR-1): antes 17 campos con 'Comisión'; ahora
   // 16, porque el cliente ya no tiene comisión (se carga por vendedor y rubro).
-  it('AC-CLI-1 AC-COMR-1 tiene exactamente los 16 campos pedidos, en orden y con sus etiquetas', () => {
+  it('AC-CLI-1 AC-COMR-1 tiene exactamente los 17 campos pedidos, en orden y con sus etiquetas', () => {
     expect(CAMPOS_CLIENTE.map(c => c.label)).toEqual([
       'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal', 'Provincia',
-      'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Celular', 'Vendedor', 'Cobrador',
+      'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Nombre de contacto', 'Celular', 'Vendedor', 'Cobrador',
       'Fecha de alta', 'Tipo de cliente', 'Rubro',
     ]);
     expect(CAMPOS_CLIENTE.some(c => c.key === 'comision')).toBe(false);

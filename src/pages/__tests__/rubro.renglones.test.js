@@ -95,7 +95,7 @@ describe('AC-COMR-5 Nuevo pedido', () => {
   const VENDEDOR = { id: 2, nombre: 'Vend', permiso: 2, zona: 'Norte' };
   const render = async () => { await act(async () => { root.render(<NuevoPedido />); }); };
   const sembrar = (items) => {
-    localStorage.setItem('nuevoPedidoDraft:2', JSON.stringify({ version: 1, clienteQ: 'Kiosco', clienteNombre: 'Kiosco', items }));
+    localStorage.setItem('nuevoPedidoDraft:2', JSON.stringify({ version: 1, clienteQ: 'Kiosco', clienteNombre: 'Kiosco', direccion: 'Mitre 123', items }));
   };
 
   it('AC-COMR-5 al agregar un producto con rubro, el renglón guardado tiene rubro (normalizado)', async () => {

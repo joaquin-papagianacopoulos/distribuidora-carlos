@@ -4,6 +4,7 @@ import {
   validarCheckout, armarPayloadPedido, formatearPesos, textoEquivalencia, CAMPOS_CHECKOUT, MAX_OBSERVACIONES,
 } from '../domain/tienda';
 import { PROVINCIAS } from '../domain/clientes';
+import { direccionExacta, mensajeDireccion } from '../domain/direccion';
 import { nuevoId } from '../domain/validacion';
 import { tokenParaPedido } from '../domain/tiendaLinks';
 import { Encabezado } from './Catalogo';
@@ -34,6 +35,9 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
   const idem = useRef(nuevoId());
 
   const calc = armarCalculo(lineas, catalogoById, config);
+  // REQ-DIR (AC-DIR-1): validación en vivo; el error aparece cuando ya escribieron algo o lo intentaron enviar.
+  const dirOk = direccionExacta(valores.direccion);
+  const errorDir = !dirOk.ok && (valores.direccion.trim() !== '' || errores.direccion) ? mensajeDireccion(dirOk.motivo) : '';
   const cambiar = (k, v) => { setValores(p => ({ ...p, [k]: v })); setErrores(p => ({ ...p, [k]: undefined })); };
 
   const enviar = async (e) => {
@@ -95,9 +99,12 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
                 <textarea id={`co-${k}`} value={valores[k]} maxLength={MAX_OBSERVACIONES + 100} rows={3} onChange={e => cambiar(k, e.target.value)} />
               ) : (
                 <input id={`co-${k}`} type={k === 'telefono' ? 'tel' : 'text'} value={valores[k]} onChange={e => cambiar(k, e.target.value)}
-                  autoComplete={k === 'telefono' ? 'tel' : undefined} />
+                  autoComplete={k === 'telefono' ? 'tel' : undefined}
+                  aria-invalid={k === 'direccion' && errorDir ? true : undefined}
+                  aria-describedby={k === 'direccion' && errorDir ? 'co-direccion-error' : undefined} />
               )}
-              {errores[k] ? <div role="alert" className="t-error" data-testid={`error-${k}`}>{errores[k]}</div> : null}
+              {k === 'direccion' && errorDir ? <div id="co-direccion-error" role="alert" className="t-error" data-testid="error-direccion">{errorDir}</div> : null}
+              {k !== 'direccion' && errores[k] ? <div role="alert" className="t-error" data-testid={`error-${k}`}>{errores[k]}</div> : null}
             </div>
           ))}
           {/* Campo trampa (honeypot): los clientes reales no lo ven ni lo completan. */}
@@ -106,7 +113,7 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
             <input id="co-sitio" name="sitio_web" tabIndex={-1} autoComplete="off" value={hp} onChange={e => setHp(e.target.value)} />
           </div>
           {error ? <div role="alert" className="t-error" data-testid="error-envio">{error}</div> : null}
-          <button type="submit" className="t-btn t-btn-primario" disabled={enviando}>{enviando ? 'Enviando...' : 'Confirmar pedido'}</button>
+          <button type="submit" className="t-btn t-btn-primario" disabled={enviando || !dirOk.ok}>{enviando ? 'Enviando...' : 'Confirmar pedido'}</button>
         </form>
       </main>
     </div>

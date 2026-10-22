@@ -17,7 +17,7 @@ import { acotarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { avisoSinStock, stockParaAviso, resumenSinStock } from '../domain/stock';
-import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
+import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon, completarPreciosBulto } from '../domain/precios';
 import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
 import TipoFacturaSelector from '../components/TipoFacturaSelector';
@@ -471,9 +471,12 @@ const Facturacion = () => {
       if (prev.some(i => i.productoId === productoId)) {
         return sortItems(prev.map(i => i.productoId === productoId ? reprecio({ ...i, cantidad: i.cantidad + cantRestaurada }) : i));
       }
-      return sortItems([...prev, {
+      // REQ-FRB: si el producto tiene precio de bulto, el renglón lo congela y re-precia.
+      const base = {
         productoId, nombre: r.nombre, precio: Number(r.precio) || 0, precioOriginal: Number(r.precio) || 0, cantidad: cantRestaurada,
-      }]);
+      };
+      const prod = (productos || []).find(p => p.id === productoId);
+      return sortItems([...prev, completarPreciosBulto(base, prod)]);
     });
     setDraftByPid(prev => {
       const next = {

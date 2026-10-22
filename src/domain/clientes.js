@@ -27,6 +27,7 @@ export const CAMPOS_CLIENTE = [
   { key: 'pais', label: 'País' },
   { key: 'tipoIva', label: 'Tipo de IVA', tipo: 'select', opciones: TIPOS_IVA },
   { key: 'cuit', label: 'CUIT' },
+  { key: 'contacto', label: 'Nombre de contacto' },
   { key: 'telefono', label: 'Celular', tipo: 'tel' },
   { key: 'vendedor', label: 'Vendedor', tipo: 'vendedor' },
   { key: 'cobrador', label: 'Cobrador' },
@@ -37,7 +38,7 @@ export const CAMPOS_CLIENTE = [
 
 export const clienteVacio = (now = new Date()) => ({
   codigo: '', nombre: '', direccion: '', ciudad: '', codigoPostal: '', provincia: '',
-  zona: '', pais: 'Argentina', tipoIva: '', cuit: '', telefono: '', vendedor: '',
+  zona: '', pais: 'Argentina', tipoIva: '', cuit: '', contacto: '', telefono: '', vendedor: '',
   cobrador: '', fechaAlta: hoyISO(now), tipoCliente: '', rubro: '',
 });
 
@@ -65,6 +66,7 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
     pais: texto(form.pais, 60) || 'Argentina',
     tipoIva: texto(form.tipoIva, 40),
     cuit: '',
+    contacto: texto(form.contacto, 80),
     telefono: soloDigitos(form.telefono).slice(0, 15),
     vendedor: texto(form.vendedor, 80),
     cobrador: texto(form.cobrador, 80),
@@ -119,6 +121,7 @@ export const clienteExtraToRemote = (c = {}) => ({
   pais: c.pais || null,
   tipo_iva: c.tipoIva || null,
   cuit: c.cuit || null,
+  contacto: (c.contacto && String(c.contacto).trim()) || null,
   vendedor: c.vendedor || null,
   cobrador: c.cobrador || null,
   fecha_alta: c.fechaAlta || null,
@@ -139,10 +142,26 @@ export const clienteExtraFromRemote = (r = {}, local = {}) => {
     pais: pick('pais', 'pais'),
     tipoIva: pick('tipo_iva', 'tipoIva'),
     cuit: pick('cuit', 'cuit'),
+    contacto: pick('contacto', 'contacto'),
     vendedor: pick('vendedor', 'vendedor'),
     cobrador: pick('cobrador', 'cobrador'),
     fechaAlta: pick('fecha_alta', 'fechaAlta'),
     tipoCliente: pick('tipo_cliente', 'tipoCliente'),
     rubro: pick('rubro', 'rubro'),
   };
+};
+
+// AC-CON-1: línea de la lista: codigo · direccion · contacto · celular (sin vacíos).
+export const resumenCliente = (c = {}) =>
+  [c.codigo, c.direccion, c.contacto, c.telefono].filter(x => x && String(x).trim()).join(' · ');
+
+// Escalón de sync (R1): quita la columna `contacto` si Supabase todavía no la tiene.
+export const sinContacto = (row = {}) => {
+  const { contacto, ...resto } = row; // eslint-disable-line no-unused-vars
+  return resto;
+};
+
+export const nombraColumnaContacto = (error) => {
+  const msg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return /\bcontacto\b/.test(msg);
 };

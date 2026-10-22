@@ -61,6 +61,7 @@ const INFO_CLIENTE = {
   pais: { obligatorio: 'No', formato: 'Texto (vacío = Argentina)', ejemplo: 'Argentina' },
   tipoIva: { obligatorio: 'No', formato: 'Uno de la lista', ejemplo: 'Responsable Inscripto' },
   cuit: { obligatorio: 'Sí, salvo Consumidor Final o sin tipo de IVA', formato: '11 dígitos, con o sin guiones. Se valida el dígito verificador', ejemplo: '20-12345678-6' },
+  contacto: { obligatorio: 'No', formato: 'Texto, hasta 80 caracteres', ejemplo: 'Pepe Gómez' },
   telefono: { obligatorio: 'No', formato: 'Entre 8 y 15 dígitos', ejemplo: '3415551234' },
   vendedor: { obligatorio: 'No', formato: 'Nombre de un vendedor activo. Si no existe, la fila se rechaza', ejemplo: '' },
   cobrador: { obligatorio: 'No', formato: 'Texto', ejemplo: '' },
@@ -144,6 +145,7 @@ const ALIAS = {
     iva: 'tipoIva', condicioniva: 'tipoIva',
     cuil: 'cuit', cuitcuil: 'cuit',
     telefono: 'telefono', tel: 'telefono',
+    contacto: 'contacto', nombredecontacto: 'contacto', nombrecontacto: 'contacto', personadecontacto: 'contacto',
     fechaalta: 'fechaAlta',
   },
 };
@@ -367,7 +369,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   };
 };
 
-const TEXTO_CLIENTE = { codigo: 30, nombre: 120, direccion: 160, ciudad: 80, zona: 60, pais: 60, cobrador: 80, tipoCliente: 60, rubro: 60, codigoPostal: 10 };
+const TEXTO_CLIENTE = { codigo: 30, nombre: 120, direccion: 160, ciudad: 80, zona: 60, pais: 60, cobrador: 80, contacto: 80, tipoCliente: 60, rubro: 60, codigoPostal: 10 };
 
 /**
  * Valida/normaliza una fila de clientes con las reglas de ClienteForm.

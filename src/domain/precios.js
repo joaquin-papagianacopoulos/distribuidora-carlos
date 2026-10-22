@@ -66,6 +66,43 @@ export function precioAplicadoRenglon(item, cantidad) {
   return { ...item, precio: r.precio, precioPorBulto: r.porBulto };
 }
 
+// REQ-FRB (AC-FRB-1): renglones que no congelaron el precio de bulto (pedidos web
+// aceptados, faltantes destachados) lo completan desde el producto, SOLO si el
+// precio unitario del renglón sigue siendo el del producto (si cambió, queda legacy).
+export function completarPreciosBulto(item, producto) {
+  if (!item || typeof item !== 'object' || !producto || typeof producto !== 'object') return item;
+  if (Number(item.precioBultoOriginal) > 0) return item;
+  if (esPrecioManual(item)) return item;
+  const pb = aPrecio(producto.precioBulto);
+  const bx = normalizarBultoX(producto.bultoX);
+  if (!(pb > 0) || bx === null) return item;
+  const base = Number(item.precioOriginal ?? item.precio);
+  if (!Number.isFinite(base) || aPrecio(base) !== aPrecio(producto.precio)) return item;
+  const congelado = {
+    ...item,
+    precioOriginal: base,
+    precioBultoOriginal: pb,
+    precioBultoX: bx,
+  };
+  return precioAplicadoRenglon(congelado, item.cantidad);
+}
+
+// REQ-FRB (AC-FRB-2/3): totales de la boleta. El precio de bulto NO cuenta como
+// descuento (la base es precioBaseRenglon); el descuento manual sí.
+export function totalesBoleta(items) {
+  const lista = Array.isArray(items) ? items : [];
+  let total = 0;
+  let base = 0;
+  for (const i of lista) {
+    const c = Number(i?.cantidad) || 0;
+    total += c * (Number(i?.precio) || 0);
+    base += c * precioBaseRenglon(i);
+  }
+  const descuento = Math.max(0, base - total);
+  const descuentoPct = base > 0 ? Math.round((descuento / base) * 100) : 0;
+  return { total, totalSinDescuento: base, descuento, descuentoPct };
+}
+
 // AC-PBU-1: aviso (no bloquea) si el precio llevando bulto supera al unitario.
 export function avisoPrecioBulto(precio, precioBulto) {
   const p = aCentavos(precio);

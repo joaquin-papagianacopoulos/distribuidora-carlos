@@ -25,7 +25,7 @@ const sembrarBorrador = (vendedor, cantidad = 5, extra = {}) => {
   localStorage.setItem(`nuevoPedidoDraft:${vendedor.id}`, JSON.stringify({
     version: 1,
     clienteQ: 'Kiosco',
-    clienteNombre: 'Kiosco',
+    clienteNombre: 'Kiosco', direccion: 'Mitre 123',
     items: [{ productoId: 'p1', nombre: 'Coca 500', precio: 10, precioOriginal: 10, cantidad, ...extra }],
   }));
 };
@@ -178,7 +178,7 @@ describe('AC-BUL-9 Nuevo Pedido: unidad por defecto', () => {
     await act(async () => { sugg.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
   };
   const sembrarSoloCliente = () => {
-    localStorage.setItem('nuevoPedidoDraft:2', JSON.stringify({ version: 1, clienteQ: 'Kiosco', clienteNombre: 'Kiosco', items: [] }));
+    localStorage.setItem('nuevoPedidoDraft:2', JSON.stringify({ version: 1, clienteQ: 'Kiosco', clienteNombre: 'Kiosco', direccion: 'Mitre 123', items: [] }));
   };
 
   test('AC-BUL-9 agregar producto (arranca en 1) y tocar "+ Bulto" x12 deja 12, no 13', async () => {

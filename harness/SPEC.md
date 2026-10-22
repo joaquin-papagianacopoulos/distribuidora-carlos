@@ -572,3 +572,29 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 - **AC-NEG-1** En Ingreso de mercadería, el tipo de la cabecera y el de cada renglón ofrecen Factura A, Factura B y **En negro**; un valor fuera de esos tres se rechaza con error en el campo.
 - **AC-NEG-2** Subtotales del ingreso, historial (filtro "Solo en negro" y totales) y "qué entró de un producto" muestran En negro aparte de A y B; los PDF (comprobante e historial) suman la columna En negro. Ingresos viejos siguen igual.
 - **AC-NEG-3** Migración `017_compras_en_negro.sql`: `ingresos_costos.tipo_cabecera` y `admin_compras_guardar` aceptan `'N'` (validado en el servidor); idempotente y sin tocar datos.
+
+---
+
+## REQ-CON — Nombre de contacto antes del celular en datos de clientes
+
+> Pedido del dueño 2026-10-22 (`harness/pedidos/2026-10-22_LOTE-AJUSTES.md`).
+
+- **AC-CON-1** En la lista de clientes y en el detalle/formulario, el **nombre de contacto** se muestra inmediatamente **antes del celular**. Si el cliente no tiene campo de contacto, se agrega `contacto` (columna `contacto`, opcional, texto) con migración tolerante y sync que no falla si la columna no existe aún; clientes viejos siguen funcionando.
+- **AC-CON-2** El orden también se respeta en exportaciones/plantilla Excel de clientes y PDF donde hoy aparezca el celular (un Excel viejo sin la columna se importa igual).
+
+## REQ-DIR — Dirección exacta obligatoria para enviar pedido
+
+- **AC-DIR-1** En el carrito/checkout de la tienda y en Nuevo pedido, si la dirección de entrega está vacía o no es "exacta" (función pura: calle y número, ej. "Av. Siempreviva 742"; solo texto sin número, o menos de 5 caracteres, se rechaza; se acepta "s/n" o "S/N" explícito), el botón de enviar queda deshabilitado y el campo muestra el error.
+- **AC-DIR-2** El servidor (`tienda_crear_pedido`) aplica la misma validación y rechaza el pedido; un cliente manipulado no pasa. Pedidos y clientes viejos no se ven afectados.
+- **AC-DIR-3** Función pura `direccionExacta(texto)` en `src/domain/` con tests (vacío, solo calle, solo número, "s/n", espacios, tildes).
+
+## REQ-FRB — Precio de bulto al fraccionar y llegar al bulto (factura)
+
+- **AC-FRB-1** Al fraccionar productos (fragancias vendidas por unidades sueltas), cuando la cantidad del renglón llega a `bultoX` o más, el renglón usa `precioBulto` (regla REQ-PBU / `precioAplicado`) y así queda en **boleta, factura y PDF**: precio unitario aplicado, `precioPorBulto: true` y total correcto.
+- **AC-FRB-2** El PDF/factura muestra que se aplicó precio de bulto ("x precio de bulto") y los totales coinciden con los de pantalla; bajar de nuevo del bulto vuelve al precio por unidad. Precio manual del admin se respeta (AC-PBU-3).
+- **AC-FRB-3** Tests de dominio y de generación de PDF/boleta con el ejemplo de AC-PBU (unidad $900, bulto $800, x16: 10 u. → $9.000; 16 u. → $12.800).
+
+> Aclaraciones del RUN 20261022-1200 (sin cambiar AC):
+> - REQ-DIR S1: Nuevo pedido no tiene dirección propia; la "dirección de entrega" es `cliente.direccion` y se guarda en el cliente al enviar. S2: pedidos y clientes viejos no se re-validan.
+> - REQ-FRB S3: el precio de bulto deja de verse como "descuento" en la boleta (base = `precioBaseRenglon`); el descuento manual sí se muestra.
+> - REQ-CON S5: hoy ningún PDF imprime el celular del cliente; no se agregó.

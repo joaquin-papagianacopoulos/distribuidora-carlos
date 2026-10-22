@@ -55,15 +55,15 @@ const etiquetas = () => [...container.querySelectorAll('label.input-label')]
 // 16, porque el cliente ya no tiene comisión (REQ-COMR).
 const ETIQUETAS_SPEC = [
   'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal',
-  'Provincia', 'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Celular', 'Vendedor', 'Cobrador',
+  'Provincia', 'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Nombre de contacto', 'Celular', 'Vendedor', 'Cobrador',
   'Fecha de alta', 'Tipo de cliente', 'Rubro',
 ];
 
 describe('ClienteForm', () => {
-  it('AC-CLI-1 AC-COMR-1 muestra exactamente los 16 campos con las etiquetas del SPEC, en orden (sin Comisión)', async () => {
+  it('AC-CLI-1 AC-COMR-1 muestra exactamente los 17 campos con las etiquetas del SPEC, en orden (sin Comisión)', async () => {
     await render({ onGuardar: jest.fn() });
     expect(etiquetas()).toEqual(ETIQUETAS_SPEC);
-    expect(etiquetas()).toHaveLength(16);
+    expect(etiquetas()).toHaveLength(17);
     expect(campo('comision')).toBeNull();
     // Obligatorios marcados con *
     const req = [...container.querySelectorAll('label.input-label')].filter(l => l.textContent.endsWith(' *')).map(l => l.htmlFor);

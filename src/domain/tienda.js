@@ -10,6 +10,7 @@ import { precioAplicado } from './precios';
 import { minimoEfectivo, cantidadInicialConMinimo } from './minimos';
 import { texto, validarCuit, formatearCuit, soloDigitos } from './validacion';
 import { PROVINCIAS } from './clientes';
+import { direccionExacta, mensajeDireccion } from './direccion';
 
 export const MAX_RENGLONES = 150;
 export const MAX_OBSERVACIONES = 500;
@@ -394,7 +395,9 @@ export function validarCheckout(form = {}) {
   const dig = soloDigitos(datos.telefono);
   if (!datos.telefono) errores.telefono = 'Ingresá un teléfono o WhatsApp';
   else if (dig.length < 8 || dig.length > 15) errores.telefono = 'El teléfono debe tener entre 8 y 15 dígitos';
-  if (!datos.direccion) errores.direccion = 'Ingresá la dirección de entrega';
+  // REQ-DIR (AC-DIR-1): calle y número (o "s/n").
+  const dir = direccionExacta(datos.direccion);
+  if (!dir.ok) errores.direccion = mensajeDireccion(dir.motivo);
   if (!datos.ciudad) errores.ciudad = 'Ingresá la ciudad';
   if (datos.cp && !/^[A-Z0-9]{4,8}$/.test(datos.cp)) errores.cp = 'Código postal inválido';
   if (datos.provincia && !PROVINCIAS.includes(datos.provincia)) errores.provincia = 'Provincia inválida';

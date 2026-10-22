@@ -3,7 +3,7 @@ import { normalizePedidoOrdenEntrega } from '../utils/ordenEntrega';
 import { isPedidoOculto, makePedidoEliminado, normalizePedidoFecha } from '../utils/pedidos';
 import { fetchProductImage, isImageSearchConfigured, ImageSearchQuotaError } from '../services/imageSearch';
 import { detectarMarca } from '../utils/brands';
-import { clienteExtraToRemote, clienteExtraFromRemote } from '../domain/clientes';
+import { clienteExtraToRemote, clienteExtraFromRemote, sinContacto, nombraColumnaContacto } from '../domain/clientes';
 import { productoExtraToRemote, productoExtraFromRemote, productoVentaToRemote, productoPreciosToRemote, COLUMNAS_PRODUCTO_PUBLICAS, columnasSinFaltante, columnasSinLaMasNueva } from '../domain/productos';
 import { bajarCambiosPrecio } from '../services/cambiosPrecioService';
 import { normalizarBultoNombre } from '../domain/unidadVenta';
@@ -715,8 +715,26 @@ export const syncClientes = async () => {
       const basicos = filasLegacy.filter(l => !conExtras(l));
       let err = null; let leg = false;
       if (extras.length) {
-        const r = await upsertTolerante('clientes', extras.map(x => x[0]), extras.map(x => sinOrdenZona(x[1])));
-        err = r.error; leg = r.legacy;
+        const completas = extras.map(x => x[0]);
+        const legacyRows = extras.map(x => sinOrdenZona(x[1]));
+        // REQ-CON (R1): escalón intermedio. Si solo falta `contacto` (migración 019
+        // sin correr) se suben igual codigo, cuit, etc. y queda extrasPendientes.
+        const { error: e1 } = await supabase.from('clientes').upsert(completas, { onConflict: 'id' });
+        if (!e1) {
+          err = null;
+        } else if (!esColumnaInexistente(e1)) {
+          err = e1;
+        } else if (nombraColumnaContacto(e1)) {
+          if (!avisosEscalon.has('contacto')) {
+            avisosEscalon.add('contacto');
+            console.warn('Supabase: falta la columna "contacto" en "clientes". Correr supabase/migrations/019_ajustes_contacto_direccion.sql. Se sube el resto.');
+          }
+          const r = await upsertTolerante('clientes', completas.map(sinContacto), legacyRows);
+          err = r.error; leg = true;
+        } else {
+          const r2 = await supabase.from('clientes').upsert(legacyRows, { onConflict: 'id' });
+          err = r2.error; leg = true;
+        }
       }
       if (!err && basicos.length) {
         const r = await upsertTolerante('clientes', basicos, basicos.map(sinOrdenZona));

@@ -124,7 +124,7 @@ describe('AC-PLA-1 / AC-PLA-2 botones de plantilla', () => {
     const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
     const enc = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })[0];
     expect(enc).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
-    expect(enc).toHaveLength(16);
+    expect(enc).toHaveLength(17);
     expect(enc).not.toContain('Comisión');
   });
 

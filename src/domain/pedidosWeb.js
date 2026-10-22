@@ -5,6 +5,7 @@
 import { clienteVacio } from './clientes';
 import { texto, soloDigitos, redondear2, esFechaISO, hoyISO } from './validacion';
 import { congelarBultosItems, validarMultiplosItems } from './unidadVenta';
+import { completarPreciosBulto } from './precios';
 
 export const WEB_ESTADOS = Object.freeze(['por_revisar', 'aceptado', 'rechazado']);
 export const MOTIVO_MIN = 3;
@@ -185,7 +186,9 @@ export function armarItemsAceptar(items, productosById = new Map(), { previos } 
     const cantidad = Number(it.cantidad);
     const precio = Number(it.precio);
     if (!Number.isInteger(cantidad) || cantidad < 1 || !Number.isFinite(precio) || precio < 0) continue;
-    limpios.push({ ...it, cantidad, precio, subtotal: redondear2(Math.round(precio * 100) * cantidad / 100) });
+    // REQ-FRB (AC-FRB-1): completa los precios de bulto que el pedido web no traía.
+    const c = completarPreciosBulto({ ...it, cantidad, precio }, (productosById instanceof Map && it.productoId != null ? productosById.get(String(it.productoId)) : undefined));
+    limpios.push({ ...c, subtotal: redondear2(Math.round(Number(c.precio) * 100) * cantidad / 100) });
   }
   const conBultos = congelarBultosItems(limpios, productosById, { previos });
   const total = redondear2(conBultos.reduce((a, it) => a + Math.round(it.precio * 100) * it.cantidad, 0) / 100);

@@ -97,9 +97,9 @@ describe('AC-PLA-3 AC-PLA-4 encabezados con tildes, mayusculas y basura invisibl
   });
 
   it.each([
-    ['MAYUSCULAS con tilde', ['CÓDIGO CLIENTE', 'RAZÓN SOCIAL', 'DOMICILIO DE ENTREGA', 'CIUDAD', 'CÓDIGO POSTAL', 'PROVINCIA', 'ZONA', 'PAÍS', 'TIPO DE IVA', 'CUIT', 'CELULAR', 'VENDEDOR', 'COBRADOR', 'FECHA DE ALTA', 'TIPO DE CLIENTE', 'RUBRO']],
-    ['sin tildes', ['codigo cliente', 'razon social', 'domicilio de entrega', 'ciudad', 'codigo postal', 'provincia', 'zona', 'pais', 'tipo de iva', 'cuit', 'celular', 'vendedor', 'cobrador', 'fecha de alta', 'tipo de cliente', 'rubro']],
-  ])('AC-PLA-4 clientes %s: las 16 columnas se mapean a su campo', (_n, headers) => {
+    ['MAYUSCULAS con tilde', ['CÓDIGO CLIENTE', 'RAZÓN SOCIAL', 'DOMICILIO DE ENTREGA', 'CIUDAD', 'CÓDIGO POSTAL', 'PROVINCIA', 'ZONA', 'PAÍS', 'TIPO DE IVA', 'CUIT', 'NOMBRE DE CONTACTO', 'CELULAR', 'VENDEDOR', 'COBRADOR', 'FECHA DE ALTA', 'TIPO DE CLIENTE', 'RUBRO']],
+    ['sin tildes', ['codigo cliente', 'razon social', 'domicilio de entrega', 'ciudad', 'codigo postal', 'provincia', 'zona', 'pais', 'tipo de iva', 'cuit', 'nombre de contacto', 'celular', 'vendedor', 'cobrador', 'fecha de alta', 'tipo de cliente', 'rubro']],
+  ])('AC-PLA-4 clientes %s: las 17 columnas se mapean a su campo', (_n, headers) => {
     const m = mapearEncabezados(headers, 'clientes');
     COLUMNAS_PLANTILLA.clientes.forEach((c, i) => expect(m.indices[c.key]).toBe(i));
     expect(m.ignoradas).toEqual([]);

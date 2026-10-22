@@ -147,3 +147,20 @@ describe('AC-FAB-3 PDF Facturas a emitir', () => {
     expect(f.size).toBeGreaterThan(300);
   });
 });
+
+describe('AC-FRB-2 AC-FRB-3 boleta con precio de bulto', () => {
+  const base = { productoId: 1, nombre: 'Dos Corazones', precioOriginal: 900, precioBultoOriginal: 800, precioBultoX: 16 };
+
+  it('AC-FRB-3 16 u. -> $12.800, marca "x precio de bulto" y sin "Total sin descuento"', async () => {
+    await generarFacturaFile(pedido({ items: [{ ...base, cantidad: 16, precio: 800, precioPorBulto: true }] }), {}, {}, 0, null);
+    expect(buscar(/x precio de bulto/).length).toBeGreaterThan(0);
+    expect(buscar(/12\.800/).length).toBeGreaterThan(0);
+    expect(buscar(/Total sin descuento/i)).toHaveLength(0);
+  });
+
+  it('AC-FRB-3 10 u. -> $9.000, sin marca de bulto', async () => {
+    await generarFacturaFile(pedido({ items: [{ ...base, cantidad: 10, precio: 900, precioPorBulto: false }] }), {}, {}, 0, null);
+    expect(buscar(/x precio de bulto/)).toHaveLength(0);
+    expect(buscar(/9\.000/).length).toBeGreaterThan(0);
+  });
+});

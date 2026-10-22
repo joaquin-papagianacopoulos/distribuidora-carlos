@@ -2,7 +2,8 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { fuzzySearch, getTodayStr, formatFecha, searchProductos } from '../utils/fuzzy';
-import { addCliente } from '../db';
+import { addCliente, updateCliente } from '../db';
+import { direccionExacta, mensajeDireccion } from '../domain/direccion';
 import { crearPedidoOnlineFirst } from '../services/pedidoRepository';
 import { normalizePedidoFecha } from '../utils/pedidos';
 import { avisoSinStock, stockParaAviso } from '../domain/stock';
@@ -248,6 +249,9 @@ const NuevoPedido = () => {
   const [clienteQ, setClienteQ] = useState(() => draftInicial?.clienteQ || '');
   const [clienteId, setClienteId] = useState(() => draftInicial?.clienteId || null);
   const [clienteNombre, setClienteNombre] = useState(() => draftInicial?.clienteNombre || '');
+  const [direccion, setDireccion] = useState(() => draftInicial?.direccion || '');
+  const dirOk = direccionExacta(direccion);
+  const errorDir = !dirOk.ok && direccion.trim() !== '' ? mensajeDireccion(dirOk.motivo) : '';
   const [productoQ, setProductoQ] = useState(() => draftInicial?.productoQ || '');
   const [items, setItems] = useState(() => Array.isArray(draftInicial?.items) ? draftInicial.items : []);
   const [observaciones, setObservaciones] = useState(() => draftInicial?.observaciones || '');
@@ -263,6 +267,7 @@ const NuevoPedido = () => {
       clienteQ,
       clienteId,
       clienteNombre,
+      direccion,
       productoQ,
       items,
       observaciones,
@@ -274,7 +279,7 @@ const NuevoPedido = () => {
     } else {
       localStorage.removeItem(draftKey);
     }
-  }, [draftKey, fecha, clienteQ, clienteId, clienteNombre, productoQ, items, observaciones]);
+  }, [draftKey, fecha, clienteQ, clienteId, clienteNombre, direccion, productoQ, items, observaciones]);
 
   const clienteSugg = clienteQ.length >= 1 ? fuzzySearch(clienteQ, clientes, 'nombre', 5) : [];
   const productoLimit = productoQ.trim().length < 2 ? 40 : 120;
@@ -284,6 +289,7 @@ const NuevoPedido = () => {
     setClienteId(c.id);
     setClienteNombre(c.nombre);
     setClienteQ(c.nombre);
+    setDireccion(c.direccion || '');
     setShowClienteSugg(false);
   };
 
@@ -387,17 +393,25 @@ const NuevoPedido = () => {
 
     // Si el cliente no existe en el maestro, guardarlo para que aparezca en sugerencias otro dia.
     const nombreFinal = clienteNombre.trim();
+    // REQ-DIR (S1): la dirección de entrega vive en el cliente; defensa en profundidad.
+    const dirFinal = direccionExacta(direccion);
+    if (!dirFinal.ok) { setToast({ msg: mensajeDireccion(dirFinal.motivo), type: 'error' }); return; }
     let finalClienteId = clienteId || null;
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const existente = finalClienteId
+      ? (clientes || []).find(c => c.id === finalClienteId)
+      : (clientes || []).find(c => norm(c?.nombre) === norm(nombreFinal));
+    if (existente && String(existente.direccion || '').trim() !== dirFinal.valor) {
+      try { await updateCliente({ ...existente, direccion: dirFinal.valor }); } catch (e) { console.warn('No se pudo actualizar la dirección del cliente:', e?.message || String(e)); }
+    }
     if (!finalClienteId) {
-      const norm = (s) => String(s || '').trim().toLowerCase();
-      const existing = (clientes || []).find(c => norm(c?.nombre) === norm(nombreFinal));
-      if (existing) {
-        finalClienteId = existing.id;
+      if (existente) {
+        finalClienteId = existente.id;
       } else {
         try {
           finalClienteId = await addCliente({
             nombre: nombreFinal,
-            direccion: '',
+            direccion: dirFinal.valor,
             telefono: '',
             alias: '',
           });
@@ -429,6 +443,7 @@ const NuevoPedido = () => {
     setClienteQ('');
     setClienteId(null);
     setClienteNombre('');
+    setDireccion('');
     setProductoQ('');
     setObservaciones('');
     setFecha(getTodayStr());
@@ -545,6 +560,7 @@ const NuevoPedido = () => {
               setClienteQ(e.target.value);
               setClienteNombre(e.target.value);
               setClienteId(null);
+              setDireccion('');
               setShowClienteSugg(true);
             }}
             onFocus={() => setShowClienteSugg(true)}
@@ -566,6 +582,22 @@ const NuevoPedido = () => {
           )}
         </div>
 
+        {/* REQ-DIR (AC-DIR-1): dirección de entrega obligatoria y exacta (calle y número). */}
+        <div style={{ marginTop: 12 }}>
+          <label className="input-label" htmlFor="np-direccion">📍 Dirección de entrega *</label>
+          <input
+            id="np-direccion"
+            className="input"
+            value={direccion}
+            onChange={e => setDireccion(e.target.value)}
+            placeholder="Ej: Av. Siempreviva 742"
+            autoComplete="off"
+            aria-invalid={errorDir ? true : undefined}
+            aria-describedby={errorDir ? 'np-direccion-error' : undefined}
+          />
+          {errorDir && <div id="np-direccion-error" role="alert" data-testid="error-direccion" style={{ color: 'var(--red, #c0392b)', fontSize: 13, marginTop: 4 }}>{errorDir}</div>}
+        </div>
+
         <div style={{ marginTop: 12 }}>
           <label className="input-label">📅 Fecha del pedido</label>
           <input type="date" className="input" value={fecha} onChange={e => setFecha(e.target.value)} />
@@ -583,7 +615,7 @@ const NuevoPedido = () => {
         />
       </div>
 
-      <button className="btn btn-primary" onClick={guardar} style={{ marginTop: 4, marginBottom: 80 }}>
+      <button className="btn btn-primary" onClick={guardar} disabled={!dirOk.ok} style={{ marginTop: 4, marginBottom: 80 }}>
         ✓ Guardar Pedido
       </button>
 
