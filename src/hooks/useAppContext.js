@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   initDB,
   seedDemoData,
@@ -17,6 +17,7 @@ import {
   getPedidosProveedor,
 } from '../db';
 import { calcularStock } from '../domain/stock';
+import { soloProveedoresActivos } from '../domain/proveedores';
 import { tienePin, estaActivo } from '../domain/vendedores';
 import { syncStock } from '../services/stockService';
 import { syncComisiones } from '../services/comisionesService';
@@ -51,6 +52,7 @@ export const AppProvider = ({ children }) => {
   const [faltantes, setFaltantes] = useState([]);
   const [deudas, setDeudas] = useState([]);
   const [proveedores, setProveedores] = useState([]);
+  const proveedoresActivos = useMemo(() => soloProveedoresActivos(proveedores), [proveedores]);
   const [movimientosStock, setMovimientosStock] = useState([]);
   const [ingresos, setIngresos] = useState([]);
   const [stockMap, setStockMap] = useState(() => new Map());
@@ -96,7 +98,7 @@ export const AppProvider = ({ children }) => {
       getMovimientosStock(),
       getIngresos(),
     ]);
-    setProveedores(prov);
+    setProveedores(prov || []);
     setMovimientosStock(movs);
     setIngresos(ing);
     setStockMap(calcularStock(movs));
@@ -229,6 +231,22 @@ export const AppProvider = ({ children }) => {
         }
       }
 
+      // Stock (proveedores, ingresos y movimientos). Va DESPUES de subir los
+      // pedidos para que los movimientos de pedidos facturados offline ya
+      // tengan la ref con el id remoto. Si falla, no corta el resto.
+      // Va ANTES de los pulls de pedidos: si uno de esos falla, el stock igual se sincroniza.
+      step = 'syncStock';
+      try {
+        console.log('6c. syncStock...');
+        // Pull completo del ledger solo con el boton Sync manual; el arranque usa
+        // el cursor incremental (con solape), que alcanza para estar al dia.
+        await syncStock({ full: reason === 'manual' });
+      } catch (e) {
+        const msg = e?.message || String(e);
+        console.warn('syncStock fallo (se reintenta en el proximo sync):', msg);
+        setSyncError(`syncStock: ${msg}`);
+      }
+
       step = 'pullPedidosRecientes';
       console.log(`5. pullPedidosRecientes (${recentLimit})...`);
       {
@@ -260,21 +278,6 @@ export const AppProvider = ({ children }) => {
         }
 
         lastFaltantesSyncRef.current = Date.now();
-      }
-
-      // Stock (proveedores, ingresos y movimientos). Va DESPUES de subir los
-      // pedidos para que los movimientos de pedidos facturados offline ya
-      // tengan la ref con el id remoto. Si falla, no corta el resto.
-      step = 'syncStock';
-      try {
-        console.log('6c. syncStock...');
-        // Pull completo del ledger solo con el boton Sync manual; el arranque usa
-        // el cursor incremental (con solape), que alcanza para estar al dia.
-        await syncStock({ full: reason === 'manual' });
-      } catch (e) {
-        const msg = e?.message || String(e);
-        console.warn('syncStock fallo (se reintenta en el proximo sync):', msg);
-        setSyncError(`syncStock: ${msg}`);
       }
 
       // Comisiones (REQ-COM): solo admin. Reintenta cierres/anulaciones que
@@ -417,6 +420,29 @@ export const AppProvider = ({ children }) => {
     await recargar();
   }, [recargar, vendedorActual, zonaActiva]);
 
+  // Stock: productos + ledger de movimientos al dia (se usa al abrir la pantalla Stock y al
+  // volver a verla). No depende del resto del sync: si otro paso falla, este igual corre.
+  const syncStockAhora = useCallback(async () => {
+    if (!navigator.onLine) return { ok: false, motivo: 'offline' };
+    if (isSyncing.current) return { ok: false, motivo: 'ocupado' };
+    isSyncing.current = true;
+    try {
+      await syncPedidosPendientes(); // los movimientos de pedidos nuevos dependen de su id remoto
+      await syncProductos();
+      await downloadMaestros();
+      lastMaestrosSyncRef.current = Date.now();
+      await syncStock({ full: false });
+      await recargar();
+      return { ok: true };
+    } catch (e) {
+      console.warn('syncStockAhora error:', e?.message || e);
+      await recargar();
+      return { ok: false, motivo: 'error', mensaje: e?.message || String(e) };
+    } finally {
+      isSyncing.current = false;
+    }
+  }, [recargar]);
+
   // Resumen: sube lo pendiente y baja TODOS los pedidos del rango (sin filtro de zona/vendedor).
   const syncPedidosRango = useCallback(async (desde, hasta) => {
     if (!navigator.onLine) return { ok: false, motivo: 'offline' };
@@ -507,7 +533,9 @@ export const AppProvider = ({ children }) => {
       pedidos,
       faltantes,
       deudas,
-      proveedores,
+      // Pantallas y selectores usan solo los activos; el historial usa proveedoresTodos (nombres de los dados de baja).
+      proveedores: proveedoresActivos,
+      proveedoresTodos: proveedores,
       movimientosStock,
       ingresos,
       stockMap,
@@ -529,6 +557,7 @@ export const AppProvider = ({ children }) => {
       syncNow,
       syncPedidosFecha,
       syncPedidosRango,
+      syncStockAhora,
       syncPedidosCliente,
     }}>
       {children}

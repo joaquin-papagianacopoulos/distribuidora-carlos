@@ -18,7 +18,7 @@ import CambiosPrecio from './CambiosPrecio';
 import { listarRubros } from '../domain/rubros';
 import { conservarCostosDesconocidos } from '../domain/productos';
 import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
-import { ajustarStock } from '../services/stockService';
+import { ajustarStock, syncStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
 import { nuevoId } from '../domain/validacion';
 import { resumenCliente } from '../domain/clientes';
@@ -163,7 +163,7 @@ const ResultadoImport = ({ r, testId }) => {
 
 
 const Configuracion = () => {
-  const { productos, clientes, vendedores, vendedorActual, seleccionarVendedor, recargar, proveedores = [], stockMap, online = true } = useApp();
+  const { productos, clientes, vendedores, vendedorActual, seleccionarVendedor, recargar, proveedores = [], proveedoresTodos = null, ingresos = [], stockMap, online = true } = useApp();
   const isAdmin = Number(vendedorActual?.permiso || 2) === 1;
   const [tab, setTab] = useState('productos');
   const [showForm, setShowForm] = useState(false);
@@ -456,9 +456,29 @@ const Configuracion = () => {
     }
     else if (tab === 'proveedores') {
       // AC-PROV-3: no borrar si tiene productos asociados.
-      const chk = puedeBorrarProveedor(item.id, productos);
-      if (!chk.ok) {
-        alert(`No se puede borrar: el proveedor tiene ${chk.asociados} producto(s) asociado(s).`);
+      const chk = puedeBorrarProveedor(item.id, productos, ingresos);
+      if (chk.asociados) {
+        alert(`No se puede borrar: el proveedor tiene ${chk.asociados} producto(s) asociado(s). Pasalos a otro proveedor primero.`);
+        return;
+      }
+      if (chk.ingresos) {
+        // Con historial de compras no se borra (Supabase lo impide y se perderia el historial): baja logica.
+        if (!navigator.onLine) {
+          alert('Para dar de baja un proveedor tenés que tener internet.');
+          return;
+        }
+        if (!window.confirm(`"${item.descripcion}" tiene ${chk.ingresos} ingreso(s) en el historial, así que no se puede borrar.\n\n¿Darlo de baja? Deja de aparecer en las listas y el historial se conserva.`)) return;
+        try {
+          await putProveedor({ ...item, activo: false });
+          await syncStock();
+        } catch (e) {
+          // No subio (p. ej. falta la migracion 021): se deshace la baja local.
+          await putProveedor({ ...item, activo: true });
+          alert('No se pudo dar de baja el proveedor en el servidor:\n' + (e?.message || String(e)) + '\n\nSi dice que falta la columna "activo", correr supabase/migrations/021_proveedores_baja.sql.');
+          await recargar();
+          return;
+        }
+        await recargar();
         return;
       }
       if (!navigator.onLine) {
@@ -978,7 +998,7 @@ const Configuracion = () => {
         <ProveedorForm
           key={editItem?.id ?? 'nuevo'}
           inicial={editItem}
-          existentes={proveedores}
+          existentes={proveedoresTodos || proveedores}
           onGuardar={guardarProveedor}
           onCancelar={cerrarForm}
         />
