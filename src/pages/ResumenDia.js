@@ -1,5 +1,5 @@
 // src/pages/ResumenDia.js
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { getTodayStr, formatFecha } from '../utils/fuzzy';
 import { generarResumenDia, generarResumenRango } from '../utils/pdfGen';
@@ -9,7 +9,7 @@ const alpha = (a, b) =>
   String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' });
 
 const ResumenDia = () => {
-  const { pedidos, vendedores, vendedorActual, zonaActiva, setZona } = useApp();
+  const { pedidos, vendedores, vendedorActual, zonaActiva, setZona, syncPedidosRango, online } = useApp();
   const isAdmin = Number(vendedorActual?.permiso || 2) === 1;
 
   const hoy = getTodayStr();
@@ -18,6 +18,26 @@ const ResumenDia = () => {
   const [generando, setGenerando] = useState(false);
   const zona = String(zonaActiva || '');
   const [vendedorFiltro, setVendedorFiltro] = useState('');
+
+  // Estado de la actualizacion remota del rango (el resumen no puede depender solo de lo local).
+  const [actualizando, setActualizando] = useState(false);
+  const [estadoSync, setEstadoSync] = useState(null); // { ok, hora, mensaje, incompleto }
+
+  const actualizar = useCallback(async () => {
+    if (!isAdmin || !syncPedidosRango) return;
+    const d = String(desde || '').trim();
+    const h = String(hasta || '').trim();
+    if (!d || !h) return;
+    setActualizando(true);
+    const r = await syncPedidosRango(d <= h ? d : h, d <= h ? h : d);
+    setEstadoSync({ ...r, hora: new Date() });
+    setActualizando(false);
+  }, [isAdmin, syncPedidosRango, desde, hasta]);
+
+  // Al abrir y al cambiar el rango, baja los pedidos del servidor.
+  useEffect(() => {
+    if (online) actualizar();
+  }, [desde, hasta, online]);
 
   if (!isAdmin) {
     return (
@@ -43,6 +63,8 @@ const ResumenDia = () => {
       .filter(p => !vendedorFiltro || String(p.vendedorNombre || p.vendedor || '') === vendedorFiltro)
       .filter(p => normalizePedidoFecha(p.fecha) >= dd && normalizePedidoFecha(p.fecha) <= hh);
   }, [pedidos, desde, hasta, zona, vendedorFiltro]);
+
+  const sinSubir = useMemo(() => pedidosRango.filter(p => p.synced === false).length, [pedidosRango]);
 
   const { totalesPorProducto, totalGeneral, totalUnidades, pedidosCount } = useMemo(() => {
     const map = {};
@@ -124,9 +146,20 @@ const ResumenDia = () => {
           onChange={e => setHasta(e.target.value)}
         />
 
-        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text3)' }}>
-          Para actualizar datos remotos, toca Sync.
+        <div style={{ marginTop: 10, fontSize: 12, color: estadoSync && !estadoSync.ok ? 'var(--danger, #e5484d)' : 'var(--text3)' }}>
+          {actualizando && 'Actualizando desde el servidor...'}
+          {!actualizando && !online && 'Sin conexion: se muestran los datos de este dispositivo.'}
+          {!actualizando && online && estadoSync?.ok && `Actualizado ${estadoSync.hora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${estadoSync.incompleto ? ' (rango muy grande: puede faltar alguno)' : ''}`}
+          {!actualizando && online && estadoSync && !estadoSync.ok && `No se pudo actualizar: ${estadoSync.mensaje || 'error de red'}`}
         </div>
+        {sinSubir > 0 && (
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--warning, #b7791f)' }}>
+            {sinSubir} pedido(s) de este dispositivo todavia no se subieron al servidor.
+          </div>
+        )}
+        <button className="btn btn-secondary" onClick={actualizar} disabled={actualizando || !online} style={{ marginTop: 10 }}>
+          {actualizando ? 'Actualizando...' : '↻ Actualizar'}
+        </button>
       </div>
 
       <div className="stats-grid">

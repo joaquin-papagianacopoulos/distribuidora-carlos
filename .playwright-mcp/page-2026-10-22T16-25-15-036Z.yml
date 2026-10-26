@@ -1,0 +1,142 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]: Envíos a todo el país · Moto en CABA y GBA
+  - banner [ref=f3e3]:
+    - generic [ref=f3e4]:
+      - link "Coco Store BA, inicio" [ref=f3e5] [cursor=pointer]:
+        - /url: /
+        - img "Coco Store BA" [ref=f3e6]
+      - searchbox "Buscar productos" [ref=f3e11]
+      - link "Escribinos" [ref=f3e12] [cursor=pointer]:
+        - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quer%C3%ADa%20hacer%20una%20consulta.
+    - navigation "Categorías" [ref=f3e16]:
+      - generic [ref=f3e17]:
+        - button "Todos" [pressed] [ref=f3e18] [cursor=pointer]
+        - button "Descartables" [ref=f3e19] [cursor=pointer]
+        - button "Recargables" [ref=f3e20] [cursor=pointer]
+        - button "Pods" [ref=f3e21] [cursor=pointer]
+        - button "Líquidos" [ref=f3e22] [cursor=pointer]
+        - button "Perfumes" [ref=f3e23] [cursor=pointer]
+        - button "Otros" [ref=f3e24] [cursor=pointer]
+  - main [ref=f3e25]:
+    - region "Novedades" [ref=f3e26]:
+      - generic [ref=f3e29]:
+        - generic [ref=f3e30]:
+          - heading "Zaramay ya compró en Coco Store." [level=1] [ref=f3e31]:
+            - text: Zaramay ya compró
+            - generic [ref=f3e32]: en Coco Store.
+          - paragraph [ref=f3e33]: Perfumes importados y vapes, entregados en mano. Mirá el posteo en nuestro Instagram.
+          - generic [ref=f3e34]:
+            - link "Ver el posteo" [ref=f3e35] [cursor=pointer]:
+              - /url: https://www.instagram.com/p/DMobGvFJYV_/
+            - link "Ver perfumes" [ref=f3e36] [cursor=pointer]:
+              - /url: "#productos"
+        - generic [ref=f3e37]:
+          - img "Zaramay y el dueño de Coco Store con perfumes árabes sobre un auto" [ref=f3e38]
+          - img "Zaramay y el dueño de Coco Store en la calle, con la bolsa del pedido" [ref=f3e39]
+      - generic:
+        - button "Banner anterior" [ref=f3e40] [cursor=pointer]
+        - tablist "Elegir banner" [ref=f3e43]:
+          - tab "Banner 1 de 3" [selected] [ref=f3e44] [cursor=pointer]
+          - tab "Banner 2 de 3" [ref=f3e46] [cursor=pointer]
+          - tab "Banner 3 de 3" [ref=f3e47] [cursor=pointer]
+        - button "Banner siguiente" [ref=f3e48] [cursor=pointer]
+    - generic [ref=f3e52]:
+      - heading "Qué estás buscando" [level=2] [ref=f3e54]
+      - generic [ref=f3e55]:
+        - button "Descartables 3 productos" [ref=f3e56] [cursor=pointer]:
+          - generic [ref=f3e57]: Descartables
+          - generic [ref=f3e58]: 3 productos
+        - button "Recargables 1 producto" [ref=f3e59] [cursor=pointer]:
+          - generic [ref=f3e60]: Recargables
+          - generic [ref=f3e61]: 1 producto
+        - button "Pods 1 producto" [ref=f3e62] [cursor=pointer]:
+          - generic [ref=f3e63]: Pods
+          - generic [ref=f3e64]: 1 producto
+        - button "Líquidos 1 producto" [ref=f3e65] [cursor=pointer]:
+          - generic [ref=f3e66]: Líquidos
+          - generic [ref=f3e67]: 1 producto
+    - generic [ref=f3e69]:
+      - generic [ref=f3e70]:
+        - heading "Todos los productos" [level=2] [ref=f3e71]
+        - generic [ref=f3e72]: 7 productos
+      - generic [ref=f3e73]:
+        - article [ref=f3e74]:
+          - img "Elfbar ejemplo" [ref=f3e76]
+          - generic [ref=f3e77]:
+            - generic [ref=f3e78]: Descartables
+            - heading "Elfbar ejemplo" [level=3] [ref=f3e79]
+            - generic [ref=f3e80]: $ 27.000
+            - link "Pedir por WhatsApp" [ref=f3e81] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Elfbar%20ejemplo%20(%24%C2%A027.000)
+        - article [ref=f3e82]:
+          - generic [ref=f3e84]:
+            - generic [ref=f3e85]: Perfumes
+            - heading "Perfume árabe 100ml (ejemplo)" [level=3] [ref=f3e86]
+            - generic [ref=f3e87]: Consultar precio
+            - link "Pedir por WhatsApp" [ref=f3e88] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Perfume%20%C3%A1rabe%20100ml%20(ejemplo)
+        - article [ref=f3e89]:
+          - generic [ref=f3e91]:
+            - generic [ref=f3e92]: Líquidos
+            - heading "Liquido salt nic 30ml (ejemplo)" [level=3] [ref=f3e93]
+            - generic [ref=f3e94]: $ 9.000
+            - link "Pedir por WhatsApp" [ref=f3e95] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Liquido%20salt%20nic%2030ml%20(ejemplo)%20(%24%C2%A09.000)
+        - article [ref=f3e96]:
+          - generic [ref=f3e98]:
+            - generic [ref=f3e99]: Pods
+            - heading "Pods de repuesto x2 (ejemplo)" [level=3] [ref=f3e100]
+            - generic [ref=f3e101]: $ 12.000
+            - link "Pedir por WhatsApp" [ref=f3e102] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Pods%20de%20repuesto%20x2%20(ejemplo)%20(%24%C2%A012.000)
+        - article [ref=f3e103]:
+          - generic [ref=f3e105]:
+            - generic [ref=f3e106]: Recargables
+            - heading "Vape recargable kit inicial (ejemplo)" [level=3] [ref=f3e107]
+            - generic [ref=f3e108]: $ 45.000
+            - link "Pedir por WhatsApp" [ref=f3e109] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Vape%20recargable%20kit%20inicial%20(ejemplo)%20(%24%C2%A045.000)
+        - article [ref=f3e110]:
+          - generic [ref=f3e112]:
+            - generic [ref=f3e113]: Descartables
+            - heading "Vape descartable Frutilla (ejemplo)" [level=3] [ref=f3e114]
+            - generic [ref=f3e115]: $ 18.000
+            - link "Pedir por WhatsApp" [ref=f3e116] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Vape%20descartable%20Frutilla%20(ejemplo)%20(%24%C2%A018.000)
+        - article [ref=f3e117]:
+          - generic [ref=f3e119]:
+            - generic [ref=f3e120]: Descartables
+            - heading "Vape descartable Ice Mint (ejemplo)" [level=3] [ref=f3e121]
+            - generic [ref=f3e122]: $ 18.000
+            - link "Pedir por WhatsApp" [ref=f3e123] [cursor=pointer]:
+              - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quiero%20pedir%3A%20Vape%20descartable%20Ice%20Mint%20(ejemplo)%20(%24%C2%A018.000)
+    - generic [ref=f3e125]:
+      - heading "Cómo comprar" [level=2] [ref=f3e127]
+      - list [ref=f3e128]:
+        - listitem [ref=f3e129]:
+          - generic [ref=f3e130]: Elegí tu producto
+          - paragraph [ref=f3e131]: Mirá el catálogo y tocá “Pedir” en el que te guste.
+        - listitem [ref=f3e132]:
+          - generic [ref=f3e133]: Escribinos
+          - paragraph [ref=f3e134]: Se abre WhatsApp con el pedido listo. Confirmamos stock y forma de pago.
+        - listitem [ref=f3e135]:
+          - generic [ref=f3e136]: Recibilo
+          - paragraph [ref=f3e137]: Moto en CABA y GBA, o envío a todo el país.
+  - contentinfo [ref=f3e138]:
+    - generic [ref=f3e139]:
+      - generic [ref=f3e140]:
+        - img "Coco Store BA" [ref=f3e141]
+        - paragraph [ref=f3e142]: Importados con envío a todo el país. Vapes, pods, líquidos y perfumes.
+      - generic [ref=f3e143]:
+        - heading "Contacto" [level=4] [ref=f3e144]
+        - link "WhatsApp" [ref=f3e145] [cursor=pointer]:
+          - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quer%C3%ADa%20hacer%20una%20consulta.
+        - link "Instagram @cocostoreba" [ref=f3e146] [cursor=pointer]:
+          - /url: https://www.instagram.com/cocostoreba/
+      - generic [ref=f3e147]:
+        - heading "Envíos" [level=4] [ref=f3e148]
+        - paragraph [ref=f3e149]: Moto en CABA y GBA.
+        - paragraph [ref=f3e150]: Correo a todo el país.
+      - paragraph [ref=f3e151]: Venta exclusiva a mayores de 18 años. Los precios y el stock pueden cambiar sin aviso.
+  - link "Escribinos por WhatsApp" [ref=f3e152] [cursor=pointer]:
+    - /url: https://wa.me/5401164703346?text=Hola%20Coco%20Store!%20Quer%C3%ADa%20hacer%20una%20consulta.

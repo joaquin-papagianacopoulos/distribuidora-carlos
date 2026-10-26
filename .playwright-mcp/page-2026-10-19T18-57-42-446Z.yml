@@ -1,0 +1,134 @@
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e2]: Envíos a todo el país · Moto en CABA y GBA
+  - banner [ref=f10e3]:
+    - generic [ref=f10e4]:
+      - link "Coco Store BA, inicio" [ref=f10e5] [cursor=pointer]:
+        - /url: /
+        - img "Coco Store BA" [ref=f10e6]
+      - searchbox "Buscar productos" [ref=f10e11]
+      - link "Escribinos" [ref=f10e12] [cursor=pointer]:
+        - /url: https://ig.me/m/cocostoreba
+    - navigation "Categorías" [ref=f10e16]:
+      - generic [ref=f10e17]:
+        - button "Todos" [pressed] [ref=f10e18] [cursor=pointer]
+        - button "Descartables" [ref=f10e19] [cursor=pointer]
+        - button "Recargables" [ref=f10e20] [cursor=pointer]
+        - button "Pods" [ref=f10e21] [cursor=pointer]
+        - button "Líquidos" [ref=f10e22] [cursor=pointer]
+        - button "Perfumes" [ref=f10e23] [cursor=pointer]
+        - button "Otros" [ref=f10e24] [cursor=pointer]
+  - main [ref=f10e25]:
+    - generic [ref=f10e26]:
+      - generic [ref=f10e27]:
+        - generic [ref=f10e28]:
+          - heading "Vapes originales a tu puerta." [level=1] [ref=f10e29]:
+            - text: Vapes originales
+            - generic [ref=f10e30]: a tu puerta.
+          - paragraph [ref=f10e31]: Descartables, recargables, pods y líquidos. Elegí, escribinos por WhatsApp y te lo llevamos.
+          - generic [ref=f10e32]:
+            - link "Ver los vapes" [ref=f10e33] [cursor=pointer]:
+              - /url: "#productos"
+            - link "Pedir por WhatsApp" [ref=f10e34] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - img "El coco de Coco Store dándole una patada a una pelota" [ref=f10e36]
+      - generic [ref=f10e37]: "@cocostoreba"
+    - generic [ref=f10e39]:
+      - heading "Qué estás buscando" [level=2] [ref=f10e41]
+      - generic [ref=f10e42]:
+        - button "Descartables 3 productos" [ref=f10e43] [cursor=pointer]:
+          - generic [ref=f10e44]: Descartables
+          - generic [ref=f10e45]: 3 productos
+        - button "Recargables 1 producto" [ref=f10e46] [cursor=pointer]:
+          - generic [ref=f10e47]: Recargables
+          - generic [ref=f10e48]: 1 producto
+        - button "Pods 1 producto" [ref=f10e49] [cursor=pointer]:
+          - generic [ref=f10e50]: Pods
+          - generic [ref=f10e51]: 1 producto
+        - button "Líquidos 1 producto" [ref=f10e52] [cursor=pointer]:
+          - generic [ref=f10e53]: Líquidos
+          - generic [ref=f10e54]: 1 producto
+    - generic [ref=f10e56]:
+      - generic [ref=f10e57]:
+        - heading "Todos los productos" [level=2] [ref=f10e58]
+        - generic [ref=f10e59]: 7 productos
+      - generic [ref=f10e60]:
+        - article [ref=f10e61]:
+          - img "Elfbar ejemplo" [ref=f10e63]
+          - generic [ref=f10e64]:
+            - generic [ref=f10e65]: Descartables
+            - heading "Elfbar ejemplo" [level=3] [ref=f10e66]
+            - generic [ref=f10e67]: $ 27.000
+            - link "Pedir por WhatsApp" [ref=f10e68] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e69]:
+          - generic [ref=f10e71]:
+            - generic [ref=f10e72]: Perfumes
+            - heading "Perfume árabe 100ml (ejemplo)" [level=3] [ref=f10e73]
+            - generic [ref=f10e74]: Consultar precio
+            - link "Pedir por WhatsApp" [ref=f10e75] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e76]:
+          - generic [ref=f10e78]:
+            - generic [ref=f10e79]: Líquidos
+            - heading "Liquido salt nic 30ml (ejemplo)" [level=3] [ref=f10e80]
+            - generic [ref=f10e81]: $ 9.000
+            - link "Pedir por WhatsApp" [ref=f10e82] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e83]:
+          - generic [ref=f10e85]:
+            - generic [ref=f10e86]: Pods
+            - heading "Pods de repuesto x2 (ejemplo)" [level=3] [ref=f10e87]
+            - generic [ref=f10e88]: $ 12.000
+            - link "Pedir por WhatsApp" [ref=f10e89] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e90]:
+          - generic [ref=f10e92]:
+            - generic [ref=f10e93]: Recargables
+            - heading "Vape recargable kit inicial (ejemplo)" [level=3] [ref=f10e94]
+            - generic [ref=f10e95]: $ 45.000
+            - link "Pedir por WhatsApp" [ref=f10e96] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e97]:
+          - generic [ref=f10e99]:
+            - generic [ref=f10e100]: Descartables
+            - heading "Vape descartable Frutilla (ejemplo)" [level=3] [ref=f10e101]
+            - generic [ref=f10e102]: $ 18.000
+            - link "Pedir por WhatsApp" [ref=f10e103] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+        - article [ref=f10e104]:
+          - generic [ref=f10e106]:
+            - generic [ref=f10e107]: Descartables
+            - heading "Vape descartable Ice Mint (ejemplo)" [level=3] [ref=f10e108]
+            - generic [ref=f10e109]: $ 18.000
+            - link "Pedir por WhatsApp" [ref=f10e110] [cursor=pointer]:
+              - /url: https://ig.me/m/cocostoreba
+    - generic [ref=f10e112]:
+      - heading "Cómo comprar" [level=2] [ref=f10e114]
+      - list [ref=f10e115]:
+        - listitem [ref=f10e116]:
+          - generic [ref=f10e117]: Elegí tu producto
+          - paragraph [ref=f10e118]: Mirá el catálogo y tocá “Pedir” en el que te guste.
+        - listitem [ref=f10e119]:
+          - generic [ref=f10e120]: Escribinos
+          - paragraph [ref=f10e121]: Se abre WhatsApp con el pedido listo. Confirmamos stock y forma de pago.
+        - listitem [ref=f10e122]:
+          - generic [ref=f10e123]: Recibilo
+          - paragraph [ref=f10e124]: Moto en CABA y GBA, o envío a todo el país.
+  - contentinfo [ref=f10e125]:
+    - generic [ref=f10e126]:
+      - generic [ref=f10e127]:
+        - img "Coco Store BA" [ref=f10e128]
+        - paragraph [ref=f10e129]: Importados con envío a todo el país. Vapes, pods, líquidos y perfumes.
+      - generic [ref=f10e130]:
+        - heading "Contacto" [level=4] [ref=f10e131]
+        - link "WhatsApp" [ref=f10e132] [cursor=pointer]:
+          - /url: https://ig.me/m/cocostoreba
+        - link "Instagram @cocostoreba" [ref=f10e133] [cursor=pointer]:
+          - /url: https://www.instagram.com/cocostoreba/
+      - generic [ref=f10e134]:
+        - heading "Envíos" [level=4] [ref=f10e135]
+        - paragraph [ref=f10e136]: Moto en CABA y GBA.
+        - paragraph [ref=f10e137]: Correo a todo el país.
+      - paragraph [ref=f10e138]: Venta exclusiva a mayores de 18 años. Los precios y el stock pueden cambiar sin aviso.
+  - link "Escribinos por WhatsApp" [ref=f10e139] [cursor=pointer]:
+    - /url: https://ig.me/m/cocostoreba

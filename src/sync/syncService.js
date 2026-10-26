@@ -70,7 +70,7 @@ export const upsertEscalonado = async (table, variantes) => {
 import {
   getPedidos, markPedidoSynced, putPedidoRemoto, deletePedido,
   getClientes, addCliente, updateCliente,
-  getProductos, putProducto, putProductosBatch,
+  getProductos, putProducto, putProductosBatch, deleteProducto,
   getVendedores, addVendedor,
   getFaltantes, addFaltante, deleteFaltante, updateFaltante,
   getDeudas, addDeuda, deleteDeuda, updateDeuda,
@@ -601,6 +601,33 @@ export const pullPedidosWebPorRevisar = async () => {
     .filter(p => p.origen === 'web' && p.remoteId != null && !vistos.has(p.remoteId) && (p.webEstado || 'por_revisar') === 'por_revisar')
     .map(p => p.remoteId);
   if (aRefrescar.length) filas = filas.concat(await traerPedidosPorIds(aRefrescar));
+  return { ok: true, count: await guardarPedidosWebRemotos(filas) };
+};
+
+// Pedidos web de los ultimos dias (cualquier estado, sin filtro de zona/vendedor): los
+// pedidos web entran con zona '' y vendedor '', asi que el pull por zona/vendedor nunca
+// los trae. Lo usan admin y armador para ver todos los pedidos web, y para que el
+// armador reciba los que el admin acepto desde otro dispositivo.
+export const pullPedidosWebRecientes = async (dias = 14) => {
+  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const PAGE = 500;
+  let filas = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('pedidos').select('*')
+      .eq('origen', 'web')
+      .gte('updated_at', desde)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) {
+      if (esColumnaInexistente(error)) return { ok: true, skipped: true };
+      throw error;
+    }
+    filas = filas.concat(data || []);
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
   return { ok: true, count: await guardarPedidosWebRemotos(filas) };
 };
 
@@ -1172,6 +1199,15 @@ export const downloadMaestros = async () => {
   }
   for (let i = 0; i < productosUpserts.length; i += 500) {
     await putProductosBatch(productosUpserts.slice(i, i + 500));
+  }
+  // Productos borrados en Supabase (desde otro dispositivo): se sacan de este tambien.
+  // Solo con una lista remota no vacia y sin tocar nada con cambios locales sin subir.
+  if ((productosRemoto ?? []).length > 0) {
+    const remotosIds = new Set(productosRemoto.map(r => String(r.id)));
+    for (const local of productosLocales) {
+      if (local.pendingSync || local.extrasPendientes || local.extrasDirty) continue;
+      if (!remotosIds.has(String(local.id))) await deleteProducto(local.id);
+    }
   }
   const clientesById = new Map(clientesLocales.map(c => [c.id, c]));
   const clientesUpserts = (clientesRemoto ?? [])

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Banners DistriSulpi</title>
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Archivo:wght@500;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root { --azul: #0b2357; --azul-osc: #001b4b; --rojo: #a3141f; --rojo-osc: #7d0d16; --crema: #f3efe6; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #777; font-family: 'Archivo', sans-serif; display: flex; flex-direction: column; gap: 40px; padding: 40px; }
+  .banner { width: 1800px; height: 600px; position: relative; overflow: hidden; flex: none; }
+  /* Zona segura: en celular la tienda recorta a 16:9 => quedan los 1067px centrales. */
+  .seguro { position: absolute; top: 0; bottom: 0; left: 366px; width: 1068px; display: flex; align-items: center; }
+  .logo { width: 400px; height: 400px; flex: none; border-radius: 50%; background: url(logo.jpg) center / 111.5% no-repeat; box-shadow: 0 0 0 10px var(--crema), 0 18px 40px rgba(0,0,0,.35); }
+  h1, h2 { font-family: 'Alfa Slab One', serif; font-weight: 400; line-height: .95; }
+  .chip { display: inline-block; padding: 10px 22px; border-radius: 40px; font-weight: 800; font-size: 24px; letter-spacing: .5px; text-transform: uppercase; }
+  .estrella { position: absolute; color: var(--crema); }
+
+  /* ---------- Banner 1: marca ---------- */
+  .b1 { background: var(--crema); }
+  .b1::before { content: ''; position: absolute; inset: 0; background:
+      repeating-linear-gradient(-45deg, transparent 0 34px, rgba(11,35,87,.05) 34px 68px); }
+  .b1 .lado { position: absolute; top: 0; bottom: 0; width: 330px; background: var(--azul); }
+  .b1 .lado.izq { left: 0; clip-path: polygon(0 0, 100% 0, 70% 100%, 0 100%); }
+  .b1 .lado.der { right: 0; clip-path: polygon(30% 0, 100% 0, 100% 100%, 0 100%); }
+  .b1 .lado::after { content: ''; position: absolute; top: 0; bottom: 0; width: 26px; background: var(--rojo); }
+  .b1 .lado.izq::after { right: 40px; transform: skewX(-26deg); }
+  .b1 .lado.der::after { left: 40px; transform: skewX(-26deg); }
+  .b1 .seguro { gap: 40px; justify-content: center; }
+  .b1 .logo { width: 330px; height: 330px; }
+  .b1 .eyebrow { font-weight: 900; color: var(--rojo); font-size: 24px; letter-spacing: 5px; text-transform: uppercase; white-space: nowrap; }
+  .b1 h1 { white-space: nowrap; color: var(--azul); font-size: 66px; margin: 10px 0 6px; }
+  .b1 h1 span { color: var(--rojo); }
+  .subraya { width: 470px; height: 18px; margin: 4px 0 26px; }
+  .b1 .chips { display: flex; flex-wrap: wrap; gap: 10px; max-width: 640px; }
+  .b1 .chip { background: var(--azul); color: var(--crema); font-size: 19px; padding: 9px 18px; }
+  .b1 .chip.r { background: var(--rojo); }
+
+  /* ---------- Banner 2: surtido ---------- */
+  .b2 { background: radial-gradient(circle at 50% 50%, #c11c2a 0, var(--rojo) 45%, var(--rojo-osc) 100%); }
+  .b2 .rayos { position: absolute; inset: -600px; background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,255,255,.07) 0 7.5deg, transparent 7.5deg 15deg); }
+  .b2 .seguro { flex-direction: column; justify-content: center; text-align: center; }
+  .b2 .numero { font-family: 'Alfa Slab One', serif; color: var(--crema); font-size: 210px; line-height: .85; text-shadow: 8px 8px 0 var(--azul-osc); }
+  .b2 .mas { font-weight: 900; color: var(--crema); font-size: 40px; letter-spacing: 8px; text-transform: uppercase; }
+  .b2 h2 { color: var(--crema); font-size: 60px; margin-top: 14px; text-shadow: 5px 5px 0 var(--azul-osc); }
+  .b2 .cinta { margin-top: 28px; background: var(--azul); color: var(--crema); font-weight: 800; font-size: 28px; letter-spacing: 2px; padding: 14px 40px; text-transform: uppercase; clip-path: polygon(0 0, 100% 0, 96% 50%, 100% 100%, 0 100%, 4% 50%); }
+  .b2 .logo-chico { position: absolute; width: 270px; height: 270px; border-radius: 50%; background: url(logo.jpg) center / 111.5% no-repeat; box-shadow: 0 0 0 8px var(--crema), 0 14px 30px rgba(0,0,0,.4); }
+  .b2 .ico { position: absolute; width: 150px; height: 150px; }
+
+  /* ---------- Banner 3: pedido online ---------- */
+  .b3 { background: linear-gradient(115deg, var(--azul-osc) 0, var(--azul) 60%, #16337a 100%); }
+  .b3 .aro { position: absolute; border-radius: 50%; border: 22px solid var(--rojo); opacity: .9; }
+  .b3 .aro.n { border-color: rgba(243,239,230,.12); }
+  .b3 .seguro { gap: 48px; justify-content: center; }
+  .b3 .texto { max-width: 600px; }
+  .b3 .eyebrow { display: inline-block; background: var(--rojo); color: var(--crema); font-weight: 900; font-size: 26px; letter-spacing: 4px; padding: 8px 18px; text-transform: uppercase; }
+  .b3 h1 { white-space: nowrap; color: var(--crema); font-size: 76px; margin: 22px 0 18px; }
+  .b3 h1 span { color: #ff5a64; }
+  .b3 .pasos { display: flex; gap: 14px; }
+  .b3 .paso { display: flex; align-items: center; gap: 10px; color: var(--crema); font-weight: 700; font-size: 25px; }
+  .b3 .paso b { width: 46px; height: 46px; border-radius: 50%; background: var(--crema); color: var(--azul); display: flex; align-items: center; justify-content: center; font-family: 'Alfa Slab One', serif; font-weight: 400; font-size: 24px; }
+  .b3 .flechita { color: #ff5a64; font-weight: 900; font-size: 28px; }
+  .b3 .boton { margin-top: 32px; display: inline-block; background: var(--crema); color: var(--rojo); font-family: 'Alfa Slab One', serif; font-size: 34px; padding: 16px 40px; border-radius: 60px; box-shadow: 0 8px 0 var(--rojo-osc); }
+</style>
+</head>
+<body>
+
+<!-- Swoosh rojo como el del logo -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="swoosh" viewBox="0 0 470 18"><path d="M0 9 Q 140 0 470 2 L 470 6 Q 160 10 0 18 Z" fill="#a3141f"/></symbol>
+    <symbol id="i-bolsa" viewBox="0 0 64 64"><path d="M14 22h36l-3 34H17z" fill="#f3efe6"/><path d="M24 22v-6a8 8 0 0 1 16 0v6" fill="none" stroke="#f3efe6" stroke-width="5"/></symbol>
+    <symbol id="i-carama" viewBox="0 0 64 64"><circle cx="32" cy="32" r="13" fill="#f3efe6"/><path d="M19 32 6 22v20zM45 32l13-10v20z" fill="#f3efe6"/><path d="M26 24q6 8 0 16M34 24q6 8 0 16" stroke="#a3141f" stroke-width="3" fill="none"/></symbol>
+    <symbol id="i-carrito" viewBox="0 0 64 64"><path d="M4 10h10l7 32h30l7-22H18" fill="none" stroke="#f3efe6" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="25" cy="52" r="5" fill="#f3efe6"/><circle cx="47" cy="52" r="5" fill="#f3efe6"/></symbol>
+    <symbol id="i-estrella" viewBox="0 0 64 64"><path d="M32 4l8 20 20 2-15 13 5 21-18-11-18 11 5-21L4 26l20-2z" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<!-- ================= BANNER 1 ================= -->
+<div class="banner b1" id="b1">
+  <div class="lado izq"></div><div class="lado der"></div>
+  <svg class="estrella" style="left:70px;top:70px;width:60px;height:60px"><use href="#i-estrella"/></svg>
+  <svg class="estrella" style="left:150px;top:420px;width:40px;height:40px"><use href="#i-estrella"/></svg>
+  <svg class="estrella" style="right:80px;top:110px;width:46px;height:46px"><use href="#i-estrella"/></svg>
+  <svg class="estrella" style="right:150px;top:440px;width:64px;height:64px"><use href="#i-estrella"/></svg>
+  <div class="seguro">
+    <div class="logo"></div>
+    <div>
+      <div class="eyebrow">Distribuidora mayorista</div>
+      <h1>Todo para tu<br><span>kiosco</span> y <span>almacén</span></h1>
+      <svg class="subraya"><use href="#swoosh"/></svg>
+      <div class="chips">
+        <span class="chip">Golosinas</span><span class="chip r">Alfajores</span><span class="chip">Galletitas</span>
+        <span class="chip r">Chocolates</span><span class="chip">Condimentos</span><span class="chip r">Almacén</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= BANNER 2 ================= -->
+<div class="banner b2" id="b2">
+  <div class="rayos"></div>
+  <div class="logo-chico" style="left:60px;top:165px"></div>
+  <svg class="ico" style="right:150px;top:70px;transform:rotate(-14deg)"><use href="#i-carama"/></svg>
+  <svg class="ico" style="right:90px;top:330px;width:170px;height:170px;transform:rotate(10deg)"><use href="#i-bolsa"/></svg>
+  <svg class="estrella" style="left:330px;top:60px;width:44px;height:44px"><use href="#i-estrella"/></svg>
+  <svg class="estrella" style="right:330px;bottom:60px;width:36px;height:36px"><use href="#i-estrella"/></svg>
+  <div class="seguro">
+    <div class="mas">Más de</div>
+    <div class="numero">950</div>
+    <h2>productos para tu negocio</h2>
+    <div class="cinta">Golosinas · Alfajores · Almacén · Condimentos</div>
+  </div>
+</div>
+
+<!-- ================= BANNER 3 ================= -->
+<div class="banner b3" id="b3">
+  <div class="aro" style="width:520px;height:520px;left:-230px;top:-170px"></div>
+  <div class="aro n" style="width:380px;height:380px;left:-60px;top:300px"></div>
+  <div class="aro" style="width:460px;height:460px;right:-200px;bottom:-200px"></div>
+  <div class="aro n" style="width:300px;height:300px;right:60px;top:-120px"></div>
+  <svg class="estrella" style="left:120px;top:330px;width:50px;height:50px;color:#ff5a64"><use href="#i-estrella"/></svg>
+  <svg class="estrella" style="right:200px;top:300px;width:120px;height:120px;transform:rotate(-8deg)"><use href="#i-carrito"/></svg>
+  <div class="seguro">
+    <div class="logo" style="width:340px;height:340px"></div>
+    <div class="texto">
+      <div class="eyebrow">Tienda online</div>
+      <h1>Hacé tu pedido<br><span>desde el celu</span></h1>
+      <div class="pasos">
+        <div class="paso"><b>1</b>Elegí</div><span class="flechita">›</span>
+        <div class="paso"><b>2</b>Sumá al carrito</div><span class="flechita">›</span>
+        <div class="paso"><b>3</b>¡Listo!</div>
+      </div>
+      <div class="boton">¡Pedí ahora!</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

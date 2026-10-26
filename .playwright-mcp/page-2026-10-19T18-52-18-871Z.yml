@@ -1,0 +1,50 @@
+- generic [active] [ref=f4e1]:
+  - main [ref=f4e2]:
+    - img "Coco Store BA" [ref=f4e3]
+    - heading "Panel de productos" [level=1] [ref=f4e4]
+    - generic [ref=f4e5]:
+      - generic [ref=f4e6]:
+        - text: Contraseña
+        - textbox "Contraseña" [ref=f4e7]
+      - button "Entrar" [ref=f4e8] [cursor=pointer]
+      - alert [ref=f4e9]
+  - main [ref=f4e10]:
+    - generic [ref=f4e11]:
+      - heading "Mis productos" [level=1] [ref=f4e12]
+      - generic [ref=f4e13]:
+        - link "Ver la tienda" [ref=f4e14] [cursor=pointer]:
+          - /url: /
+        - button "Salir" [ref=f4e15] [cursor=pointer]
+    - generic [ref=f4e16]:
+      - heading "Subir un producto" [level=2] [ref=f4e17]
+      - generic [ref=f4e18] [cursor=pointer]: Tocá acá para elegir la fotoSacala del celular o la compu
+      - generic [ref=f4e20]:
+        - text: Nombre
+        - textbox "Nombre" [ref=f4e21]:
+          - /placeholder: "Ej: Elfbar 5000 puffs Ice Mint"
+      - generic [ref=f4e22]:
+        - generic [ref=f4e23]:
+          - text: Precio (en pesos)
+          - textbox "Precio (en pesos)" [ref=f4e24]:
+            - /placeholder: "Ej: 18000"
+        - generic [ref=f4e25]:
+          - text: Categoría
+          - combobox "Categoría" [ref=f4e26]:
+            - option "Descartables" [selected]
+            - option "Recargables"
+            - option "Pods"
+            - option "Líquidos"
+            - option "Perfumes"
+            - option "Otros"
+      - button "Subir producto" [ref=f4e27] [cursor=pointer]
+      - button "Cancelar edición" [ref=f4e28] [cursor=pointer]
+      - status [ref=f4e29]
+    - heading "Lo que tenés cargado" [level=2] [ref=f4e31]
+    - generic [ref=f4e32]:
+      - heading "Tu WhatsApp" [level=2] [ref=f4e33]
+      - generic [ref=f4e34]:
+        - text: Número con código de país, sin + ni espacios
+        - textbox "Número con código de país, sin + ni espacios" [ref=f4e35]:
+          - /placeholder: "Ej: 5491122334455"
+      - button "Guardar número" [ref=f4e36] [cursor=pointer]
+      - status [ref=f4e37]

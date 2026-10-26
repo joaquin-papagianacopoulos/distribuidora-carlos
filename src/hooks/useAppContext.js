@@ -32,12 +32,15 @@ import {
   syncProductos,
   syncClientes,
   pullPedidosWebPorRevisar,
+  pullPedidosWebRecientes,
+  pullPedidosByRango,
 } from '../sync/syncService';
 
 const AppContext = createContext(null);
 
 const SYNC_INTERVAL = 180_000;
-const MAESTROS_SYNC_INTERVAL = 30 * 60_000;
+// Productos/clientes: se bajan en cada sync liviano (antes cada 30 min y el celular quedaba con datos viejos).
+const MAESTROS_SYNC_INTERVAL = 2 * 60_000;
 const FALTANTES_SYNC_INTERVAL = 10 * 60_000;
 
 export const AppProvider = ({ children }) => {
@@ -288,15 +291,21 @@ export const AppProvider = ({ children }) => {
         }
       }
 
-      // Pedidos web por revisar (REQ-WEB, AC-WEB-6): solo admin, sin limite de fecha.
-      if (Number(vendedorActual?.permiso || 2) === 1) {
-        step = 'pullPedidosWeb';
-        try {
-          await pullPedidosWebPorRevisar();
-        } catch (e) {
-          const msg = e?.message || String(e);
-          console.warn('pullPedidosWeb fallo (se reintenta en el proximo sync):', msg);
-          setSyncError(`pullPedidosWeb: ${msg}`);
+      // Pedidos web (REQ-WEB): admin y armador. El admin ademas baja los por revisar sin
+      // limite de fecha; ambos bajan los web recientes sin filtro de zona (entran con zona ''),
+      // asi el armador recibe los que el admin acepto desde otro dispositivo.
+      {
+        const permWeb = Number(vendedorActual?.permiso || 2);
+        if (permWeb === 1 || permWeb === 3) {
+          step = 'pullPedidosWeb';
+          try {
+            if (permWeb === 1) await pullPedidosWebPorRevisar();
+            await pullPedidosWebRecientes();
+          } catch (e) {
+            const msg = e?.message || String(e);
+            console.warn('pullPedidosWeb fallo (se reintenta en el proximo sync):', msg);
+            setSyncError(`pullPedidosWeb: ${msg}`);
+          }
         }
       }
 
@@ -400,11 +409,30 @@ export const AppProvider = ({ children }) => {
     const zona = verTodo ? (zonaActiva || null) : (vendedorActual?.zona || null);
     try {
       await pullPedidosByFecha(fecha, { vendedorNombre, zona });
+      // Los pedidos web aceptados tienen zona '' o distinta: no entran en el filtro de zona.
+      if (verTodo) await pullPedidosWebRecientes();
     } catch (e) {
       console.warn('syncPedidosFecha error:', e?.message || e);
     }
     await recargar();
   }, [recargar, vendedorActual, zonaActiva]);
+
+  // Resumen: sube lo pendiente y baja TODOS los pedidos del rango (sin filtro de zona/vendedor).
+  const syncPedidosRango = useCallback(async (desde, hasta) => {
+    if (!navigator.onLine) return { ok: false, motivo: 'offline' };
+    try {
+      await syncPedidosPendientes();
+      const r = await pullPedidosByRango(desde, hasta);
+      const permisoActual = Number(vendedorActual?.permiso || 2);
+      if (permisoActual === 1 || permisoActual === 3) await pullPedidosWebRecientes();
+      await recargar();
+      return { ok: true, count: r?.count || 0, incompleto: !!r?.incompleto };
+    } catch (e) {
+      console.warn('syncPedidosRango error:', e?.message || e);
+      await recargar();
+      return { ok: false, motivo: 'error', mensaje: e?.message || String(e) };
+    }
+  }, [recargar, vendedorActual]);
 
   const syncPedidosCliente = useCallback(async (q) => {
     if (!navigator.onLine) return;
@@ -500,6 +528,7 @@ export const AppProvider = ({ children }) => {
       setZona,
       syncNow,
       syncPedidosFecha,
+      syncPedidosRango,
       syncPedidosCliente,
     }}>
       {children}

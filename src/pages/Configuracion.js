@@ -439,7 +439,21 @@ const Configuracion = () => {
         setBorrandoId(null);
       }
     }
-    else if (tab === 'clientes') await deleteCliente(item.id);
+    else if (tab === 'clientes') {
+      // Borrar solo en local no alcanza: el pull de sync lo vuelve a traer.
+      if (!navigator.onLine) {
+        alert('Para borrar un cliente tenés que tener internet. Si no, vuelve a aparecer al sincronizar.');
+        return;
+      }
+      try {
+        const { error } = await supabase.from('clientes').delete().eq('id', item.id);
+        if (error) throw error;
+        await deleteCliente(item.id);
+      } catch (e) {
+        alert('No se pudo borrar el cliente:\n' + (e?.message || String(e)));
+        return;
+      }
+    }
     else if (tab === 'proveedores') {
       // AC-PROV-3: no borrar si tiene productos asociados.
       const chk = puedeBorrarProveedor(item.id, productos);
