@@ -8,3 +8,6 @@ harness/runner/node_modules
 _backup_antes_harness_*/
 *.pdf
 *.docx
+
+# Tienda Coco Store: repo propio (cocostore_web)
+cocostore/
