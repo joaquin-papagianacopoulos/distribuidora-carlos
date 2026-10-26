@@ -22,6 +22,7 @@ import { contarPorRevisar } from './domain/pedidosWeb';
 import { contarStockBajo } from './domain/stockBajo';
 import SelectorVendedor from './components/SelectorVendedor';
 import { useSync } from './sync/useSync';
+import { limpiarCacheLocal } from './services/limpiarCache';
 import { esAdmin, esArmador } from './domain/permisos';
 import './App.css';
 
@@ -101,6 +102,15 @@ const AppContent = () => {
     seleccionarVendedor(null);
   };
 
+  const borrarCache = async () => {
+    const aviso = online
+      ? 'Se borran los datos guardados en este dispositivo y se vuelven a bajar del servidor.\n\nSi hay pedidos sin subir, se pierden: primero tocá "Sync".\n\n¿Borrar caché?'
+      : 'Estás sin conexión: si borrás la caché no vas a poder volver a bajar los datos hasta tener internet.\n\n¿Borrar igual?';
+    if (!window.confirm(aviso)) return;
+    await limpiarCacheLocal();
+    window.location.reload();
+  };
+
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       // Evitar que Safari se quede con una version vieja cacheada.
@@ -158,6 +168,18 @@ const AppContent = () => {
               {'\u21BB'} Sync
             </button>
           )}
+
+          <button
+            onClick={borrarCache}
+            title="Borrar caché y volver a bajar los datos"
+            data-testid="btn-borrar-cache"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 12, padding: '0 2px', color: 'var(--text-secondary)',
+            }}
+          >
+            {'\u{1F9F9}'} Borrar caché
+          </button>
 
           <div
             className={`sync-dot ${online ? 'online' : 'offline'}`}

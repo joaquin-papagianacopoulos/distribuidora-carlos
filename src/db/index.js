@@ -16,6 +16,12 @@ const DB_VERSION = 12;
 
 let db = null;
 
+// Cierra la conexion abierta (necesario para poder borrar la base desde "Borrar cache").
+export const cerrarDB = () => {
+  try { if (db) db.close(); } catch { /* ya cerrada */ }
+  db = null;
+};
+
 export const initDB = () => new Promise((resolve, reject) => {
   if (db) return resolve(db);
   const request = indexedDB.open(DB_NAME, DB_VERSION);
