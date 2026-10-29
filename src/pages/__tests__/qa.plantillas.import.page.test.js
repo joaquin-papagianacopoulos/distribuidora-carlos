@@ -215,16 +215,17 @@ describe('AC-PLA-5 archivo grande desde la pantalla', () => {
     expect(resumen('resultado-productos')).toContain('Creados: 1000 · Actualizados: 0 · Rechazados: 0');
   }, 60000);
 
-  it('AC-PLA-4 AC-PLA-5 XLSX de 1000 clientes con CUIT invalido cada 10: guarda 900, lista 100 rechazos con su fila', async () => {
+  // MOD (AC-CLI2-1): el CUIT ya no se valida; la fila mala ahora es sin domicilio.
+  it('AC-PLA-4 AC-PLA-5 XLSX de 1000 clientes con una fila invalida cada 10: guarda 900, lista 100 rechazos con su fila', async () => {
     await irAClientes();
     const aoa = [['Código cliente', 'Razón social', 'Domicilio de entrega', 'Tipo de IVA', 'CUIT']];
-    for (let i = 0; i < 1000; i++) aoa.push([`K${i}`, `Cli ${i}`, `Calle ${i}`, 'Monotributo', i % 10 === 5 ? '20123456780' : '20123456786']);
+    for (let i = 0; i < 1000; i++) aoa.push([`K${i}`, `Cli ${i}`, i % 10 === 5 ? '' : `Calle ${i}`, 'Monotributo', '20123456786']);
     await subir(inputClientes(), xlsxFile('c.xlsx', aoa));
     expect(addCliente).toHaveBeenCalledTimes(900);
     expect(resumen('resultado-clientes')).toContain('Creados: 900 · Actualizados: 0 · Rechazados: 100');
     const rech = rechazos('resultado-clientes');
-    expect(rech).toContain('Fila 7: CUIT inválido');
-    expect(rech).toContain('Fila 997: CUIT inválido');
+    expect(rech).toContain('Fila 7: El domicilio de entrega es obligatorio');
+    expect(rech).toContain('Fila 997: El domicilio de entrega es obligatorio');
     expect(addCliente.mock.calls.every(c => c[0].cuit === '20-12345678-6')).toBe(true);
   }, 60000);
 });
@@ -265,10 +266,11 @@ describe('AC-PLA-4 / AC-PLA-2 clientes: texto de ayuda y comisión', () => {
   // BUG: BUG-PLA-04 (ver qa-report.md). Tras el cambio del dueño (AC-PLA-2: 16
   // columnas, sin Comisión) la tarjeta de importación de clientes sigue diciendo
   // "los 17 campos del alta de clientes" (Configuracion.js:582).
-  it('AC-PLA-2 AC-CON-2 la ayuda de la tarjeta de clientes dice "17 campos" (16 + Nombre de contacto, sin Comisión)', async () => {
+  // MOD (AC-CLI2-2): sin Provincia, quedan 16.
+  it('AC-PLA-2 AC-CON-2 AC-CLI2-2 la ayuda de la tarjeta de clientes dice "16 campos" (sin Comisión ni Provincia)', async () => {
     await irAClientes();
     const txt = container.querySelector('[data-testid="import-clientes"]').textContent;
-    expect(txt).toMatch(/17 campos/);
+    expect(txt).toMatch(/16 campos/);
   });
 
   it('AC-PLA-4 CSV con ";" y columna Comisión en el medio: se ignora, no corre las demas columnas y no pisa la ficha', async () => {

@@ -145,9 +145,11 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     // ahora la clave no viaja (el upsert no pisa la columna en Supabase).
     expect(row).toMatchObject({
       id: 7, nombre: 'Kiosco', direccion: 'Mitre 1', codigo: 'C7', ciudad: 'Rosario', codigo_postal: 'S2000',
-      provincia: 'Santa Fe', tipo_iva: 'Monotributo', cuit: '20-12345678-6', fecha_alta: '2026-10-07',
+      tipo_iva: 'Monotributo', cuit: '20-12345678-6', fecha_alta: '2026-10-07',
     });
     expect(row).not.toHaveProperty('comision');
+    // AC-CLI2-2: la provincia tampoco viaja (no pisa la columna en Supabase).
+    expect(row).not.toHaveProperty('provincia');
     expect(db.clearClientesPendingSync).toHaveBeenCalledWith([7]);
   });
 

@@ -9,7 +9,7 @@ import {
   CAMPOS_EXCLUIDOS_PLANTILLA, avisoColumnasExcluidas,
 } from '../plantillas';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta } from '../productos';
-import { CAMPOS_CLIENTE, PROVINCIAS, TIPOS_IVA } from '../clientes';
+import { CAMPOS_CLIENTE, TIPOS_IVA } from '../clientes';
 
 const NOW = new Date(2026, 9, 12);
 const PROVEEDORES = [
@@ -47,11 +47,13 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
   // MOD (RUN 20261012-2106): antes esperaba los 17 campos de REQ-CLI. El dueño
   // decidio (AC-PLA-2, 2026-10-12) sacar Comisión de la plantilla: quedan 16,
   // en el mismo orden y con las mismas etiquetas del formulario.
-  it('AC-PLA-2 clientes: los 17 campos de REQ-CLI en orden (CAMPOS_CLIENTE sin Comisión)', () => {
+  // MOD (AC-CLI2-2): sin Provincia, quedan 16.
+  it('AC-PLA-2 clientes: los 16 campos de REQ-CLI en orden (CAMPOS_CLIENTE sin Comisión)', () => {
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(LABELS_C);
-    expect(LABELS_C).toHaveLength(17);
+    expect(LABELS_C).toHaveLength(16);
     expect(LABELS_C[0]).toBe('Código cliente');
-    expect(LABELS_C[16]).toBe('Rubro');
+    expect(LABELS_C[15]).toBe('Rubro');
+    expect(LABELS_C).not.toContain('Provincia');
     expect(NOMBRE_ARCHIVO_PLANTILLA.clientes).toBe('plantilla_clientes.xlsx');
   });
 
@@ -64,7 +66,7 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-7 columnas = campos del formulario', () =
     // como alias legacy en CAMPOS_EXCLUIDOS_PLANTILLA.
     expect(CAMPOS_CLIENTE.map(c => c.key)).not.toContain('comision');
     const p = armarPlantilla('clientes');
-    expect(p.hojas[0].filas[0]).toHaveLength(17);
+    expect(p.hojas[0].filas[0]).toHaveLength(16);
     expect(p.hojas.flatMap(h => h.filas).flat().some(c => /comisi[oó]n/i.test(String(c)))).toBe(false);
     // El orden relativo del resto es el del formulario.
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
@@ -226,16 +228,18 @@ describe('AC-PLA-4 validación por fila de clientes', () => {
   // MOD (RUN 20261012-2106): antes esperaba comision: 5 desde la celda '5%'.
   // Con AC-PLA-4 (dueño, 2026-10-12) la comisión del archivo se ignora: en un
   // alta queda null y se carga desde la ficha.
-  it('AC-PLA-4 fila válida: CUIT normalizado, provincia/IVA sin tildes, vendedor por nombre, fecha default hoy', () => {
+  // MOD (AC-CLI2-2): una provincia en el archivo se ignora.
+  it('AC-PLA-4 fila válida: CUIT normalizado, IVA sin tildes, vendedor por nombre, fecha default hoy; provincia ignorada', () => {
     const r = validarFilaCliente({
       codigo: '0042', nombre: 'Almacén Sol', direccion: 'San Martín 50', provincia: 'cordoba', tipoIva: 'responsable inscripto',
       cuit: '20123456786', telefono: '341 555-1234', vendedor: ' juan perez ', comision: '5%', fechaAlta: '',
     }, ctx);
     expect(r.ok).toBe(true);
     expect(r.valor).toMatchObject({
-      codigo: '0042', provincia: 'Córdoba', tipoIva: 'Responsable Inscripto', cuit: '20-12345678-6',
+      codigo: '0042', tipoIva: 'Responsable Inscripto', cuit: '20-12345678-6',
       telefono: '3415551234', vendedor: 'Juan Pérez', fechaAlta: '2026-10-12', pais: 'Argentina',
     });
+    expect(r.valor).not.toHaveProperty('provincia');
     // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null en el alta; ahora la clave no existe.
     expect(r.valor).not.toHaveProperty('comision');
   });
@@ -257,22 +261,23 @@ describe('AC-PLA-4 validación por fila de clientes', () => {
     expect({ ...legacy, ...r2.valor }.comision).toBe(150);
   });
 
-  it('AC-PLA-4 CUIT inválido se rechaza', () => {
+  // MOD (AC-CLI2-1): antes se rechazaba; el CUIT ya no se valida.
+  it('AC-CLI2-1 CUIT con dígito verificador inválido se acepta', () => {
     const r = validarFilaCliente({ codigo: 'X1', nombre: 'A', direccion: 'B', tipoIva: 'Monotributo', cuit: '20-12345678-0' }, ctx);
-    expect(r.ok).toBe(false);
-    expect(r.errores.join()).toMatch(/CUIT inválido/);
+    expect(r.ok).toBe(true);
+    expect(r.valor.cuit).toBe('20-12345678-0');
   });
 
   // MOD (RUN 20261012-2106): antes tambien esperaba el error "comisión debe
   // ser un % entre 0 y 100". AC-PLA-4 ya no valida la comisión del archivo
   // (se ignora): ahora se verifica que ese error NO aparezca.
-  it('AC-PLA-4 obligatorios, provincia/IVA fuera de lista y fecha inválida (la comisión no se valida)', () => {
+  it('AC-PLA-4 obligatorios, IVA fuera de lista y fecha inválida (comisión y provincia no se validan)', () => {
     const r = validarFilaCliente({ codigo: '', nombre: '', direccion: '', provincia: 'Narnia', tipoIva: 'Otro', comision: '150', fechaAlta: '31/02/2026' }, ctx);
     const txt = r.errores.join(' | ');
     expect(txt).toMatch(/código es obligatorio/);
     expect(txt).toMatch(/razón social es obligatoria/);
     expect(txt).toMatch(/domicilio de entrega es obligatorio/);
-    expect(txt).toMatch(/Provincia inválida/);
+    expect(txt).not.toMatch(/Provincia/);
     expect(txt).toMatch(/Tipo de IVA inválido/);
     expect(txt).not.toMatch(/comisi/i);
     expect(txt).toMatch(/Fecha de alta inválida/);
@@ -371,16 +376,17 @@ describe('AC-PLA-3 / AC-PLA-4 / AC-PLA-5 planificarImportacion', () => {
       filaC({ 'Código cliente': '0042', 'Razón social': 'Nuevo', 'Domicilio de entrega': 'X 1', 'Tipo de IVA': 'Consumidor Final' }),
       filaC({ 'Código cliente': '0010', 'Razón social': 'Kiosco Pepe SRL', 'Domicilio de entrega': 'Mitre 1' }),
       filaC({ 'Código cliente': ' 0042 ', 'Razón social': 'Dup', 'Domicilio de entrega': 'Y' }),
-      filaC({ 'Código cliente': '0050', 'Razón social': 'Malo', 'Domicilio de entrega': 'Z', 'Tipo de IVA': 'Monotributo', 'CUIT': '20123456780' }),
+      // MOD (AC-CLI2-1): un CUIT con DV inválido ya no rechaza la fila.
+      filaC({ 'Código cliente': '0050', 'Razón social': 'CUIT raro', 'Domicilio de entrega': 'Z', 'Tipo de IVA': 'Monotributo', 'CUIT': '20123456780' }),
       filaC({ 'Código cliente': '0051', 'Razón social': 'Vend', 'Domicilio de entrega': 'Z', 'Vendedor': 'Fantasma' }),
     ];
     const plan = planificarImportacion(rows, 'clientes', { existentes: CLIENTES, vendedores: VENDEDORES, now: NOW });
-    expect(plan.entradas.map(e => [e.fila, e.accion])).toEqual([[2, 'crear'], [3, 'actualizar'], [4, 'rechazar'], [5, 'rechazar'], [6, 'rechazar']]);
+    expect(plan.entradas.map(e => [e.fila, e.accion])).toEqual([[2, 'crear'], [3, 'actualizar'], [4, 'rechazar'], [5, 'crear'], [6, 'rechazar']]);
     expect(plan.entradas[1].existente.id).toBe(10);
-    expect(plan.resumen.rechazos.map(r => r.fila)).toEqual([4, 5, 6]);
+    expect(plan.entradas[3].valor.cuit).toBe('20-12345678-0');
+    expect(plan.resumen.rechazos.map(r => r.fila)).toEqual([4, 6]);
     expect(plan.resumen.rechazos[0].motivo).toMatch(/Código repetido en el archivo/);
-    expect(plan.resumen.rechazos[1].motivo).toMatch(/CUIT inválido/);
-    expect(plan.resumen.rechazos[2].motivo).toMatch(/Vendedor "Fantasma"/);
+    expect(plan.resumen.rechazos[1].motivo).toMatch(/Vendedor "Fantasma"/);
   });
 
   it('AC-PLA-4 clientes sin columnas obligatorias => error de estructura', () => {
@@ -413,9 +419,9 @@ describe('AC-PLA-1 / AC-PLA-2 / AC-PLA-6 armado de la plantilla', () => {
     expect(inst.find(f => f[0] === 'Stock')[2]).toMatch(/Solo para productos NUEVOS/);
   });
 
-  it('AC-PLA-2 clientes: provincias, tipos de IVA y vendedores activos en "Valores válidos"', () => {
+  it('AC-PLA-2 clientes: tipos de IVA y vendedores activos en "Valores válidos" (sin Provincia)', () => {
     const inst = filasInstrucciones('clientes', { vendedores: VENDEDORES });
-    expect(inst.find(f => f[0] === 'Provincia')[3]).toBe(PROVINCIAS.join(', '));
+    expect(inst.find(f => f[0] === 'Provincia')).toBeUndefined();
     expect(inst.find(f => f[0] === 'Tipo de IVA')[3]).toBe(TIPOS_IVA.join(', '));
     expect(inst.find(f => f[0] === 'Vendedor')[3]).toBe('Admin, Juan Pérez');
     expect(armarPlantilla('clientes').hojas[0].filas[0]).toEqual(LABELS_C);
@@ -526,9 +532,9 @@ describe('AC-PLA-5 AC-PROD-3 C9 stock inicial fallido en una importación parcia
 // REQ-COMR (RUN 20261014-1449): plantillas e importación sin la comisión del
 // cliente (AC-COMR-2) y con el Rubro de productos normalizado (AC-COMR-4).
 describe('AC-COMR-2 AC-COMR-4 plantillas con el modelo por vendedor y rubro', () => {
-  it('AC-COMR-2 la plantilla de clientes no tiene Comisión: 17 columnas = CAMPOS_CLIENTE', () => {
+  it('AC-COMR-2 la plantilla de clientes no tiene Comisión: 16 columnas = CAMPOS_CLIENTE', () => {
     expect(COLUMNAS_PLANTILLA.clientes.map(c => c.label)).toEqual(CAMPOS_CLIENTE.map(c => c.label));
-    expect(armarPlantilla('clientes').hojas[0].filas[0]).toHaveLength(17);
+    expect(armarPlantilla('clientes').hojas[0].filas[0]).toHaveLength(16);
   });
 
   it('AC-COMR-2 un Excel viejo con "Comisión" se importa, avisa (informativo, texto nuevo) y no pisa la comision de existentes', () => {

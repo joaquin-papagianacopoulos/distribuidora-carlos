@@ -7,14 +7,17 @@ const base = { codigo: 'C001', nombre: 'Almacén Don José SRL', direccion: 'Av.
 describe('AC-CLI-1 campos del alta de clientes', () => {
   // MOD (RUN 20261014-1449, AC-COMR-1): antes 17 campos con 'Comisión'; ahora
   // 16, porque el cliente ya no tiene comisión (se carga por vendedor y rubro).
-  it('AC-CLI-1 AC-COMR-1 tiene exactamente los 17 campos pedidos, en orden y con sus etiquetas', () => {
+  // MOD (AC-CLI2-2): sin 'Provincia', quedan 16.
+  it('AC-CLI-1 AC-COMR-1 AC-CLI2-2 tiene exactamente los 16 campos pedidos, en orden y con sus etiquetas', () => {
     expect(CAMPOS_CLIENTE.map(c => c.label)).toEqual([
-      'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal', 'Provincia',
+      'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal',
       'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Nombre de contacto', 'Celular', 'Vendedor', 'Cobrador',
       'Fecha de alta', 'Tipo de cliente', 'Rubro',
     ]);
     expect(CAMPOS_CLIENTE.some(c => c.key === 'comision')).toBe(false);
     expect(clienteVacio()).not.toHaveProperty('comision');
+    expect(CAMPOS_CLIENTE.some(c => c.key === 'provincia')).toBe(false);
+    expect(clienteVacio()).not.toHaveProperty('provincia');
   });
   it('AC-CLI-1 cliente vacío trae país Argentina y fecha de alta de hoy', () => {
     const v = clienteVacio(new Date(2026, 9, 7));
@@ -63,13 +66,17 @@ describe('AC-CLI-3 CUIT', () => {
     expect(validarCuit(cero)).toBe(true);
     for (let d = 0; d <= 9; d++) expect(validarCuit(`${diez}${d}`)).toBe(false);
   });
-  it('AC-CLI-3 rechaza CUIT inválido y guarda el válido formateado', () => {
-    expect(validarCliente({ ...base, cuit: '20123456787' }).errores.cuit).toBeTruthy();
+  // MOD (AC-CLI2-1): el alta ya no valida el CUIT; con 11 dígitos se formatea.
+  it('AC-CLI2-1 acepta cualquier CUIT y formatea el de 11 dígitos', () => {
+    const r = validarCliente({ ...base, cuit: '20123456787' });
+    expect(r.ok).toBe(true);
+    expect(r.cliente.cuit).toBe('20-12345678-7');
     expect(validarCliente({ ...base, cuit: '20123456786' }).cliente.cuit).toBe('20-12345678-6');
+    expect(validarCliente({ ...base, cuit: ' 123-abc ' }).cliente.cuit).toBe('123-abc');
     expect(formatearCuit('123')).toBe('123');
   });
-  it('AC-CLI-3 CUIT obligatorio salvo Consumidor Final', () => {
-    expect(validarCliente({ ...base, cuit: '' }).errores.cuit).toBeTruthy();
+  it('AC-CLI2-1 el CUIT es opcional para cualquier tipo de IVA', () => {
+    expect(validarCliente({ ...base, cuit: '' }).ok).toBe(true);
     expect(validarCliente({ ...base, cuit: '', tipoIva: 'Consumidor Final' }).ok).toBe(true);
     expect(validarCliente({ ...base, cuit: '', tipoIva: '' }).ok).toBe(true);
   });
@@ -92,10 +99,13 @@ describe('AC-CLI-4 código único', () => {
 describe('validaciones de formato', () => {
   // MOD (RUN 20261014-1449, AC-COMR-1): antes 'comision: 150' daba error; ahora
   // la comisión ya no se valida (ni aparece en el cliente), el resto sí.
-  it('AC-COMR-1 rechaza CP, provincia, tipo IVA, celular y fecha inválidos; la comisión ya no se valida', () => {
+  // MOD (AC-CLI2-2): la provincia tampoco se valida ni se devuelve.
+  it('AC-COMR-1 AC-CLI2-2 rechaza CP, tipo IVA, celular y fecha inválidos; comisión y provincia ya no se validan', () => {
     const r = validarCliente({ ...base, codigoPostal: '12', provincia: 'Narnia', tipoIva: 'Otro', telefono: '123', comision: '150', fechaAlta: '2026-02-30' });
-    expect(Object.keys(r.errores)).toEqual(expect.arrayContaining(['codigoPostal', 'provincia', 'tipoIva', 'telefono', 'fechaAlta']));
+    expect(Object.keys(r.errores)).toEqual(expect.arrayContaining(['codigoPostal', 'tipoIva', 'telefono', 'fechaAlta']));
     expect(r.errores).not.toHaveProperty('comision');
+    expect(r.errores).not.toHaveProperty('provincia');
+    expect(r.cliente).not.toHaveProperty('provincia');
     expect(r.cliente).not.toHaveProperty('comision');
   });
   // MOD (RUN 20261014-1449, AC-COMR-1): antes 'comision: 2,5' quedaba 2.5; ahora la clave no se devuelve.

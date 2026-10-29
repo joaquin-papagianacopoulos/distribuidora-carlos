@@ -6,7 +6,7 @@
 // fila se valida con validarProducto / validarCliente (las mismas reglas del
 // formulario). Aca no hay React, IndexedDB ni xlsx: solo datos.
 import { CAMPOS_PRODUCTO, validarProducto } from './productos';
-import { CAMPOS_CLIENTE, PROVINCIAS, TIPOS_IVA, validarCliente, clienteVacio } from './clientes';
+import { CAMPOS_CLIENTE, TIPOS_IVA, validarCliente, clienteVacio } from './clientes';
 import { texto, csvSafe, claveUnica, esFechaISO } from './validacion';
 import { filtrarActivos } from './vendedores';
 import { listarRubros, resolverRubro } from './rubros';
@@ -56,11 +56,10 @@ const INFO_CLIENTE = {
   direccion: { obligatorio: 'Sí', formato: 'Texto, hasta 160 caracteres', ejemplo: 'Mitre 123' },
   ciudad: { obligatorio: 'No', formato: 'Texto', ejemplo: 'Rosario' },
   codigoPostal: { obligatorio: 'No', formato: '4 a 8 letras/números (CPA)', ejemplo: 'S2000' },
-  provincia: { obligatorio: 'No', formato: 'Una de la lista', ejemplo: 'Santa Fe' },
   zona: { obligatorio: 'No', formato: 'Texto', ejemplo: 'Centro' },
   pais: { obligatorio: 'No', formato: 'Texto (vacío = Argentina)', ejemplo: 'Argentina' },
   tipoIva: { obligatorio: 'No', formato: 'Uno de la lista', ejemplo: 'Responsable Inscripto' },
-  cuit: { obligatorio: 'Sí, salvo Consumidor Final o sin tipo de IVA', formato: '11 dígitos, con o sin guiones. Se valida el dígito verificador', ejemplo: '20-12345678-6' },
+  cuit: { obligatorio: 'No', formato: 'Texto libre, no se valida. Con 11 dígitos se guarda con guiones', ejemplo: '20-12345678-6' },
   contacto: { obligatorio: 'No', formato: 'Texto, hasta 80 caracteres', ejemplo: 'Pepe Gómez' },
   telefono: { obligatorio: 'No', formato: 'Entre 8 y 15 dígitos', ejemplo: '3415551234' },
   vendedor: { obligatorio: 'No', formato: 'Nombre de un vendedor activo. Si no existe, la fila se rechaza', ejemplo: '' },
@@ -388,9 +387,9 @@ export const validarFilaCliente = (valores = {}, { existente = null, existentes 
     }
   }
   for (const [k, max] of Object.entries(TEXTO_CLIENTE)) if (tiene(k)) form[k] = textoSeguro(valores[k], max);
-  if (tiene('provincia')) form.provincia = canonico(valores.provincia, PROVINCIAS);
   if (tiene('tipoIva')) form.tipoIva = canonico(valores.tipoIva, TIPOS_IVA);
-  if (tiene('cuit')) form.cuit = celda(valores.cuit);
+  // AC-CLI2-1: el CUIT es texto libre, así que también pasa por textoSeguro.
+  if (tiene('cuit')) form.cuit = textoSeguro(valores.cuit, 20);
   if (tiene('telefono')) form.telefono = celda(valores.telefono);
   if (tiene('fechaAlta')) form.fechaAlta = normalizarFecha(valores.fechaAlta, { corta: fechaCorta });
   if (tiene('vendedor')) {
@@ -588,7 +587,6 @@ export const textoResumen = ({ creados = 0, actualizados = 0, rechazados = 0, st
 export const ENCABEZADO_INSTRUCCIONES = ['Columna', 'Obligatorio', 'Formato', 'Valores válidos', 'Ejemplo'];
 
 const valoresValidos = (entidad, key, { proveedores = [], vendedores = [] } = {}) => {
-  if (entidad === 'clientes' && key === 'provincia') return lista(PROVINCIAS);
   if (entidad === 'clientes' && key === 'tipoIva') return lista(TIPOS_IVA);
   if (entidad === 'clientes' && key === 'vendedor') {
     const n = filtrarActivos(vendedores).map(v => texto(v.nombre, 80)).filter(Boolean);

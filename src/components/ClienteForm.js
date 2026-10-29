@@ -38,7 +38,7 @@ const ClienteForm = ({ inicial = null, existentes = [], vendedores = [], onGuard
         errores={errores}
         onChange={onChange}
         opcionesDinamicas={{ vendedor: opcionesVendedor }}
-        ayudas={{ cuit: 'Solo números o con guiones. Se valida el dígito verificador.' }}
+        ayudas={{ cuit: 'Opcional. Se guarda tal cual se escribe.' }}
       />
       <div className="input-group">
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text)' }}>

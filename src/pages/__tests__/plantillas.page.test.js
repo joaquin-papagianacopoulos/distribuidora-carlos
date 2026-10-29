@@ -124,7 +124,7 @@ describe('AC-PLA-1 / AC-PLA-2 botones de plantilla', () => {
     const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
     const enc = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })[0];
     expect(enc).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
-    expect(enc).toHaveLength(17);
+    expect(enc).toHaveLength(16);
     expect(enc).not.toContain('Comisión');
   });
 
@@ -238,7 +238,9 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
       '0045;Comision;Calle 5;;;;150',
     ].join('\n');
     await subir(inputClientes(), { name: 'clientes.csv', size: csv.length, text: () => Promise.resolve(csv) });
-    expect(addCliente).toHaveBeenCalledTimes(2);
+    // MOD (AC-CLI2-1): el CUIT con DV inválido ya no rechaza la fila 4: se crea.
+    expect(addCliente).toHaveBeenCalledTimes(3);
+    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: '0043', cuit: '20-12345678-0' }));
     // MOD (RUN 20261014-1449, AC-COMR-2): antes las altas traían comision: null; ahora no traen la clave.
     expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({
       codigo: '0042', nombre: 'Nuevo SA', cuit: '30-71234567-1', vendedor: 'Juan', extrasDirty: true, boletaContraBoleta: false,
@@ -247,9 +249,9 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
     for (const [c] of addCliente.mock.calls) expect(c).not.toHaveProperty('comision');
     expect(updateCliente).toHaveBeenCalledWith(expect.objectContaining({ id: 10, nombre: 'Kiosco Pepe SRL', boletaContraBoleta: true, extrasDirty: true }));
     expect(mockApp.recargar).toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="resultado-clientes-resumen"]').textContent).toContain('Creados: 2 · Actualizados: 1 · Rechazados: 3');
+    expect(container.querySelector('[data-testid="resultado-clientes-resumen"]').textContent).toContain('Creados: 3 · Actualizados: 1 · Rechazados: 2');
     const rech = container.querySelector('[data-testid="resultado-clientes-rechazos"]').textContent;
-    expect(rech).toContain('Fila 4: CUIT inválido');
+    expect(rech).not.toMatch(/CUIT/);
     expect(rech).toContain('Fila 5: Vendedor "Viejo" no existe o está dado de baja');
     expect(rech).toContain('Fila 6: Código repetido en el archivo (ya está en la fila 2)');
     expect(rech).not.toMatch(/comisi/i);
@@ -285,10 +287,11 @@ describe('AC-PLA-4 / AC-PLA-5 importación de clientes', () => {
   it('AC-PLA-4 XLSX con la plantilla de clientes', async () => {
     await irAClientes();
     // MOD (RUN 20261012-2106): la plantilla de clientes ya no tiene Comisión (AC-PLA-2).
+    // MOD (AC-CLI2-2): tampoco Provincia; se prueba con Tipo de IVA sin tildes.
     const L = CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label);
-    const file = xlsxFile('plantilla_clientes.xlsx', [L, L.map(l => ({ 'Código cliente': 'X1', 'Razón social': 'Desde Excel', 'Domicilio de entrega': 'Dir', 'Provincia': 'cordoba' }[l] ?? ''))], 'Clientes');
+    const file = xlsxFile('plantilla_clientes.xlsx', [L, L.map(l => ({ 'Código cliente': 'X1', 'Razón social': 'Desde Excel', 'Domicilio de entrega': 'Dir', 'Tipo de IVA': 'monotributo' }[l] ?? ''))], 'Clientes');
     await subir(inputClientes(), file);
-    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'X1', provincia: 'Córdoba', extrasDirty: true }));
+    expect(addCliente).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'X1', tipoIva: 'Monotributo', extrasDirty: true }));
     expect(container.querySelector('[data-testid="resultado-clientes"]').textContent).toContain('1 creado, 0 actualizados');
   });
 

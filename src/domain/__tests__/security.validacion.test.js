@@ -99,9 +99,11 @@ describe('AC-SEC-2 validarCliente / validarProveedor', () => {
     // que un valor hostil llegue al cliente).
     expect(r.cliente).not.toHaveProperty('comision');
     expect(r.errores).not.toHaveProperty('comision');
-    expect(r.errores.cuit).toBeTruthy();
+    // MOD (AC-CLI2-1/2): CUIT y provincia ya no se validan; el CUIT queda acotado.
+    expect(r.errores).not.toHaveProperty('cuit');
+    expect(r.cliente.cuit.length).toBeLessThanOrEqual(20);
+    expect(r.cliente).not.toHaveProperty('provincia');
     expect(r.errores.fechaAlta).toBeTruthy();
-    expect(r.errores.provincia).toBeTruthy();
     expect(r.errores.tipoIva).toBeTruthy();
   });
 

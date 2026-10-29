@@ -1,6 +1,7 @@
 // src/domain/clientes.js — REQ-CLI: alta de clientes.
-import { texto, validarCuit, formatearCuit, esFechaISO, hoyISO, claveUnica, soloDigitos } from './validacion';
+import { texto, formatearCuit, esFechaISO, hoyISO, claveUnica, soloDigitos } from './validacion';
 
+// Lista usada por la tienda online (checkout). Los clientes ya no tienen provincia.
 export const PROVINCIAS = [
   'Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes',
   'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones',
@@ -15,14 +16,14 @@ export const TIPOS_IVA = [
 // Orden y etiquetas EXACTOS que pidió el cliente (AC-CLI-1). REQ-COMR
 // (AC-COMR-1): "Comisión" ya no es un campo del cliente (quedan 16). El dato
 // viejo `comision` se conserva en IndexedDB y en Supabase, pero no se muestra,
-// no se valida, no se mapea y no se usa.
+// no se valida, no se mapea y no se usa. REQ-CLI2 (AC-CLI2-2): lo mismo con
+// "Provincia" (quedan 15): el dato viejo se conserva pero no se toca.
 export const CAMPOS_CLIENTE = [
   { key: 'codigo', label: 'Código cliente', requerido: true },
   { key: 'nombre', label: 'Razón social', requerido: true },
   { key: 'direccion', label: 'Domicilio de entrega', requerido: true },
   { key: 'ciudad', label: 'Ciudad' },
   { key: 'codigoPostal', label: 'Código postal' },
-  { key: 'provincia', label: 'Provincia', tipo: 'select', opciones: PROVINCIAS },
   { key: 'zona', label: 'Zona' },
   { key: 'pais', label: 'País' },
   { key: 'tipoIva', label: 'Tipo de IVA', tipo: 'select', opciones: TIPOS_IVA },
@@ -37,7 +38,7 @@ export const CAMPOS_CLIENTE = [
 ];
 
 export const clienteVacio = (now = new Date()) => ({
-  codigo: '', nombre: '', direccion: '', ciudad: '', codigoPostal: '', provincia: '',
+  codigo: '', nombre: '', direccion: '', ciudad: '', codigoPostal: '',
   zona: '', pais: 'Argentina', tipoIva: '', cuit: '', contacto: '', telefono: '', vendedor: '',
   cobrador: '', fechaAlta: hoyISO(now), tipoCliente: '', rubro: '',
 });
@@ -61,7 +62,6 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
     direccion: texto(form.direccion, 160),
     ciudad: texto(form.ciudad, 80),
     codigoPostal: texto(form.codigoPostal, 10).toUpperCase().replace(/\s/g, ''),
-    provincia: texto(form.provincia, 40),
     zona: texto(form.zona, 60),
     pais: texto(form.pais, 60) || 'Argentina',
     tipoIva: texto(form.tipoIva, 40),
@@ -88,16 +88,12 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
   if (c.codigoPostal && !/^[A-Z0-9]{4,8}$/.test(c.codigoPostal)) {
     errores.codigoPostal = 'Código postal inválido (4 a 8 letras/números)';
   }
-  if (c.provincia && !PROVINCIAS.includes(c.provincia)) errores.provincia = 'Provincia inválida';
   if (c.tipoIva && !TIPOS_IVA.includes(c.tipoIva)) errores.tipoIva = 'Tipo de IVA inválido';
 
+  // REQ-CLI2 (AC-CLI2-1): el CUIT es opcional y no se valida. Si tiene 11
+  // dígitos se guarda con guiones; si no, tal cual se escribió.
   const cuitRaw = soloDigitos(form.cuit);
-  if (cuitRaw) {
-    if (!validarCuit(cuitRaw)) errores.cuit = 'CUIT inválido (revisá los 11 dígitos)';
-    else c.cuit = formatearCuit(cuitRaw);
-  } else if (c.tipoIva && c.tipoIva !== 'Consumidor Final') {
-    errores.cuit = 'El CUIT es obligatorio para este tipo de IVA';
-  }
+  c.cuit = cuitRaw.length === 11 ? formatearCuit(cuitRaw) : texto(form.cuit, 20);
 
   if (c.telefono && (c.telefono.length < 8 || c.telefono.length > 15)) {
     errores.telefono = 'El celular debe tener entre 8 y 15 dígitos';
@@ -112,11 +108,11 @@ export const validarCliente = (form = {}, existentes = [], { editId = null, now 
 // AC-COMR-1: `comision` NO viaja en ninguna fila. PostgREST arma el upsert por
 // lote con la unión de claves: si una sola fila la mandara, al resto se le
 // pondría null. Sin la clave, el ON CONFLICT no toca la columna existente.
+// AC-CLI2-2: `provincia` tampoco viaja, por la misma razón.
 export const clienteExtraToRemote = (c = {}) => ({
   codigo: c.codigo || null,
   ciudad: c.ciudad || null,
   codigo_postal: c.codigoPostal || null,
-  provincia: c.provincia || null,
   zona: c.zona || null,
   pais: c.pais || null,
   tipo_iva: c.tipoIva || null,
@@ -137,7 +133,6 @@ export const clienteExtraFromRemote = (r = {}, local = {}) => {
     codigo: pick('codigo', 'codigo'),
     ciudad: pick('ciudad', 'ciudad'),
     codigoPostal: pick('codigo_postal', 'codigoPostal'),
-    provincia: pick('provincia', 'provincia'),
     zona: pick('zona', 'zona'),
     pais: pick('pais', 'pais'),
     tipoIva: pick('tipo_iva', 'tipoIva'),

@@ -25,13 +25,14 @@ describe('AC-PLA-1 / AC-PLA-2 libro .xlsx', () => {
 
   // MOD (RUN 20261012-2106): antes eran los 17 encabezados de CAMPOS_CLIENTE.
   // AC-PLA-2 (dueño, 2026-10-12) saca Comisión: quedan 16, mismo orden.
-  it('AC-PLA-2 plantilla de clientes: los 17 encabezados en orden (sin Comisión)', () => {
+  it('AC-PLA-2 plantilla de clientes: los 16 encabezados en orden (sin Comisión ni Provincia)', () => {
     const wb = escribirYLeer(libroPlantilla(XLSX, armarPlantilla('clientes', { vendedores: VENDEDORES })));
     expect(wb.SheetNames).toEqual(['Clientes', 'Instrucciones']);
     const enc = filasDe(wb, 'Clientes')[0];
     expect(enc).toEqual(CAMPOS_CLIENTE.filter(c => c.key !== 'comision').map(c => c.label));
-    expect(enc).toHaveLength(17);
+    expect(enc).toHaveLength(16);
     expect(enc).not.toContain('Comisión');
+    expect(enc).not.toContain('Provincia');
     const inst = filasDe(wb, 'Instrucciones');
     expect(inst.find(f => f[0] === 'Vendedor')[3]).toBe('Admin');
     expect(inst.some(f => f[0] === 'Comisión')).toBe(false);
@@ -122,21 +123,21 @@ describe('AC-PLA-7 round-trip: plantilla -> completar -> importar', () => {
   // MOD (RUN 20261012-2106): antes eran 17 campos y comision: 5. La plantilla
   // ya no tiene Comisión (AC-PLA-2), asi que el dato 'Comisión' de abajo no
   // tiene columna donde caer y el alta queda con comision null (AC-PLA-4).
-  it('AC-PLA-7 clientes: los 17 campos de la plantilla llegan normalizados', () => {
+  it('AC-PLA-7 clientes: los 16 campos de la plantilla llegan normalizados', () => {
     const rows = completar('clientes', [{
       'Código cliente': 'C1', 'Razón social': 'Cliente RT', 'Domicilio de entrega': 'Calle 1', 'Ciudad': 'Rosario',
-      'Código postal': 's2000', 'Provincia': 'Santa Fe', 'Zona': 'Centro', 'País': 'Argentina', 'Tipo de IVA': 'Monotributo',
+      'Código postal': 's2000', 'Zona': 'Centro', 'País': 'Argentina', 'Tipo de IVA': 'Monotributo',
       'CUIT': '20123456786', 'Nombre de contacto': 'Pepe Gómez', 'Celular': '3415551234', 'Vendedor': 'admin', 'Cobrador': 'Pedro', 'Comisión': '5',
       'Fecha de alta': '2026-10-01', 'Tipo de cliente': 'Mayorista', 'Rubro': 'Almacén',
     }], { vendedores: VENDEDORES });
-    expect(rows[0]).toHaveLength(17);
+    expect(rows[0]).toHaveLength(16);
     const plan = planificarImportacion(rows, 'clientes', { existentes: [], vendedores: VENDEDORES });
     expect(plan.ok).toBe(true);
     expect(plan.ignoradas).toEqual([]);
     expect(plan.excluidas).toEqual([]);
     expect(plan.entradas[0].accion).toBe('crear');
     expect(plan.entradas[0].valor).toEqual({
-      codigo: 'C1', nombre: 'Cliente RT', direccion: 'Calle 1', ciudad: 'Rosario', codigoPostal: 'S2000', provincia: 'Santa Fe',
+      codigo: 'C1', nombre: 'Cliente RT', direccion: 'Calle 1', ciudad: 'Rosario', codigoPostal: 'S2000',
       zona: 'Centro', pais: 'Argentina', tipoIva: 'Monotributo', cuit: '20-12345678-6', contacto: 'Pepe Gómez', telefono: '3415551234', vendedor: 'Admin',
       // MOD (RUN 20261014-1449, AC-COMR-2): antes comision: null; ahora la clave no existe.
       cobrador: 'Pedro', fechaAlta: '2026-10-01', tipoCliente: 'Mayorista', rubro: 'Almacén',

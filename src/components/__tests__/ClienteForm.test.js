@@ -52,19 +52,21 @@ const etiquetas = () => [...container.querySelectorAll('label.input-label')]
   .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, '').trim());
 
 // MOD (RUN 20261014-1449, AC-COMR-1): antes 17 etiquetas con 'Comisión'; ahora
-// 16, porque el cliente ya no tiene comisión (REQ-COMR).
+// 16, porque el cliente ya no tiene comisión (REQ-COMR). MOD (AC-CLI2-2): sin
+// 'Provincia', quedan 16 (con 'Nombre de contacto').
 const ETIQUETAS_SPEC = [
   'Código cliente', 'Razón social', 'Domicilio de entrega', 'Ciudad', 'Código postal',
-  'Provincia', 'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Nombre de contacto', 'Celular', 'Vendedor', 'Cobrador',
+  'Zona', 'País', 'Tipo de IVA', 'CUIT', 'Nombre de contacto', 'Celular', 'Vendedor', 'Cobrador',
   'Fecha de alta', 'Tipo de cliente', 'Rubro',
 ];
 
 describe('ClienteForm', () => {
-  it('AC-CLI-1 AC-COMR-1 muestra exactamente los 17 campos con las etiquetas del SPEC, en orden (sin Comisión)', async () => {
+  it('AC-CLI-1 AC-COMR-1 AC-CLI2-2 muestra exactamente los 16 campos con las etiquetas del SPEC, en orden (sin Comisión ni Provincia)', async () => {
     await render({ onGuardar: jest.fn() });
     expect(etiquetas()).toEqual(ETIQUETAS_SPEC);
-    expect(etiquetas()).toHaveLength(17);
+    expect(etiquetas()).toHaveLength(16);
     expect(campo('comision')).toBeNull();
+    expect(campo('provincia')).toBeNull();
     // Obligatorios marcados con *
     const req = [...container.querySelectorAll('label.input-label')].filter(l => l.textContent.endsWith(' *')).map(l => l.htmlFor);
     expect(req).toEqual(['campo-codigo', 'campo-nombre', 'campo-direccion']);
@@ -77,10 +79,8 @@ describe('ClienteForm', () => {
     expect(campo('fechaAlta').value).toBe(hoyISO());
   });
 
-  it('AC-CLI-1 Provincia lista las 24 jurisdicciones y Vendedor la lista de vendedores', async () => {
+  it('AC-CLI-1 Vendedor lista los vendedores y Tipo de IVA sus opciones', async () => {
     await render({ onGuardar: jest.fn(), vendedores: [{ id: 1, nombre: 'Carlos' }, { id: 2, nombre: 'Ana' }] });
-    const provincias = [...campo('provincia').options].filter(o => o.value);
-    expect(provincias).toHaveLength(24);
     const vendedores = [...campo('vendedor').options].filter(o => o.value).map(o => o.value);
     expect(vendedores).toEqual(['Carlos', 'Ana']);
     const ivas = [...campo('tipoIva').options].filter(o => o.value).map(o => o.value);
@@ -118,24 +118,23 @@ describe('ClienteForm', () => {
     expect(errorDe('direccion')).not.toBeNull();
   });
 
-  it('AC-CLI-3 CUIT con dígito verificador inválido se rechaza con error en el campo', async () => {
-    const onGuardar = jest.fn();
+  // MOD (AC-CLI2-1): el CUIT ya no se valida ni es obligatorio.
+  it('AC-CLI2-1 CUIT con dígito verificador inválido se guarda igual, sin error', async () => {
+    const onGuardar = jest.fn(() => Promise.resolve());
     await render({ onGuardar });
     await llenar({ nombre: 'Kiosco', direccion: 'Calle 1', tipoIva: 'Responsable Inscripto', cuit: '20-12345678-7' });
     await click(botonGuardar());
-    expect(onGuardar).not.toHaveBeenCalled();
-    expect(errorDe('cuit').textContent).toMatch(/CUIT inválido/);
+    expect(errorDe('cuit')).toBeNull();
+    expect(onGuardar).toHaveBeenCalledTimes(1);
+    expect(onGuardar.mock.calls[0][0].cuit).toBe('20-12345678-7');
   });
 
-  it('AC-CLI-3 CUIT obligatorio salvo Consumidor Final', async () => {
-    const onGuardar = jest.fn();
+  it('AC-CLI2-1 sin CUIT se guarda con cualquier tipo de IVA', async () => {
+    const onGuardar = jest.fn(() => Promise.resolve());
     await render({ onGuardar });
     await llenar({ nombre: 'Kiosco', direccion: 'Calle 1', tipoIva: 'Monotributo' });
     await click(botonGuardar());
-    expect(onGuardar).not.toHaveBeenCalled();
-    expect(errorDe('cuit')).not.toBeNull();
-    await setValue(campo('tipoIva'), 'Consumidor Final');
-    await click(botonGuardar());
+    expect(errorDe('cuit')).toBeNull();
     expect(onGuardar).toHaveBeenCalledTimes(1);
   });
 
@@ -147,7 +146,6 @@ describe('ClienteForm', () => {
       nombre: '  Almacén   Don José  ',
       direccion: 'Av. Siempre Viva 742',
       codigoPostal: 'b1640 abc',
-      provincia: 'Buenos Aires',
       tipoIva: 'Responsable Inscripto',
       cuit: '20123456786',
       telefono: '+54 9 11 4444-5555',
@@ -161,7 +159,6 @@ describe('ClienteForm', () => {
       nombre: 'Almacén Don José',
       direccion: 'Av. Siempre Viva 742',
       codigoPostal: 'B1640ABC',
-      provincia: 'Buenos Aires',
       pais: 'Argentina',
       tipoIva: 'Responsable Inscripto',
       cuit: '20-12345678-6',

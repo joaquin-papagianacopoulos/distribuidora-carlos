@@ -97,9 +97,9 @@ describe('AC-PLA-3 AC-PLA-4 encabezados con tildes, mayusculas y basura invisibl
   });
 
   it.each([
-    ['MAYUSCULAS con tilde', ['CÓDIGO CLIENTE', 'RAZÓN SOCIAL', 'DOMICILIO DE ENTREGA', 'CIUDAD', 'CÓDIGO POSTAL', 'PROVINCIA', 'ZONA', 'PAÍS', 'TIPO DE IVA', 'CUIT', 'NOMBRE DE CONTACTO', 'CELULAR', 'VENDEDOR', 'COBRADOR', 'FECHA DE ALTA', 'TIPO DE CLIENTE', 'RUBRO']],
-    ['sin tildes', ['codigo cliente', 'razon social', 'domicilio de entrega', 'ciudad', 'codigo postal', 'provincia', 'zona', 'pais', 'tipo de iva', 'cuit', 'nombre de contacto', 'celular', 'vendedor', 'cobrador', 'fecha de alta', 'tipo de cliente', 'rubro']],
-  ])('AC-PLA-4 clientes %s: las 17 columnas se mapean a su campo', (_n, headers) => {
+    ['MAYUSCULAS con tilde', ['CÓDIGO CLIENTE', 'RAZÓN SOCIAL', 'DOMICILIO DE ENTREGA', 'CIUDAD', 'CÓDIGO POSTAL', 'ZONA', 'PAÍS', 'TIPO DE IVA', 'CUIT', 'NOMBRE DE CONTACTO', 'CELULAR', 'VENDEDOR', 'COBRADOR', 'FECHA DE ALTA', 'TIPO DE CLIENTE', 'RUBRO']],
+    ['sin tildes', ['codigo cliente', 'razon social', 'domicilio de entrega', 'ciudad', 'codigo postal', 'zona', 'pais', 'tipo de iva', 'cuit', 'nombre de contacto', 'celular', 'vendedor', 'cobrador', 'fecha de alta', 'tipo de cliente', 'rubro']],
+  ])('AC-PLA-4 clientes %s: las 16 columnas se mapean a su campo', (_n, headers) => {
     const m = mapearEncabezados(headers, 'clientes');
     COLUMNAS_PLANTILLA.clientes.forEach((c, i) => expect(m.indices[c.key]).toBe(i));
     expect(m.ignoradas).toEqual([]);
@@ -158,14 +158,16 @@ describe('AC-PLA-5 archivo con 1000 filas', () => {
     expect(plan.entradas[500].existente.id).toBe(501);
   });
 
-  it('AC-PLA-4 AC-PLA-5 1000 clientes con un CUIT invalido cada 7 filas: solo esas se rechazan, con su numero de fila', () => {
+  // MOD (AC-CLI2-1): antes la fila mala era un CUIT con DV inválido; el CUIT ya
+  // no se valida, así que ahora la mala no tiene razón social.
+  it('AC-PLA-4 AC-PLA-5 1000 clientes con una fila invalida cada 7: solo esas se rechazan, con su numero de fila', () => {
     const datos = [];
     const malas = [];
     for (let i = 0; i < 1000; i++) {
       const mala = i % 7 === 3;
       if (mala) malas.push(i + 2);
       datos.push(fila(LC, {
-        'Código cliente': `C${i}`, 'Razón social': `Cliente ${i}`, 'Domicilio de entrega': `Calle ${i}`,
+        'Código cliente': `C${i}`, 'Razón social': mala ? '' : `Cliente ${i}`, 'Domicilio de entrega': `Calle ${i}`,
         'Tipo de IVA': 'Responsable Inscripto', 'CUIT': mala ? '20123456780' : '30712345671',
       }));
     }
@@ -173,7 +175,7 @@ describe('AC-PLA-5 archivo con 1000 filas', () => {
     expect(plan.resumen.rechazados).toBe(malas.length);
     expect(plan.resumen.creados).toBe(1000 - malas.length);
     expect(plan.resumen.rechazos.map(r => r.fila)).toEqual(malas);
-    expect(plan.resumen.rechazos.every(r => /CUIT inválido/.test(r.motivo))).toBe(true);
+    expect(plan.resumen.rechazos.every(r => /razón social es obligatoria/.test(r.motivo))).toBe(true);
     expect(textoResumen(plan.resumen)).toBe(`✓ ${1000 - malas.length} creados, 0 actualizados, ${malas.length} líneas ignoradas.`);
   });
 
@@ -185,13 +187,15 @@ describe('AC-PLA-5 archivo con 1000 filas', () => {
   });
 });
 
+// MOD (AC-CLI2-1): la importación ya no valida el CUIT; validarCuit sigue
+// existiendo (lo usa Facturación A/B para avisar, AC-FAB-2).
 describe('AC-PLA-4 CUIT: digito verificador 10 / 11 / 0 y mezcla de filas', () => {
   // Armamos CUITs con DV calculado para cubrir los tres casos del algoritmo.
   const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
   const dvDe = (d10) => { const s = pesos.reduce((a, p, i) => a + p * Number(d10[i]), 0); return 11 - (s % 11); };
   const buscar = (cond) => { for (let n = 10000000; n < 10000500; n++) { const d = `20${n}`; if (cond(dvDe(d))) return d; } return null; };
 
-  it('AC-PLA-4 CUIT cuyo DV da 11 (=> 0) es valido, y el que da 10 se rechaza (no existe CUIT valido con DV 10)', () => {
+  it('AC-PLA-4 AC-CLI2-1 validarCuit: DV 11 (=> 0) es valido y DV 10 no; la importacion acepta ambos', () => {
     const base11 = buscar(v => v === 11);
     const base10 = buscar(v => v === 10);
     expect(base11 && base10).toBeTruthy();
@@ -202,10 +206,10 @@ describe('AC-PLA-4 CUIT: digito verificador 10 / 11 / 0 y mezcla de filas', () =
     const ok = validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento', cuit: `${base11}0` }, ctx);
     expect(ok.ok).toBe(true);
     const mal = validarFilaCliente({ codigo: 'B', nombre: 'B', direccion: 'B', tipoIva: 'Exento', cuit: `${base10}0` }, ctx);
-    expect(mal.ok).toBe(false);
+    expect(mal.ok).toBe(true);
   });
 
-  it('AC-PLA-4 un CUIT invalido entre dos filas validas no frena ni contagia a las vecinas', () => {
+  it('AC-PLA-4 AC-CLI2-1 un CUIT con DV invalido entre dos filas se importa igual', () => {
     const rows = [
       LC,
       fila(LC, { 'Código cliente': '1', 'Razón social': 'Bien 1', 'Domicilio de entrega': 'a', 'Tipo de IVA': 'Monotributo', 'CUIT': '20-12345678-6' }),
@@ -213,8 +217,9 @@ describe('AC-PLA-4 CUIT: digito verificador 10 / 11 / 0 y mezcla de filas', () =
       fila(LC, { 'Código cliente': '3', 'Razón social': 'Bien 3', 'Domicilio de entrega': 'a', 'Tipo de IVA': 'Monotributo', 'CUIT': '27-23456789-1' }),
     ];
     const plan = planificarImportacion(rows, 'clientes', { now: NOW });
-    expect(plan.entradas.map(e => e.accion)).toEqual(['crear', 'rechazar', 'crear']);
+    expect(plan.entradas.map(e => e.accion)).toEqual(['crear', 'crear', 'crear']);
     expect(plan.entradas[0].valor.cuit).toBe('20-12345678-6');
+    expect(plan.entradas[1].valor.cuit).toBe('20-12345678-7');
     expect(plan.entradas[2].valor.cuit).toBe('27-23456789-1');
     // El mismo CUIT en dos clientes distintos NO es un error (el formulario tampoco lo valida).
     const dup = planificarImportacion([LC,
@@ -223,10 +228,13 @@ describe('AC-PLA-4 CUIT: digito verificador 10 / 11 / 0 y mezcla de filas', () =
     expect(dup.resumen.creados).toBe(2);
   });
 
-  it('AC-PLA-4 CUIT con letras o de 10 digitos se rechaza; con tipo IVA Consumidor Final y sin CUIT se acepta', () => {
+  it('AC-CLI2-1 CUIT con letras, de 10 digitos o vacio se acepta con cualquier tipo de IVA', () => {
     const ctx = { now: NOW };
-    expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento', cuit: '2012345678' }, ctx).ok).toBe(false);
-    expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento', cuit: 'abc' }, ctx).errores.join()).toMatch(/obligatorio/);
+    const diez = validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento', cuit: '2012345678' }, ctx);
+    expect(diez.ok).toBe(true);
+    expect(diez.valor.cuit).toBe('2012345678');
+    expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento', cuit: 'abc' }, ctx).valor.cuit).toBe('abc');
+    expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Exento' }, ctx).ok).toBe(true);
     expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B', tipoIva: 'Consumidor Final' }, ctx).ok).toBe(true);
     expect(validarFilaCliente({ codigo: 'A', nombre: 'A', direccion: 'B' }, ctx).ok).toBe(true);
   });

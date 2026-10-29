@@ -73,7 +73,7 @@ describe('AC-SEC-3 AC-PLA-6 formula injection en la importacion', () => {
     for (const v of [codigo, nombre, categoria, unidad]) expect(FORMULA.test(String(v))).toBe(false);
   });
 
-  test.each(PAYLOADS.map(p => [p]))('AC-SEC-3 cliente: %j en los campos de texto queda neutralizado; CUIT y celular solo digitos', (p) => {
+  test.each(PAYLOADS.map(p => [p]))('AC-SEC-3 cliente: %j en los campos de texto y el CUIT queda neutralizado; celular solo digitos', (p) => {
     const valores = { codigo: p, nombre: p, direccion: p, ciudad: p, zona: p, pais: p, cobrador: p, tipoCliente: p, rubro: p, telefono: p, cuit: p };
     const r = validarFilaCliente(valores, { existentes: [], vendedores: [], now: NOW });
     for (const k of ['codigo', 'nombre', 'direccion', 'ciudad', 'zona', 'pais', 'cobrador', 'tipoCliente', 'rubro', 'telefono', 'cuit']) {

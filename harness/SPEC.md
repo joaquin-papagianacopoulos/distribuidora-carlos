@@ -26,11 +26,11 @@ Campos (etiqueta UI → campo interno → columna Supabase):
 | Domicilio de entrega | `direccion` | `direccion` | Obligatorio |
 | Ciudad | `ciudad` | `ciudad` | |
 | Código postal | `codigoPostal` | `codigo_postal` | Alfanumérico (CPA) 4–8 chars |
-| Provincia | `provincia` | `provincia` | Lista de las 24 jurisdicciones |
+| ~~Provincia~~ | `provincia` | `provincia` | **Eliminado del formulario por REQ-CLI2 (AC-CLI2-2)**. El dato viejo se conserva en IndexedDB y en Supabase, pero no se muestra ni se usa |
 | Zona | `zona` | `zona` | |
 | País | `pais` | `pais` | Default "Argentina" |
 | Tipo de IVA | `tipoIva` | `tipo_iva` | Responsable Inscripto / Monotributo / Exento / Consumidor Final / No Responsable |
-| CUIT | `cuit` | `cuit` | 11 dígitos con dígito verificador válido (obligatorio salvo Consumidor Final) |
+| CUIT | `cuit` | `cuit` | Opcional, texto libre sin validar; con 11 dígitos se guarda `XX-XXXXXXXX-X` (REQ-CLI2, AC-CLI2-1) |
 | Celular | `telefono` | `telefono` | 8–15 dígitos |
 | Vendedor | `vendedor` | `vendedor` | Lista de vendedores |
 | Cobrador | `cobrador` | `cobrador` | |
@@ -41,7 +41,7 @@ Campos (etiqueta UI → campo interno → columna Supabase):
 
 - **AC-CLI-1** El formulario de alta/edición muestra exactamente esos **16** campos con esas etiquetas (sin Comisión — modificado por AC-COMR-1, 2026-10-12).
 - **AC-CLI-2** No se puede guardar con código, razón social o domicilio vacíos; se muestra el error por campo.
-- **AC-CLI-3** CUIT inválido (dígito verificador) se rechaza; se guarda normalizado `XX-XXXXXXXX-X`.
+- **AC-CLI-3** ~~CUIT inválido (dígito verificador) se rechaza~~ → reemplazado por AC-CLI2-1. Con 11 dígitos se guarda normalizado `XX-XXXXXXXX-X`.
 - **AC-CLI-4** Código de cliente duplicado se rechaza.
 - **AC-CLI-5** Los campos nuevos se suben a Supabase y se bajan en otros dispositivos (sync), tolerando que la columna todavía no exista.
 - **AC-CLI-6** Los clientes viejos (sin campos nuevos) siguen funcionando en pedidos/orden de entrega.
@@ -598,3 +598,8 @@ Ej.: pedido con 10 sabores de Saphirus → en la boleta sale una línea "Saphiru
 > - REQ-DIR S1: Nuevo pedido no tiene dirección propia; la "dirección de entrega" es `cliente.direccion` y se guarda en el cliente al enviar. S2: pedidos y clientes viejos no se re-validan.
 > - REQ-FRB S3: el precio de bulto deja de verse como "descuento" en la boleta (base = `precioBaseRenglon`); el descuento manual sí se muestra.
 > - REQ-CON S5: hoy ningún PDF imprime el celular del cliente; no se agregó.
+
+## REQ-CLI2 — CUIT libre y sin provincia en el alta de clientes
+
+- **AC-CLI2-1** En el alta/edición de clientes y en la importación Excel el CUIT es **opcional** para cualquier tipo de IVA y **no se valida** (ni dígito verificador ni largo). Con 11 dígitos se guarda `XX-XXXXXXXX-X`; si no, tal cual se escribió (hasta 20 caracteres; en la importación pasa por `csvSafe`). Facturación A/B sigue avisando si el CUIT no es válido (AC-FAB-2, no bloquea).
+- **AC-CLI2-2** Se saca "Provincia" del formulario de clientes y de la plantilla Excel de clientes (quedan 16 campos). El dato viejo `provincia` se conserva en IndexedDB y en Supabase: no se valida, no se sube en el upsert (no pisa la columna) y no se baja. Una columna "Provincia" en un Excel viejo se ignora. La tienda online (checkout, AC-TIE-12) no cambia.
