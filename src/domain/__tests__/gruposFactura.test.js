@@ -111,14 +111,15 @@ describe('AC-AGR-3 filasBoleta', () => {
 
   it('AC-AGR-3 sin grupos: una fila por renglon, alfabetico', () => {
     const f = filasBoleta(ITEMS, [], { modo: 'detalle' });
-    expect(f.map(x => x.nombre)).toEqual(['Jabon Blanco', 'Saphirus Lavanda', 'Saphirus Rosa', 'Zorro Limpio']);
+    // AC-FRB-5: los renglones en bultos exactos se imprimen en bultos.
+    expect(f.map(x => x.nombre)).toEqual(['Jabon Blanco', 'Saphirus Lavanda (bulto x12)', 'Saphirus Rosa (bulto x12)', 'Zorro Limpio']);
     expect(f.every(x => x.tipo === 'item')).toBe(true);
     expect(totalFilasBoleta(f)).toBe(totalItems);
   });
   it('AC-AGR-3 modo detalle: grupo con sus renglones debajo, mezclado alfabeticamente', () => {
     const f = filasBoleta(ITEMS, grupos, { modo: 'detalle' });
     expect(f.map(x => [x.tipo, x.nombre.trim()])).toEqual([
-      ['item', 'Jabon Blanco'], ['grupo', 'Saphirus'], ['detalle', 'Saphirus Lavanda'], ['detalle', 'Saphirus Rosa'], ['item', 'Zorro Limpio'],
+      ['item', 'Jabon Blanco'], ['grupo', 'Saphirus'], ['detalle', 'Saphirus Lavanda (bulto x12)'], ['detalle', 'Saphirus Rosa (bulto x12)'], ['item', 'Zorro Limpio'],
     ]);
     expect(f[1].cantidadTexto).toBe('3 bultos (36 u.)');
     expect(f[1].subtotal).toBe(3600);

@@ -7,6 +7,7 @@ import { texto, nuevoId } from './validacion';
 import { claveMarca, normalizarMarca } from './marcas';
 import { rubroDeRenglon } from './rubros';
 import { normalizarBultoX } from './bultos';
+import { gruposBultoParaBoleta, claveRenglonGrupo, lineaGrupoBulto } from './grupoBulto';
 
 export const MAX_GRUPOS = 50;
 export const MAX_NOMBRE_GRUPO = 60;
@@ -113,6 +114,21 @@ const subtotalItem = (i) => Number(i?.cantidad) * Number(i?.precio);
 export const SUFIJO_PRECIO_BULTO = ' (x precio de bulto)';
 const nombreConMarca = (i, nombre) => (i?.precioPorBulto === true ? `${nombre}${SUFIJO_PRECIO_BULTO}` : nombre);
 
+// REQ-FRB (AC-FRB-5): un renglón cuya cantidad es múltiplo exacto del bulto
+// (bultoX congelado por REQ-VTA o precioBultoX por REQ-PBU) se imprime en bultos:
+// "Fragancia X (bulto x6) | 1 | $precio del bulto". El subtotal no cambia y
+// la marca "x precio de bulto" (AC-FRB-2) se mantiene si corresponde.
+// Sin bulto conocido o con unidades sueltas => en unidades, como siempre.
+export const columnasRenglonBoleta = (i, nombre) => {
+  const bx = normalizarBultoX(i?.bultoX) ?? normalizarBultoX(i?.precioBultoX);
+  const c = Number(i?.cantidad);
+  if (bx !== null && Number.isInteger(c) && c >= bx && c % bx === 0) {
+    const precioDelBulto = Math.round(Number(i?.precio) * bx * 100) / 100;
+    return { nombre: nombreConMarca(i, `${nombre} (bulto x${bx})`), cantidadTexto: String(c / bx), precioTexto: peso(precioDelBulto), enBultos: true };
+  }
+  return { nombre: nombreConMarca(i, nombre), cantidadTexto: String(i?.cantidad), precioTexto: peso(i?.precio) };
+};
+
 // Filas de la tabla de la boleta. El total del pedido es la suma de los items:
 // las filas "detalle" (renglones bajo un grupo) NO se suman de nuevo.
 //   tipo 'grupo' | 'detalle' | 'item'
@@ -124,16 +140,24 @@ export const filasBoleta = (items, grupos, { modo = 'detalle' } = {}) => {
 
   const sueltos = lista.filter(i => !claveAGrupo.has(claveRenglon(i)));
   const top = [];
+  // AC-GBU-3: los productos combinables (mismo "Grupo bulto") que no están en un grupo
+  // armado a mano van en UNA sola línea, sin el detalle de cada color.
+  const combinables = gruposBultoParaBoleta(sueltos);
+  for (const rengs of combinables.values()) {
+    const fila = lineaGrupoBulto(rengs, { peso, sufijoPrecioBulto: SUFIJO_PRECIO_BULTO });
+    top.push({ orden: fila.nombre, fila: { tipo: 'item', ...fila }, detalle: [] });
+  }
   for (const i of sueltos) {
+    if (combinables.has(claveRenglonGrupo(i))) continue;
     top.push({
-      orden: i.nombre, fila: { tipo: 'item', nombre: nombreConMarca(i, i.nombre), cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}) }, detalle: [],
+      orden: i.nombre, fila: { tipo: 'item', ...columnasRenglonBoleta(i, i.nombre), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}) }, detalle: [],
     });
   }
   for (const g of gs) {
     const rengs = lista.filter(i => claveAGrupo.get(claveRenglon(i)) === g.id);
     if (!rengs.length) continue;
     const detalle = modo === 'solo_grupos' ? [] : [...rengs].sort((a, b) => alpha(a.nombre, b.nombre)).map(i => ({
-      tipo: 'detalle', nombre: nombreConMarca(i, `   ${i.nombre}`), cantidadTexto: String(i.cantidad), precioTexto: peso(i.precio), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}),
+      tipo: 'detalle', ...columnasRenglonBoleta(i, `   ${i.nombre}`), subtotal: subtotalItem(i), ...(i.precioPorBulto === true ? { porBulto: true } : {}),
     }));
     top.push({
       orden: g.nombre,

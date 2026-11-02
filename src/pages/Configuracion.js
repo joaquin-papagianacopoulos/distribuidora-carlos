@@ -217,6 +217,14 @@ const Configuracion = () => {
   // El formulario de producto se abre arriba de todo (reemplaza la lista): se vuelve al inicio.
   const irArriba = () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* jsdom */ } };
 
+  // AC-CLI2-3: el formulario de clientes/proveedores queda abajo de la lista: al abrirlo
+  // (lapiz o alta) se lleva la pantalla directo al formulario.
+  const formRef = useRef(null);
+  useEffect(() => {
+    if (!showForm || (tab !== 'clientes' && tab !== 'proveedores')) return;
+    try { formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { /* jsdom */ }
+  }, [showForm, editItem, tab]);
+
   const openAdd = () => {
     setEditItem(null);
     setForm(tab === 'vendedores' ? { permiso: 2 } : {});
@@ -985,23 +993,27 @@ const Configuracion = () => {
 
       {/* FORMULARIOS DE ALTA (REQ-CLI / REQ-PROD / REQ-PROV) */}
       {showForm && tab === 'clientes' && (
-        <ClienteForm
-          key={editItem?.id ?? 'nuevo'}
-          inicial={editItem}
-          existentes={clientes}
-          vendedores={vendedoresParaSelector(vendedores, editItem?.vendedor)}
-          onGuardar={guardarCliente}
-          onCancelar={cerrarForm}
-        />
+        <div ref={formRef}>
+          <ClienteForm
+            key={editItem?.id ?? 'nuevo'}
+            inicial={editItem}
+            existentes={clientes}
+            vendedores={vendedoresParaSelector(vendedores, editItem?.vendedor)}
+            onGuardar={guardarCliente}
+            onCancelar={cerrarForm}
+          />
+        </div>
       )}
       {showForm && tab === 'proveedores' && (
-        <ProveedorForm
-          key={editItem?.id ?? 'nuevo'}
-          inicial={editItem}
-          existentes={proveedoresTodos || proveedores}
-          onGuardar={guardarProveedor}
-          onCancelar={cerrarForm}
-        />
+        <div ref={formRef}>
+          <ProveedorForm
+            key={editItem?.id ?? 'nuevo'}
+            inicial={editItem}
+            existentes={proveedoresTodos || proveedores}
+            onGuardar={guardarProveedor}
+            onCancelar={cerrarForm}
+          />
+        </div>
       )}
 
       {/* FORM VENDEDORES */}

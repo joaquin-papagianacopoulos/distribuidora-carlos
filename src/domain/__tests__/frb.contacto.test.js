@@ -63,8 +63,9 @@ describe('AC-FRB-2 AC-FRB-3 boleta', () => {
   });
   it('AC-FRB-2 la fila lleva la marca "x precio de bulto" solo cuando corresponde', () => {
     const filas = filasBoleta([r16, r10], []);
-    expect(filas.find(f => f.cantidadTexto === '16').nombre).toBe(`Dos Corazones${SUFIJO_PRECIO_BULTO}`);
-    expect(filas.find(f => f.cantidadTexto === '16').porBulto).toBe(true);
+    // AC-FRB-5: 16 u. con bulto x16 se imprime como 1 bulto, con la marca.
+    expect(filas.find(f => f.cantidadTexto === '1').nombre).toBe(`Dos Corazones (bulto x16)${SUFIJO_PRECIO_BULTO}`);
+    expect(filas.find(f => f.cantidadTexto === '1').porBulto).toBe(true);
     expect(filas.find(f => f.cantidadTexto === '10').nombre).toBe('Dos Corazones');
     expect(filas.find(f => f.cantidadTexto === '10').porBulto).toBeUndefined();
   });

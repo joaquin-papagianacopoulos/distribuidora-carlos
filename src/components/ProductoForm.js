@@ -30,6 +30,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     // AC-VTA-1: productos viejos sin estos campos arrancan con los defaults derivados.
     ventaPor: ventaPorEfectivo(inicial || {}),
     bultoNombre: normalizarBultoNombre(inicial?.bultoNombre),
+    grupoBulto: str(inicial?.grupoBulto),
     visibleTienda: inicial?.visibleTienda !== false,
     minimoVenta: str(inicial?.minimoVenta, '1'),
     stockMinimo: str(inicial?.stockMinimo),

@@ -4,6 +4,7 @@ import { normalizarRubro, resolverRubro } from './rubros';
 import { resolverMarca, normalizarMarca } from './marcas';
 import { avisoSinStock } from './stock';
 import { minimoEfectivo } from './minimos';
+import { normalizarGrupoBulto } from './grupoBulto';
 import { validarUnidadVenta, VENTA_POR, BULTO_NOMBRES, ventaPorEfectivo, normalizarBultoNombre, parsearBooleano } from './unidadVenta';
 
 export const CAMPOS_PRODUCTO = [
@@ -31,6 +32,9 @@ export const CAMPOS_PRODUCTO = [
   // AC-STB-1: punto de reposición. Vacío = se usa el mínimo de venta.
   { key: 'stockMinimo', label: 'Stock mínimo', tipo: 'number' },
   { key: 'stock', label: 'Stock', tipo: 'number' },
+  // AC-GBU-1: productos con el mismo grupo (ej. "Prime") se combinan para llegar al bulto.
+  // Va al final para no correr las columnas de las plantillas Excel ya armadas.
+  { key: 'grupoBulto', label: 'Grupo bulto' },
 ];
 
 // AC-PROD-1: costoNeto = costo × (1-d1) × (1-d2); precio1 = costoNeto × (1+ganancia).
@@ -129,6 +133,8 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   p.ventaPor = uv.valor.ventaPor;
   p.bultoNombre = uv.valor.bultoNombre;
   p.visibleTienda = uv.valor.visibleTienda;
+  // AC-GBU-1: vacío = no se combina con otros productos.
+  p.grupoBulto = normalizarGrupoBulto(form.grupoBulto);
 
   let stock = null;
   if (form.stock !== '' && form.stock != null) {
@@ -157,6 +163,7 @@ export const COLUMNAS_PRODUCTO_PUBLICAS = Object.freeze([
   'proveedor_id', 'bulto_x', 'minimo_venta',
   'marca', 'venta_por', 'bulto_nombre', 'visible_tienda',
   'precio_bulto', 'stock_minimo',
+  'grupo_bulto',
 ]);
 
 // Columnas de la 001 (base): sin estas no se puede bajar la lista de productos.
@@ -243,6 +250,8 @@ export const productoPreciosToRemote = (p = {}) => ({
   precio_bulto: Number(p.precioBulto) > 0 ? Number(p.precioBulto) : 0,
   // AC-STB-1 (migración 012): si el producto nunca tuvo el dato, la clave no viaja y el servidor conserva el suyo.
   ...(p.stockMinimo !== undefined ? { stock_minimo: stockMinimoValido(p.stockMinimo) } : {}),
+  // AC-GBU-1 (migración 022): igual que stock_minimo, si el producto nunca tuvo el dato no viaja.
+  ...(p.grupoBulto !== undefined ? { grupo_bulto: normalizarGrupoBulto(p.grupoBulto) || null } : {}),
 });
 
 // AC-VTA-5: columnas de la migración 006 (aparte de las de la 001 para poder escalonar el sync).
@@ -276,6 +285,8 @@ export const productoExtraFromRemote = (r = {}, local = {}) => {
     minimoVenta: Number(pick('minimo_venta', 'minimoVenta', 1)),
     precioBulto: Number(pick('precio_bulto', 'precioBulto', 0)) || 0,
     stockMinimo: stockMinimoValido(pick('stock_minimo', 'stockMinimo', null)),
+    // AC-GBU-1: columna ausente (sin 022) => valor local.
+    grupoBulto: normalizarGrupoBulto(pick('grupo_bulto', 'grupoBulto', '')),
     // AC-VTA-5: columna ausente (sin 006) => valor local => default derivado.
     ventaPor: pick('venta_por', 'ventaPor', undefined),
     bultoNombre: normalizarBultoNombre(pick('bulto_nombre', 'bultoNombre', 'Bulto')),

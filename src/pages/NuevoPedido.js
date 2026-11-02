@@ -7,11 +7,12 @@ import { direccionExacta, mensajeDireccion } from '../domain/direccion';
 import { crearPedidoOnlineFirst } from '../services/pedidoRepository';
 import { normalizePedidoFecha } from '../utils/pedidos';
 import { avisoSinStock, stockParaAviso } from '../domain/stock';
+import { preciosPorGrupoBulto, progresoGrupoBulto } from '../domain/grupoBulto';
 import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
 import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
-import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
+import { pasoCantidad, cantidadConPaso, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 
 const Toast = ({ msg, type, onClose }) => {
   useEffect(() => { const t = setTimeout(onClose, 2500); return () => clearTimeout(t); }, [onClose]);
@@ -39,8 +40,11 @@ const hasDraftContent = (draft) =>
   !!String(draft?.clienteQ || draft?.clienteNombre || draft?.productoQ || draft?.observaciones || '').trim() ||
   (draft?.items || []).length > 0;
 
+// AC-PBU-3: toda cantidad nueva re-precia el renglón (precio por bulto) salvo precio manual.
+const conCantidad = (i, cantidad) => precioAplicadoRenglon(quitarMarcasRenglon({ ...i, cantidad }), cantidad);
+
 // Componente separado con estado local para los inputs — evita borrar el item al vaciar el campo
-const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], errorMinimo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
+const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrupo = null, errorMinimo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
   const [cantidadText, setCantidadText] = useState(String(item.cantidad));
   const [precioText, setPrecioText] = useState(String(item.precio));
 
@@ -130,6 +134,11 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], errorMinimo 
               {'⛔'} {errorMinimo}
             </div>
           )}
+          {progresoGrupo && (
+            <div data-testid="progreso-grupo-bulto" style={{ fontSize: 10, color: progresoGrupo.llego ? 'var(--success)' : 'var(--text3)', marginTop: 2 }}>
+              {progresoGrupo.texto}
+            </div>
+          )}
           {item.precioPorBulto === true && !precioModificado && (
             <div data-testid="precio-por-bulto" style={{ fontSize: 10, color: 'var(--success)', marginTop: 2 }}>
               Precio llevando bulto
@@ -195,9 +204,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], errorMinimo 
         {/* Cantidad */}
         <div className="qty-control">
           <button className="qty-btn" onMouseDown={() => {
-            const nueva = Math.max(paso, item.cantidad - paso);
-            onCambiarCantidad(item.productoId, -paso, paso);
-            setCantidadText(String(nueva));
+            onCambiarCantidad(item.productoId, 'restar');
+            setCantidadText(String(cantidadConPaso(item.cantidad, producto, 'restar')));
           }}>−</button>
           <input
             className="qty-input"
@@ -209,8 +217,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], errorMinimo 
             inputMode="numeric"
           />
           <button className="qty-btn" onMouseDown={() => {
-            onCambiarCantidad(item.productoId, paso, null);
-            setCantidadText(String(item.cantidad + paso));
+            onCambiarCantidad(item.productoId, 'sumar');
+            setCantidadText(String(cantidadConPaso(item.cantidad, producto, 'sumar')));
           }}>+</button>
         </div>
 
@@ -253,7 +261,9 @@ const NuevoPedido = () => {
   const dirOk = direccionExacta(direccion);
   const errorDir = !dirOk.ok && direccion.trim() !== '' ? mensajeDireccion(dirOk.motivo) : '';
   const [productoQ, setProductoQ] = useState(() => draftInicial?.productoQ || '');
-  const [items, setItems] = useState(() => Array.isArray(draftInicial?.items) ? draftInicial.items : []);
+  const [items, setItemsRaw] = useState(() => Array.isArray(draftInicial?.items) ? draftInicial.items : []);
+  // AC-GBU-2: todo cambio de renglones re-precia los productos combinables por grupo.
+  const setItems = useCallback((upd) => setItemsRaw(prev => preciosPorGrupoBulto(typeof upd === 'function' ? upd(prev) : upd)), []);
   const [observaciones, setObservaciones] = useState(() => draftInicial?.observaciones || '');
   const [toast, setToast] = useState(null);
   const [showClienteSugg, setShowClienteSugg] = useState(false);
@@ -298,7 +308,8 @@ const NuevoPedido = () => {
       const existe = prev.find(i => i.productoId === p.id);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        const next = prev.map(i => i.productoId === p.id ? quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) }) : i);
+        // AC-FRB-4: desde el bulto suma de a bulto entero y re-precia (precio de bulto).
+        const next = prev.map(i => i.productoId === p.id ? conCantidad(i, cantidadConPaso(i.cantidad, p, 'sumar')) : i);
         const idx = next.findIndex(i => i.productoId === p.id);
         if (idx <= 0) return next;
         const it = next[idx];
@@ -309,16 +320,13 @@ const NuevoPedido = () => {
     });
     // La busqueda queda como esta para poder tocar varios productos seguidos;
     // se borra con la cruz del buscador.
-  }, []);
+  }, [setItems]);
 
-  // AC-PBU-3: toda cantidad nueva re-precia el renglón (precio por bulto) salvo precio manual.
-  const conCantidad = (i, cantidad) => precioAplicadoRenglon(quitarMarcasRenglon({ ...i, cantidad }), cantidad);
-
-  const cambiarCantidad = (productoId, delta, minVal) => {
+  // AC-FRB-4: +/− con el paso del producto (de a bulto desde el bulto en los fraccionados).
+  const cambiarCantidad = (productoId, op) => {
+    const prod = productosById.get(String(productoId));
     setItems(prev => prev.map(i =>
-      i.productoId === productoId
-        ? conCantidad(i, Math.max(minVal !== null ? minVal : 1, i.cantidad + delta))
-        : i
+      i.productoId === productoId ? conCantidad(i, cantidadConPaso(i.cantidad, prod, op)) : i
     ));
   };
 
@@ -532,6 +540,7 @@ const NuevoPedido = () => {
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
                 avisos={[avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId))].filter(Boolean)}
+                progresoGrupo={progresoGrupoBulto(item, items)}
                 errorMinimo={erroresMinimo.has(String(item.productoId)) ? mensajeMinimo(erroresMinimo.get(String(item.productoId))) : null}
                 canEditPrecio={isAdmin}
                 onCambiarCantidad={cambiarCantidad}

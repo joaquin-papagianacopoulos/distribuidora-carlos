@@ -130,6 +130,26 @@ export function pasoCantidad(producto) {
   return cantidadInicialRenglon(producto);
 }
 
+// REQ-FRB (AC-FRB-4): cantidad que deja el +/− (o volver a tocar el producto).
+// Producto "ambos" (fraccionado): por debajo del bulto va de a 1; desde el bulto
+// va de a bulto entero (6 -> 12 -> 18; 7 -> 12) y al bajar vuelve al múltiplo
+// anterior (12 -> 6, 7 -> 6, 6 -> 5). El resto usa pasoCantidad como siempre.
+// Nunca baja de pasoCantidad ni supera MAX_CANTIDAD (en ese caso, sin cambios).
+export function cantidadConPaso(cantidad, producto, op = 'sumar') {
+  const c = normalizarCantidad(cantidad);
+  const paso = pasoCantidad(producto);
+  const bx = normalizarBultoX(producto && producto.bultoX);
+  let nueva;
+  if (ventaPorEfectivo(producto) === 'ambos' && bx !== null && Number.isInteger(c)) {
+    if (op === 'sumar') nueva = c >= bx ? (Math.floor(c / bx) + 1) * bx : c + 1;
+    else nueva = c > bx ? (Math.ceil(c / bx) - 1) * bx : c - 1;
+  } else {
+    nueva = op === 'sumar' ? c + paso : c - paso;
+  }
+  if (op !== 'sumar') return Math.max(paso, nueva);
+  return nueva > MAX_CANTIDAD ? c : nueva;
+}
+
 export function avisoMultiplo(cantidad, producto) {
   if (ventaPorEfectivo(producto) !== 'bulto') return null;
   const bx = normalizarBultoX(producto.bultoX);

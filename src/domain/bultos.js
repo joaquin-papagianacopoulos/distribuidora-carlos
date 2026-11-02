@@ -7,6 +7,7 @@ import { MAX_CANTIDAD } from './stock';
 import { rubroDeProducto } from './rubros';
 import { cantidadInicialConMinimo } from './minimos';
 import { precioAplicado } from './precios';
+import { normalizarGrupoBulto } from './grupoBulto';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
 export const CANTIDAD_MINIMA_RENGLON = 1;
@@ -70,6 +71,8 @@ export function renglonNuevo(producto, extra = {}) {
   // AC-PBU-3: se congelan precio por unidad y precio por bulto; el aplicado depende de la cantidad.
   const conBulto = Number(p.precioBulto) > 0 && normalizarBultoX(p.bultoX) !== null;
   const aplicado = precioAplicado(p, cantidad);
+  // AC-GBU-2: se congela el grupo del producto EN ESE MOMENTO (como el rubro).
+  const grupoBulto = normalizarGrupoBulto(p.grupoBulto);
   return {
     productoId: p.id,
     nombre: p.nombre,
@@ -78,6 +81,7 @@ export function renglonNuevo(producto, extra = {}) {
     ...(conBulto ? { precioBultoOriginal: Number(p.precioBulto), precioBultoX: normalizarBultoX(p.bultoX), precioPorBulto: aplicado.porBulto } : {}),
     cantidad,
     ...(rubro ? { rubro } : {}),
+    ...(grupoBulto ? { grupoBulto } : {}),
     ...extra,
     [MARCA_CANTIDAD_POR_DEFECTO]: true,
   };

@@ -1,8 +1,9 @@
 // src/pages/Facturacion.js
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { getTodayStr, formatFecha, fuzzySearch, searchProductos } from '../utils/fuzzy';
 import { registrarFaltantes } from '../db';
+import { preciosPorGrupoBulto } from '../domain/grupoBulto';
 import { generarFacturaFile } from '../utils/pdfGen';
 import { shareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
@@ -260,7 +261,9 @@ const Facturacion = () => {
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [clienteQ, setClienteQ] = useState('');
   const [pedidoEditando, setPedidoEditando] = useState(null);
-  const [itemsEdit, setItemsEdit] = useState([]);
+  const [itemsEdit, setItemsEditRaw] = useState([]);
+  // AC-GBU-2: todo cambio de renglones re-precia los productos combinables por grupo.
+  const setItemsEdit = useCallback((upd) => setItemsEditRaw(prev => preciosPorGrupoBulto(typeof upd === 'function' ? upd(prev) : upd)), []);
   // Productos que el armador tacho como faltantes; se pueden destachar desde aca.
   const [removidosEdit, setRemovidosEdit] = useState([]);
   const [fechaEdit, setFechaEdit] = useState(getTodayStr());

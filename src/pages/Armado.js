@@ -1,7 +1,8 @@
 // src/pages/Armado.js
 // Pantalla del rol "Armador": prepara pedidos en deposito.
 // Usa un campo independiente "armado" (no toca "estado": pendiente/facturado).
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { preciosPorGrupoBulto } from '../domain/grupoBulto';
 import { useApp } from '../hooks/useAppContext';
 import { getTodayStr, formatFecha, searchProductos } from '../utils/fuzzy';
 import { generarFacturaFile, generarListaClientesFile } from '../utils/pdfGen';
@@ -186,7 +187,9 @@ const Armado = () => {
 
   // --- Interfaz de armado (producto por producto) ---
   const [armando, setArmando] = useState(null); // pedido original (snapshot) que se esta armando
-  const [itemsArmado, setItemsArmado] = useState([]);
+  const [itemsArmado, setItemsArmadoRaw] = useState([]);
+  // AC-GBU-2: todo cambio de renglones re-precia los productos combinables por grupo.
+  const setItemsArmado = useCallback((upd) => setItemsArmadoRaw(prev => preciosPorGrupoBulto(typeof upd === 'function' ? upd(prev) : upd)), []);
   const [productoQ, setProductoQ] = useState('');
   const [showSugg, setShowSugg] = useState(false);
   const [guardandoArmado, setGuardandoArmado] = useState(false);
