@@ -99,7 +99,7 @@ describe('AC-PLA-3 BUG-PLA-02 un solo delimitador por archivo', () => {
   });
 
   test('AC-PLA-3 BUG-PLA-02 una fila con celdas de mas que el encabezado (CSV) se rechaza con motivo; con celdasDeMas=false no', () => {
-    const rows = filasDesdeCSV('Código,Descripción,Costo final\nD1,Decimal,1234,50\nD2,Ok,10,\n').filas;
+    const rows = filasDesdeCSV('Código,Descripción,Precio por unidad\nD1,Decimal,1234,50\nD2,Ok,10,\n').filas;
     const plan = planificarImportacion(rows, 'productos', { celdasDeMas: true });
     expect(plan.entradas[0].accion).toBe('rechazar');
     expect(plan.entradas[0].errores[0]).toMatch(/4 columnas y el encabezado 3/);

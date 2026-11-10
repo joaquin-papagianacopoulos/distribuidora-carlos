@@ -1,6 +1,7 @@
 // REQ-FAB (AC-FAB-3/4), REQ-AGR (AC-AGR-3), REQ-TRQ (AC-TRQ-1): la boleta y el reporte en PDF real (jsPDF).
 import { TextEncoder, TextDecoder } from 'util';
-import { generarFacturaFile, generarFacturasAEmitirFile } from '../pdfGen';
+import { generarFacturaFile, generarFacturasAEmitirFile, generarResumenDiaFile } from '../pdfGen';
+import { ESTILO_TABLA_COMPACTA, ESTILO_TABLA_ANTERIOR, filasPorHoja } from '../../domain/boletaLayout';
 
 global.TextEncoder = global.TextEncoder || TextEncoder;
 global.TextDecoder = global.TextDecoder || TextDecoder;
@@ -8,7 +9,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 const leer = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsText(blob); });
 
 // Registra cada doc.text(texto, x, y) y cada pagina agregada (subclase de jsPDF real).
-const mockReg = { textos: [], paginas: 0 };
+const mockReg = { textos: [], paginas: 0, tablas: [], lineasPunteadas: 0 };
 jest.mock('jspdf', () => {
   const real = jest.requireActual('jspdf');
   class JsPdfEspia extends real.jsPDF {
@@ -16,8 +17,12 @@ jest.mock('jspdf', () => {
       super(...a);
       const text = this.text.bind(this);
       const addPage = this.addPage.bind(this);
+      const autoTable = this.autoTable && this.autoTable.bind(this);
+      const setLineDash = this.setLineDash.bind(this);
+      if (autoTable) this.autoTable = (o) => { mockReg.tablas.push(o); return autoTable(o); };
+      this.setLineDash = (d, ...r) => { if (Array.isArray(d) && d.length) mockReg.lineasPunteadas += 1; return setLineDash(d, ...r); };
       this.text = (t, x, y, ...r) => {
-        mockReg.textos.push({ t: Array.isArray(t) ? t.join(' ') : String(t), x, y, pagina: this.internal.getCurrentPageInfo().pageNumber });
+        mockReg.textos.push({ t: Array.isArray(t) ? t.join(' ') : String(t), x, y, pagina: this.internal.getCurrentPageInfo().pageNumber, fs: this.getFontSize(), bold: /bold/i.test(String(this.getFont().fontStyle)) });
         return text(t, x, y, ...r);
       };
       this.addPage = (...p) => { mockReg.paginas += 1; return addPage(...p); };
@@ -27,8 +32,8 @@ jest.mock('jspdf', () => {
 });
 
 let textos; let paginas;
-beforeEach(() => { mockReg.textos = []; mockReg.paginas = 0; textos = mockReg.textos; paginas = 0; });
-const limpiar = () => { mockReg.textos = []; mockReg.paginas = 0; };
+beforeEach(() => { mockReg.textos = []; mockReg.paginas = 0; mockReg.tablas = []; mockReg.lineasPunteadas = 0; textos = mockReg.textos; paginas = 0; });
+const limpiar = () => { mockReg.textos = []; mockReg.paginas = 0; mockReg.tablas = []; mockReg.lineasPunteadas = 0; };
 const vistos = () => mockReg.textos;
 const pags = () => mockReg.paginas;
 
@@ -39,18 +44,24 @@ const pedido = (extra = {}) => ({
 });
 const buscar = (re) => vistos().filter(x => re.test(x.t));
 
-describe('AC-FAB-4 encabezado de la boleta', () => {
-  it('AC-FAB-4 muestra FACTURA A / FACTURA B segun el tipo', async () => {
+// ADAPTADO (AC-FAB-4 -> AC-RTO-1): el impreso siempre es un REMITO, nunca "FACTURA A/B".
+describe('AC-RTO-1 encabezado del remito', () => {
+  it('AC-RTO-1 el titulo es REMITO y nunca FACTURA, aun con tipo A o B', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null, { tipoFactura: 'A' });
-    expect(buscar(/^FACTURA A$/)).toHaveLength(1);
+    expect(buscar(/^REMITO$/)).toHaveLength(1);
+    expect(buscar(/^REMITO N° 000007$/)).toHaveLength(1);
     limpiar();
     await generarFacturaFile(pedido({ tipoFactura: 'B' }), {}, {}, 0, null);
-    expect(buscar(/^FACTURA B$/)).toHaveLength(1);
-  });
-  it('AC-FAB-4 sin tipo (o "ninguna") no escribe FACTURA', async () => {
-    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(buscar(/^REMITO$/)).toHaveLength(1);
+    expect(buscar(/FACTURA/)).toHaveLength(0);
+    limpiar();
     await generarFacturaFile(pedido({ tipoFactura: 'ninguna' }), {}, {}, 0, null);
-    expect(buscar(/^FACTURA/)).toHaveLength(0);
+    expect(buscar(/^REMITO$/)).toHaveLength(1);
+    expect(buscar(/BOLETA/)).toHaveLength(0);
+  });
+  it('AC-RTO-1 el archivo se llama remito_<n>_<fecha>.pdf', async () => {
+    const f = await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(f.name).toBe('remito_000007_2026-10-07.pdf');
   });
   it('AC-FAB-4 retrocompatible: 5 parametros siguen andando', async () => {
     const f = await generarFacturaFile(pedido(), { nombre: 'x' }, { nombre: 'y' }, 100, 3);
@@ -59,44 +70,135 @@ describe('AC-FAB-4 encabezado de la boleta', () => {
   });
 });
 
-describe('AC-TRQ-1 troquel con Transf. a proveedor', () => {
-  it('AC-TRQ-1 boleta corta: tres casillas y linea Proveedor, todo dentro de la hoja', async () => {
+describe('AC-RTO-2 direccion y vendedor destacado', () => {
+  it('AC-RTO-2 la direccion (y la zona) van debajo del nombre del cliente', async () => {
+    await generarFacturaFile(pedido(), { direccion: 'Calle Falsa 123', zona: 'Norte' }, { nombre: 'Jorge' }, 0, null);
+    const cli = buscar(/^Kiosco Pepe$/)[0];
+    const dir = buscar(/^Calle Falsa 123$/)[0];
+    expect(dir).toBeDefined();
+    expect(dir.y).toBeGreaterThan(cli.y);
+    expect(buscar(/^Zona: Norte$/)[0].y).toBeGreaterThan(cli.y);
+  });
+  it('AC-RTO-2 sin direccion no escribe una linea vacia', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
-    expect(buscar(/^Efectivo$/)).toHaveLength(1);
-    expect(buscar(/^Transferencia$/)).toHaveLength(1);
-    const prov = buscar(/^Transf\. a proveedor$/);
-    expect(prov).toHaveLength(1);
-    const linea = buscar(/^Proveedor:/);
-    expect(linea).toHaveLength(1);
-    expect(linea[0].y).toBeLessThan(297);
-    expect(linea[0].y).toBeGreaterThan(prov[0].y);
+    expect(buscar(/^Zona:/)).toHaveLength(0);
+  });
+  it('AC-RTO-2 "Vendedor:" va en negrita y con tamano >= al del cliente', async () => {
+    await generarFacturaFile(pedido(), {}, { nombre: 'Jorge' }, 0, null);
+    const cli = buscar(/^Kiosco Pepe$/)[0];
+    const ven = buscar(/^Vendedor: Jorge$/)[0];
+    expect(ven).toBeDefined();
+    expect(ven.fs).toBeGreaterThanOrEqual(cli.fs);
+    expect(ven.bold).toBe(true);
+  });
+});
+
+describe('AC-RTO-3 renglones numerados e Items', () => {
+  it('AC-RTO-3 la tabla lleva columna N° y "Ítems: N" al pie', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(mockReg.tablas[0].head[0]).toEqual(['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Subtotal']);
+    expect(mockReg.tablas[0].body.map(r => r[0])).toEqual([1, 2]);
+    expect(buscar(/^Ítems: 2$/)).toHaveLength(1);
+  });
+  it('AC-RTO-3 un grupo cuenta 1 y su detalle no se numera', async () => {
+    const items = [item(1, 'Saphirus Lavanda', 12, 100, { bultoX: 12 }), item(2, 'Saphirus Rosa', 24, 100, { bultoX: 12 }), item(3, 'Jabon', 2, 50)];
+    const grupos = [{ id: 'g', nombre: 'Saphirus', itemIds: ['1', '2'] }];
+    await generarFacturaFile(pedido({ items, grupos }), {}, {}, 0, null, { modoGrupos: 'detalle' });
+    const body = mockReg.tablas[0].body;
+    expect(body.length).toBeGreaterThan(2);
+    expect(body.filter(r => r[0] !== '')).toHaveLength(2);
+    expect(buscar(/^Ítems: 2$/)).toHaveLength(1);
+  });
+});
+
+describe('AC-RTO-4 estilo compacto y pedido largo', () => {
+  it('AC-RTO-4 el remito y otro PDF con tabla usan ESTILO_TABLA_COMPACTA', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(mockReg.tablas[0].styles).toBe(ESTILO_TABLA_COMPACTA);
+    mockReg.tablas = [];
+    await generarResumenDiaFile([pedido()], '2026-10-07');
+    expect(mockReg.tablas[0].styles).toBe(ESTILO_TABLA_COMPACTA);
+  });
+  it('AC-RTO-4 pedido de 120 renglones: entra en <= 3 hojas (con el estilo anterior eran 4) y el pie queda en la ultima', async () => {
+    const items = Array.from({ length: 120 }, (_, i) => item(i + 1, `Producto ${String(i).padStart(3, '0')}`, 1, 10));
+    await generarFacturaFile(pedido({ items }), {}, {}, 0, null);
+    const ultimaPagina = Math.max(...vistos().map(x => x.pagina));
+    expect(ultimaPagina).toBeLessThanOrEqual(3);
+    expect(ultimaPagina).toBeGreaterThan(1);
+    expect(buscar(/^Ítems: 120$/)[0].pagina).toBe(ultimaPagina);
+    expect(buscar(/^TOTAL:$/)[0].pagina).toBe(ultimaPagina);
+    const compacto = filasPorHoja({ pageH: 297, startY: 38, bottom: 14, estilo: ESTILO_TABLA_COMPACTA });
+    const anterior = filasPorHoja({ pageH: 297, startY: 38, bottom: 14, estilo: ESTILO_TABLA_ANTERIOR });
+    expect(compacto).toBeGreaterThanOrEqual(Math.ceil(1.3 * anterior));
+  });
+});
+
+describe('AC-RTO-5 saldo anterior y total a cobrar', () => {
+  it('AC-RTO-5 con deuda: "Saldo anterior" y "Total a cobrar" = total + saldo; ya no dice "Deuda pendiente"', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 5000, null);
+    expect(buscar(/^Saldo anterior: \$5\.000$/)).toHaveLength(1);
+    expect(buscar(/^Total a cobrar: \$6\.500$/)).toHaveLength(1);
+    expect(buscar(/Deuda pendiente/)).toHaveLength(0);
+  });
+  it('AC-RTO-5 sin deuda no aparece ninguno de los dos', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(buscar(/Saldo anterior|Total a cobrar/)).toHaveLength(0);
+  });
+});
+
+describe('AC-RED-2 Subtotal / Redondeo / TOTAL en el remito', () => {
+  it('AC-RED-2 pedido facturado con redondeo congelado: Subtotal, Redondeo y TOTAL redondeado', async () => {
+    await generarFacturaFile(pedido({ redondeoMultiplo: 1000 }), {}, {}, 0, null);
+    expect(buscar(/^Subtotal:$/)).toHaveLength(1);
+    expect(buscar(/^Redondeo:$/)).toHaveLength(1);
+    expect(vistos().filter(x => x.x === 195).map(x => x.t)).toEqual(expect.arrayContaining(['$1.500', '+$500', '$2.000']));
+  });
+  it('AC-RED-2 sin ajuste solo se muestra TOTAL', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(buscar(/^Subtotal:|^Redondeo:/)).toHaveLength(0);
+    expect(buscar(/^TOTAL:$/)).toHaveLength(1);
+  });
+  it('AC-RED-2 pendiente: vista previa con redondeoVistaPrevia; con saldo, Total a cobrar suma el total redondeado', async () => {
+    await generarFacturaFile(pedido({ estado: 'pendiente' }), {}, {}, 1000, null, { redondeoVistaPrevia: 1000 });
+    expect(buscar(/^Redondeo:$/)).toHaveLength(1);
+    expect(buscar(/^Total a cobrar: \$3\.000$/)).toHaveLength(1);
+  });
+});
+
+describe('AC-RTO-6 sin troquel ni pie de pagina', () => {
+  it('AC-RTO-6 no aparecen Efectivo, Transferencia, Transf. a proveedor, Proveedor: ni la linea de corte', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(buscar(/^Efectivo$|^Transferencia$|^Transf\. a proveedor$|^Proveedor:/)).toHaveLength(0);
+    expect(mockReg.lineasPunteadas).toBe(0);
   });
 
-  it('AC-TRQ-1 boleta larga con deuda y observaciones: el troquel solo en la ultima pagina y nada se pisa', async () => {
+  it('AC-RTO-6 boleta larga con saldo y observaciones: total, saldo y obs en orden y sobre el margen inferior', async () => {
     const items = Array.from({ length: 60 }, (_, i) => item(i + 1, `Producto ${String(i).padStart(2, '0')}`, 3, 100));
     await generarFacturaFile(pedido({ items, observaciones: 'Entregar por la puerta de atras' }), {}, {}, 5000, null);
-    const prov = buscar(/^Transf\. a proveedor$/);
-    expect(prov).toHaveLength(1);
     const total = buscar(/^TOTAL:$/)[0];
-    const deuda = buscar(/^Deuda pendiente/)[0];
+    const saldo = buscar(/^Saldo anterior/)[0];
+    const cobrar = buscar(/^Total a cobrar/)[0];
     const obs = buscar(/^Obs:/)[0];
-    expect(total.pagina).toBe(prov[0].pagina);
-    expect(deuda.y).toBeGreaterThan(total.y);
-    expect(obs.y).toBeGreaterThan(deuda.y);
-    expect(obs.y).toBeLessThan(prov[0].y - 20);
+    expect(saldo.pagina).toBe(total.pagina);
+    expect(saldo.y).toBeGreaterThan(total.y);
+    expect(cobrar.y).toBeGreaterThan(saldo.y);
+    expect(obs.y).toBeGreaterThan(cobrar.y);
+    expect(obs.y).toBeLessThan(297 - 12);
   });
 
-  it('AC-TRQ-1 si totales+deuda+obs no entran arriba del corte, pasan a una hoja nueva con el troquel', async () => {
-    // Busca una cantidad de renglones que deje la tabla casi al final de la hoja.
+  it('AC-RTO-6 si el pie no entra abajo de la tabla pasa entero a una hoja nueva', async () => {
     let hallado = false;
-    for (let n = 20; n < 45 && !hallado; n++) {
+    for (let n = 30; n < 80 && !hallado; n++) {
       limpiar();
       const items = Array.from({ length: n }, (_, i) => item(i + 1, `P${i}`, 1, 10));
       await generarFacturaFile(pedido({ items, observaciones: 'nota' }), {}, {}, 100, null);
-      const prov = buscar(/^Transf\. a proveedor$/)[0];
       const total = buscar(/^TOTAL:$/)[0];
-      expect(prov.pagina).toBe(total.pagina);
-      if (pags() > 0) hallado = true;
+      const items1 = buscar(/^Ítems:/)[0];
+      const obs = buscar(/^Obs:/)[0];
+      expect(total.pagina).toBe(items1.pagina);
+      expect(obs.pagina).toBe(total.pagina);
+      expect(obs.y).toBeLessThan(297 - 12);
+      if (pags() > 0 && total.y < 60) hallado = true;
     }
     expect(hallado).toBe(true);
   });

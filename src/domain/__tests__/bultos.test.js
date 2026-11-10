@@ -53,8 +53,9 @@ describe('REQ-BUL dominio de bultos', () => {
 
   test('AC-BUL-3 resta bultoX sin bajar del piso', () => {
     expect(restarBulto(41, 12)).toBe(29);
-    expect(restarBulto(5, 12)).toBe(0);
-    expect(restarBulto(5, 12, { minimo: 1 })).toBe(1);
+    // ADAPTADO (AC-CBU-2 BUG-1): con 0 bultos (5 sueltas) "− Bulto" no hace nada (antes 0 y 1).
+    expect(restarBulto(5, 12)).toBe(5);
+    expect(restarBulto(5, 12, { minimo: 1 })).toBe(5);
     expect(restarBulto(12, 12, { minimo: 1 })).toBe(1);
     expect(restarBulto(1, 12, { minimo: CANTIDAD_MINIMA_RENGLON })).toBe(1);
     expect(restarBulto(0, 12)).toBe(0);

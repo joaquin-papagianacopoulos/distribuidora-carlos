@@ -4,15 +4,19 @@ import { useApp } from '../hooks/useAppContext';
 import { fuzzySearch, getTodayStr, formatFecha, searchProductos } from '../utils/fuzzy';
 import { addCliente, updateCliente } from '../db';
 import { direccionExacta, mensajeDireccion } from '../domain/direccion';
-import { crearPedidoOnlineFirst } from '../services/pedidoRepository';
+import { crearPedidoOnlineFirst, editarPedidoOnlineFirst } from '../services/pedidoRepository';
+import { filtrarActivos } from '../domain/vendedores';
+import { datosVendedorAlCrear } from '../domain/vendedorPedido';
+import { puedeEditarPedido, puedeAsignarVendedor } from '../domain/permisos';
 import { normalizePedidoFecha } from '../utils/pedidos';
-import { avisoSinStock, stockParaAviso } from '../domain/stock';
+import { avisoSinStock, stockParaAviso, etiquetaSinStock } from '../domain/stock';
 import { preciosPorGrupoBulto, progresoGrupoBulto } from '../domain/grupoBulto';
-import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon } from '../domain/precios';
-import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
+import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon, etiquetaEscala } from '../domain/precios';
+import { validarMinimosItems, mensajeMinimo, cantidadConPasoMinimo, ajustarAMultiploMinimo, validarMultiplosMinimoItems, mensajeMultiploMinimo } from '../domain/minimos';
+import { cambiarCasillero, botonesProductoLista, agregarBultoDesdeLista, precioVigenteRenglon } from '../domain/casilleros';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
-import { pasoCantidad, cantidadConPaso, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
+import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 
 const Toast = ({ msg, type, onClose }) => {
   useEffect(() => { const t = setTimeout(onClose, 2500); return () => clearTimeout(t); }, [onClose]);
@@ -44,9 +48,10 @@ const hasDraftContent = (draft) =>
 const conCantidad = (i, cantidad) => precioAplicadoRenglon(quitarMarcasRenglon({ ...i, cantidad }), cantidad);
 
 // Componente separado con estado local para los inputs — evita borrar el item al vaciar el campo
-const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrupo = null, errorMinimo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
+const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStock = null, progresoGrupo = null, errorMinimo = null, errorMultiplo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
   const [cantidadText, setCantidadText] = useState(String(item.cantidad));
   const [precioText, setPrecioText] = useState(String(item.precio));
+  const [avisoAjuste, setAvisoAjuste] = useState(null); // AC-MUL-1: "Se ajustó a N (de a m)"
 
   // Sincronizar texto cuando cambia desde los botones +/-
   useEffect(() => { setCantidadText(String(item.cantidad)); }, [item.cantidad]);
@@ -69,7 +74,16 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
   const handleCantidadBlur = () => {
     const n = cantidadTipeada(cantidadText);
     if (n !== null) {
-      setCantidadText(String(n));
+      // AC-MUL-1: lo tipeado que no es múltiplo del mínimo se sube al múltiplo superior, con aviso.
+      const aj = ajustarAMultiploMinimo(n, producto);
+      if (aj.ajustado) {
+        setCantidadText(String(aj.cantidad));
+        setAvisoAjuste(aj.aviso);
+        onSetCantidad(item.productoId, aj.cantidad);
+      } else {
+        setCantidadText(String(n));
+        setAvisoAjuste(null);
+      }
     } else if (parseInt(cantidadText, 10) > 0) {
       // C3: texto no vacío pero inválido (p. ej. > MAX_CANTIDAD): se vuelve a
       // la última cantidad válida.
@@ -117,6 +131,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
   const precioDelBulto = ventaPorEfectivo(producto) !== 'unidad' ? precioBulto(item.precio, producto?.bultoX) : null;
   const precioModificado = item.precioOriginal !== undefined && esPrecioManual(item);
   const subtotal = item.cantidad * item.precio;
+  // AC-CBU-3: precio que se está aplicando (solo en productos con bulto).
+  const precioVigente = puedeBulto && ventaPorEfectivo(producto) !== 'unidad' && Number(producto?.bultoX) > 1 ? precioVigenteRenglon(item) : null;
 
   return (
     <div className="item-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8, paddingTop: 12, paddingBottom: 12 }}>
@@ -129,14 +145,39 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
               {'\u26A0\uFE0F'} {avisos.join(' · ')}
             </div>
           )}
+          {etiquetaStock && (
+            <div data-testid="sin-stock-por-recibir" style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
+              {etiquetaStock}
+            </div>
+          )}
           {errorMinimo && (
             <div data-testid="error-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
               {'⛔'} {errorMinimo}
             </div>
           )}
+          {errorMultiplo && (
+            <div data-testid="error-multiplo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
+              {'⛔'} {errorMultiplo}
+            </div>
+          )}
+          {avisoAjuste && (
+            <div data-testid="aviso-ajuste" role="status" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
+              {'⚠️'} {avisoAjuste}
+            </div>
+          )}
+          {precioVigente && (
+            <div data-testid="precio-vigente" style={{ fontSize: 10, color: precioVigente.tipo === 'bulto' ? 'var(--success)' : 'var(--text3)', marginTop: 2 }}>
+              {precioVigente.texto}
+            </div>
+          )}
           {progresoGrupo && (
             <div data-testid="progreso-grupo-bulto" style={{ fontSize: 10, color: progresoGrupo.llego ? 'var(--success)' : 'var(--text3)', marginTop: 2 }}>
               {progresoGrupo.texto}
+            </div>
+          )}
+          {etiquetaEscala(item) && !item.eliminado && (
+            <div data-testid="escala-aplicada" style={{ fontSize: 10, color: 'var(--success)', marginTop: 2 }}>
+              Escala: {etiquetaEscala(item)}
             </div>
           )}
           {item.precioPorBulto === true && !precioModificado && (
@@ -205,7 +246,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
         <div className="qty-control">
           <button className="qty-btn" onMouseDown={() => {
             onCambiarCantidad(item.productoId, 'restar');
-            setCantidadText(String(cantidadConPaso(item.cantidad, producto, 'restar')));
+            setAvisoAjuste(null);
+            setCantidadText(String(cambiarCasillero(item.cantidad, producto, 'sueltas', 'restar')));
           }}>−</button>
           <input
             className="qty-input"
@@ -218,7 +260,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
           />
           <button className="qty-btn" onMouseDown={() => {
             onCambiarCantidad(item.productoId, 'sumar');
-            setCantidadText(String(cantidadConPaso(item.cantidad, producto, 'sumar')));
+            setAvisoAjuste(null);
+            setCantidadText(String(cambiarCasillero(item.cantidad, producto, 'sueltas', 'sumar')));
           }}>+</button>
         </div>
 
@@ -238,13 +281,17 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], progresoGrup
         puedeRestar={Number(item.cantidad) > Math.max(CANTIDAD_MINIMA_RENGLON, paso)}
         onSumar={() => onBulto && onBulto(item.productoId, 'sumar')}
         onRestar={() => onBulto && onBulto(item.productoId, 'restar')}
+        onSumarSueltas={() => onBulto && onBulto(item.productoId, 'sumarSueltas')}
+        onRestarSueltas={() => onBulto && onBulto(item.productoId, 'restarSueltas')}
       />
     </div>
   );
 };
 
-const NuevoPedido = () => {
-  const { productos, clientes, vendedores, vendedorActual, zonaActiva, setZona, recargar, stockMap } = useApp();
+// pedidoEditarId (REQ-EDP): id local del pedido a editar; null = pedido nuevo. onFinEdicion: vuelve a la lista.
+const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
+  const { productos, clientes, vendedores, vendedorActual, zonaActiva, setZona, recargar, stockMap, pedidos } = useApp();
+  const modoEdicion = pedidoEditarId !== null && pedidoEditarId !== undefined;
   const productosById = useMemo(() => new Map((productos || []).map(p => [String(p.id), p])), [productos]);
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const isAdmin = permisoNorm === 1;
@@ -252,7 +299,8 @@ const NuevoPedido = () => {
   const zonaLocked = isAdmin ? null : (vendedorActual?.zona || '');
   const zonaPedido = isAdmin ? (zonaActiva || '') : (zonaLocked || '');
   const draftKey = getDraftKey(vendedorActual);
-  const draftInicial = useMemo(() => readDraft(draftKey), [draftKey]);
+  // AC-EDP-1: en modo edicion no se usa ni se guarda el borrador de pedido nuevo.
+  const draftInicial = useMemo(() => (modoEdicion ? null : readDraft(draftKey)), [draftKey, modoEdicion]);
   const [fecha, setFecha] = useState(() => draftInicial?.fecha || getTodayStr());
   const [clienteQ, setClienteQ] = useState(() => draftInicial?.clienteQ || '');
   const [clienteId, setClienteId] = useState(() => draftInicial?.clienteId || null);
@@ -270,7 +318,56 @@ const NuevoPedido = () => {
   const [showProductoSugg, setShowProductoSugg] = useState(false);
   const productoRef = useRef(null);
 
+  // REQ-EDP: pedido que se esta editando (version fresca del servidor si hay conexion) y estado de la carga.
+  const [original, setOriginal] = useState(null);
+  const [cargandoEdicion, setCargandoEdicion] = useState(modoEdicion);
+  const [errorEdicion, setErrorEdicion] = useState('');
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  // REQ-ASV (AC-ASV-1): "Vendedor del pedido" elegido ('' = el mismo que carga).
+  const [vendedorElegido, setVendedorElegido] = useState('');
+  const usuarioActual = useMemo(() => ({ nombre: vendedorActual?.nombre, permiso: permisoNorm }), [vendedorActual, permisoNorm]);
+
+  const cargarDesdePedido = useCallback((p) => {
+    setOriginal(p);
+    setClienteQ(p.clienteNombre || '');
+    setClienteNombre(p.clienteNombre || '');
+    setClienteId(p.clienteId || null);
+    setFecha(normalizePedidoFecha(p.fecha) || getTodayStr());
+    setObservaciones(p.observaciones || '');
+    // Los renglones guardados conservan sus precios congelados: no se re-precian al abrir.
+    setItemsRaw(Array.isArray(p.items) ? p.items.map(i => ({ ...i })) : []);
+  }, []);
+
   useEffect(() => {
+    if (!modoEdicion) return undefined;
+    let vivo = true;
+    (async () => {
+      const local = (pedidos || []).find(x => x.id === pedidoEditarId);
+      if (!local) {
+        if (vivo) { setErrorEdicion('No se encontró el pedido'); setCargandoEdicion(false); }
+        return;
+      }
+      let actual = local;
+      // AC-EDP-3: online se refresca del servidor para tener la version (updated_at) sobre la que se edita.
+      if (navigator.onLine && local.remoteId) {
+        try {
+          const { traerPedidoRemoto } = await import('../sync/syncService');
+          const fresco = await traerPedidoRemoto(local.remoteId);
+          if (fresco) actual = fresco;
+        } catch (e) { /* sin conexion o error: se edita la version local */ }
+      }
+      if (!vivo) return;
+      const chk = puedeEditarPedido({ nombre: vendedorActual?.nombre, permiso: Number(vendedorActual?.permiso || 2) }, actual);
+      if (!chk.ok) setErrorEdicion(chk.motivo || 'No podés editar este pedido');
+      else if (chk.pantalla !== 'pedido') setErrorEdicion('Este pedido ya está facturado: se edita desde Facturación');
+      else cargarDesdePedido(actual);
+      setCargandoEdicion(false);
+    })();
+    return () => { vivo = false; };
+  }, [pedidoEditarId]);
+
+  useEffect(() => {
+    if (modoEdicion) return;
     const draft = {
       version: DRAFT_VERSION,
       fecha: normalizePedidoFecha(fecha),
@@ -289,7 +386,7 @@ const NuevoPedido = () => {
     } else {
       localStorage.removeItem(draftKey);
     }
-  }, [draftKey, fecha, clienteQ, clienteId, clienteNombre, direccion, productoQ, items, observaciones]);
+  }, [modoEdicion, draftKey, fecha, clienteQ, clienteId, clienteNombre, direccion, productoQ, items, observaciones]);
 
   const clienteSugg = clienteQ.length >= 1 ? fuzzySearch(clienteQ, clientes, 'nombre', 5) : [];
   const productoLimit = productoQ.trim().length < 2 ? 40 : 120;
@@ -309,7 +406,7 @@ const NuevoPedido = () => {
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
         // AC-FRB-4: desde el bulto suma de a bulto entero y re-precia (precio de bulto).
-        const next = prev.map(i => i.productoId === p.id ? conCantidad(i, cantidadConPaso(i.cantidad, p, 'sumar')) : i);
+        const next = prev.map(i => i.productoId === p.id ? conCantidad(i, cantidadConPasoMinimo(i.cantidad, p, 'sumar')) : i);
         const idx = next.findIndex(i => i.productoId === p.id);
         if (idx <= 0) return next;
         const it = next[idx];
@@ -326,7 +423,7 @@ const NuevoPedido = () => {
   const cambiarCantidad = (productoId, op) => {
     const prod = productosById.get(String(productoId));
     setItems(prev => prev.map(i =>
-      i.productoId === productoId ? conCantidad(i, cantidadConPaso(i.cantidad, prod, op)) : i
+      i.productoId === productoId ? conCantidad(i, cambiarCasillero(i.cantidad, prod, 'sueltas', op)) : i
     ));
   };
 
@@ -337,6 +434,11 @@ const NuevoPedido = () => {
     ));
   };
 
+  // AC-CBU-1: "Bulto xN $Y" en la lista de productos agrega 1 bulto.
+  const agregarBultoLista = useCallback((p) => {
+    setItems(prev => agregarBultoDesdeLista(prev, p));
+  }, [setItems]);
+
   // AC-BUL-2/3/9: suma o resta un bulto con el bultoX ACTUAL del producto.
   // Si el renglón tiene la unidad por defecto, el primer "+ Bulto" la reemplaza.
   // Updater funcional para que toques rápidos no usen un estado viejo.
@@ -346,9 +448,11 @@ const NuevoPedido = () => {
     const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prod));
     setItems(prev => prev.map(i => {
       if (i.productoId !== productoId) return i;
-      const cantidad = op === 'sumar'
-        ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
-        : restarBulto(i.cantidad, bx, { minimo });
+      const cantidad = op === 'sumarSueltas' || op === 'restarSueltas'
+        ? cambiarCasillero(i.cantidad, prod, 'sueltas', op === 'sumarSueltas' ? 'sumar' : 'restar') // AC-CBU-2
+        : op === 'sumar'
+          ? sumarBultoRenglon(i.cantidad, bx, { cantidadPorDefecto: i[MARCA_CANTIDAD_POR_DEFECTO] === true })
+          : restarBulto(i.cantidad, bx, { minimo });
       return cantidad === i.cantidad ? i : conCantidad(i, cantidad);
     }));
   };
@@ -373,13 +477,55 @@ const NuevoPedido = () => {
     setItems(prev => prev.filter(i => i.productoId !== productoId));
   };
 
+  // AC-MUL-2: error por renglón fuera de múltiplo (mismo criterio que al guardar).
+  const erroresMultiplo = useMemo(() => {
+    const r = validarMultiplosMinimoItems(items, productosById, { permiso: permisoNorm, pantalla: 'pedido', previos: original?.items });
+    return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
+  }, [items, productosById, permisoNorm, original]);
+
   const total = items.reduce((acc, i) => acc + i.cantidad * i.precio, 0);
 
   // AC-MIN-1: renglones por debajo del mínimo (error en el renglón; no se guarda).
   const erroresMinimo = useMemo(() => {
-    const r = validarMinimosItems(items, productosById, { permiso: permisoNorm, pantalla: 'nuevoPedido' });
+    // AC-EDP-1: al editar, los renglones que no cambiaron no se bloquean (pedidos viejos).
+    const r = validarMinimosItems(items, productosById, { permiso: permisoNorm, pantalla: 'nuevoPedido', previos: original?.items });
     return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
-  }, [items, productosById, permisoNorm]);
+  }, [items, productosById, permisoNorm, original]);
+
+  // REQ-ASV: vendedores entre los que se puede elegir al cargar (activos; el selector se oculta si no hay a quien elegir).
+  const vendedoresElegibles = useMemo(() => filtrarActivos(vendedores).filter(v => !v.borrado), [vendedores]);
+  const puedeElegirVendedor = !modoEdicion && puedeAsignarVendedor(usuarioActual, null, { alCrear: true }) && vendedoresElegibles.length > 1;
+
+  // AC-EDP-1/2/3: guarda la edicion (mismo pedido, sin duplicar; no pisa en silencio).
+  const guardarEdicion = async () => {
+    if (!original || guardandoEdicion) return;
+    setGuardandoEdicion(true);
+    try {
+      const res = await editarPedidoOnlineFirst(original, {
+        items: congelarBultosItems(quitarMarcasRenglones(items), productosById, { previos: original.items }),
+        total,
+        observaciones,
+      }, { productosById });
+      if (res && res.mode === 'conflicto') {
+        // AC-EDP-3: cambio en otro dispositivo: se recarga la version del servidor antes de volver a guardar.
+        try {
+          const { traerPedidoRemoto } = await import('../sync/syncService');
+          const fresco = await traerPedidoRemoto(original.remoteId, { forzar: true });
+          if (fresco) cargarDesdePedido(fresco);
+        } catch (e) { /* queda la version local */ }
+        await recargar();
+        setToast({ msg: 'El pedido cambió en otro dispositivo. Se recargó con la última versión: revisá y guardá de nuevo.', type: 'error' });
+        return;
+      }
+      await recargar();
+      if (res && res.mode === 'offline') alert('Guardado en este dispositivo, sin subir. Se sube solo cuando haya conexión.');
+      if (onFinEdicion) onFinEdicion();
+    } catch (e) {
+      setToast({ msg: 'No se pudo guardar: ' + (e?.message || String(e)), type: 'error' });
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
 
   const guardar = async () => {
     if (!clienteNombre.trim()) { setToast({ msg: 'Ingresá el nombre del cliente', type: 'error' }); return; }
@@ -393,11 +539,26 @@ const NuevoPedido = () => {
     const vc = validarCantidadesItems(items);
     if (!vc.ok) { alert(mensajeCantidadesInvalidas(vc.errores)); return; }
     // AC-VTA-3: producto "solo bulto" con cantidad que no es múltiplo => no se guarda desde acá.
-    const vm = validarMultiplosItems(items, productosById, { permiso: permisoNorm, pantalla: 'pedido' });
+    const vm = validarMultiplosItems(items, productosById, { permiso: permisoNorm, pantalla: 'pedido', previos: original?.items });
     if (vm.bloquea) {
       alert(`Hay cantidades que no son múltiplo del bulto: ${vm.avisos.map(a => `${a.nombre} (${a.cantidad} u., bulto x ${a.bultoX})`).join(', ')}`);
       return;
     }
+
+    // AC-MUL-2: fuera de múltiplo del mínimo no se guarda desde acá (solo admin en Facturación/Armado).
+    const vmm = validarMultiplosMinimoItems(items, productosById, { permiso: permisoNorm, pantalla: 'pedido', previos: original?.items });
+    if (vmm.bloquea) {
+      setToast({ msg: `Hay cantidades fuera de múltiplo: ${vmm.errores.map(e => `${e.nombre} (de a ${e.minimo})`).join(', ')}`, type: 'error' });
+      return;
+    }
+
+    if (modoEdicion) { await guardarEdicion(); return; }
+
+    // REQ-ASV (AC-ASV-1): de quien es el pedido y quien lo cargo.
+    const dv = datosVendedorAlCrear({ vendedorActual, elegido: vendedorElegido, vendedores });
+    if (!dv.ok) { setToast({ msg: dv.error, type: 'error' }); return; }
+    const duenioElegido = vendedoresElegibles.find(v => String(v.remoteId ?? v.id) === String(dv.campos.vendedorId));
+    const zonaFinal = (vendedorElegido && duenioElegido && duenioElegido.zona) || zonaPedido || '';
 
     // Si el cliente no existe en el maestro, guardarlo para que aparezca en sugerencias otro dia.
     const nombreFinal = clienteNombre.trim();
@@ -430,13 +591,14 @@ const NuevoPedido = () => {
       }
     }
 
-    await crearPedidoOnlineFirst({
+    // AC-SEG2-3: el pedido se guarda primero en el dispositivo; si no se pudo subir queda como "sin subir".
+    const resCrear = await crearPedidoOnlineFirst({
       fecha,
       clienteId: finalClienteId,
       clienteNombre: nombreFinal,
-      vendedorId: vendedorActual.id,
-      vendedorNombre: vendedorActual.nombre,
-      zona: zonaPedido || '',
+      // AC-ASV-1: vendedor del pedido (comision) y quien lo cargo.
+      ...dv.campos,
+      zona: zonaFinal,
       // AC-BUL-9: la marca transitoria no se guarda ni se sincroniza.
       // AC-VTA-2: la cantidad sigue en unidades; se congelan bultos/bultoX/bultoNombre.
       items: congelarBultosItems(quitarMarcasRenglones(items), productosById, { previos: [] }),
@@ -455,17 +617,35 @@ const NuevoPedido = () => {
     setProductoQ('');
     setObservaciones('');
     setFecha(getTodayStr());
-    setToast({ msg: '✓ Pedido guardado correctamente', type: 'success' });
+    // `resCrear` puede venir undefined en los mocks de los tests.
+    if (resCrear && resCrear.mode === 'pendiente') {
+      setToast({ msg: 'Guardado en este dispositivo, sin subir. Se sube solo cuando haya conexión.', type: 'success' });
+    } else {
+      setToast({ msg: '✓ Pedido guardado correctamente', type: 'success' });
+    }
   };
 
   return (
     <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h1 className="page-title" style={{ margin: 0 }}>Nuevo Pedido</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>{modoEdicion ? 'Editar pedido' : 'Nuevo Pedido'}</h1>
         <span style={{ fontSize: 13, color: 'var(--text3)' }}>{formatFecha(fecha)}</span>
       </div>
 
-      {isAdmin && (
+      {modoEdicion && cargandoEdicion && <div className="card" data-testid="cargando-edicion">Cargando el pedido...</div>}
+      {modoEdicion && errorEdicion && (
+        <div className="card" role="alert" data-testid="error-edicion">
+          <div style={{ color: 'var(--danger)', marginBottom: 8 }}>{errorEdicion}</div>
+          <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => onFinEdicion && onFinEdicion()}>Volver a la lista</button>
+        </div>
+      )}
+      {modoEdicion && !cargandoEdicion && original && (
+        <div className="card" data-testid="banner-edicion" style={{ fontSize: 13 }}>
+          Editando el pedido de <b>{original.clienteNombre}</b> (vendedor: {original.vendedorNombre || original.vendedor || 'sin vendedor'}). Se guarda sobre el mismo pedido.
+        </div>
+      )}
+
+      {isAdmin && !modoEdicion && (
         <div className="card">
           <label className="input-label">Zona</label>
           <select className="input" value={zonaPedido} onChange={e => setZona(e.target.value)}>
@@ -473,6 +653,21 @@ const NuevoPedido = () => {
             {[...new Set((vendedores || []).map(v => v.zona).filter(Boolean))].sort().map(z => (
               <option key={z} value={z}>{z}</option>
             ))}
+          </select>
+        </div>
+      )}
+
+      {/* REQ-ASV (AC-ASV-1): vendedor del pedido */}
+      {puedeElegirVendedor && (
+        <div className="card">
+          <label className="input-label" htmlFor="np-vendedor">Vendedor del pedido</label>
+          <select id="np-vendedor" className="input" value={vendedorElegido} onChange={e => setVendedorElegido(e.target.value)}>
+            <option value="">{vendedorActual?.nombre} (yo)</option>
+            {vendedoresElegibles
+              .filter(v => String(v.remoteId ?? v.id) !== String(vendedorActual?.remoteId ?? vendedorActual?.id))
+              .map(v => (
+                <option key={v.id} value={String(v.remoteId ?? v.id)}>{v.nombre}{v.zona ? ` (${v.zona})` : ''}</option>
+              ))}
           </select>
         </div>
       )}
@@ -512,6 +707,26 @@ const NuevoPedido = () => {
                   <div>
                     <div>{p.nombre}</div>
                     <div className="suggestion-sub">{p.codigo || ''}</div>
+                    {etiquetaSinStock(stockParaAviso(stockMap, p.id)) && (
+                      <div data-testid="sugerencia-sin-stock" className="suggestion-sub" style={{ color: 'var(--warning)' }}>
+                        {etiquetaSinStock(stockParaAviso(stockMap, p.id))}
+                      </div>
+                    )}
+                    {puedeBulto && ventaPorEfectivo(p) !== 'unidad' && Number(p.bultoX) > 1 && (() => {
+                      const b = botonesProductoLista(p);
+                      return b.bulto ? (
+                        <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                          {ventaPorEfectivo(p) !== 'bulto' && (
+                            <button type="button" className="btn-icon" data-testid="lista-unidad"
+                              style={{ width: 'auto', padding: '0 10px', height: 28, fontSize: 12 }}
+                              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); agregarProducto(p); }}>{b.unidad.texto}</button>
+                          )}
+                          <button type="button" className="btn-icon" data-testid="lista-bulto"
+                            style={{ width: 'auto', padding: '0 10px', height: 28, fontSize: 12 }}
+                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); agregarBultoLista(p); }}>{b.bulto.texto}</button>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                   <span style={{ color: 'var(--success)', fontWeight: 600, textAlign: 'right' }}>
                     {(() => {
@@ -540,6 +755,8 @@ const NuevoPedido = () => {
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
                 avisos={[avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId))].filter(Boolean)}
+                etiquetaStock={etiquetaSinStock(stockParaAviso(stockMap, item.productoId))}
+                errorMultiplo={erroresMultiplo.has(String(item.productoId)) ? mensajeMultiploMinimo(erroresMultiplo.get(String(item.productoId))) : null}
                 progresoGrupo={progresoGrupoBulto(item, items)}
                 errorMinimo={erroresMinimo.has(String(item.productoId)) ? mensajeMinimo(erroresMinimo.get(String(item.productoId))) : null}
                 canEditPrecio={isAdmin}
@@ -565,6 +782,7 @@ const NuevoPedido = () => {
           <input
             className="input"
             value={clienteQ}
+            disabled={modoEdicion}
             onChange={e => {
               setClienteQ(e.target.value);
               setClienteNombre(e.target.value);
@@ -598,6 +816,7 @@ const NuevoPedido = () => {
             id="np-direccion"
             className="input"
             value={direccion}
+            disabled={modoEdicion}
             onChange={e => setDireccion(e.target.value)}
             placeholder="Ej: Av. Siempreviva 742"
             autoComplete="off"
@@ -609,7 +828,7 @@ const NuevoPedido = () => {
 
         <div style={{ marginTop: 12 }}>
           <label className="input-label">📅 Fecha del pedido</label>
-          <input type="date" className="input" value={fecha} onChange={e => setFecha(e.target.value)} />
+          <input type="date" className="input" value={fecha} disabled={modoEdicion} onChange={e => setFecha(e.target.value)} />
         </div>
       </div>
 
@@ -624,9 +843,12 @@ const NuevoPedido = () => {
         />
       </div>
 
-      <button className="btn btn-primary" onClick={guardar} disabled={!dirOk.ok} style={{ marginTop: 4, marginBottom: 80 }}>
-        ✓ Guardar Pedido
+      <button className="btn btn-primary" onClick={guardar} disabled={modoEdicion ? (!original || guardandoEdicion) : !dirOk.ok} style={{ marginTop: 4, marginBottom: modoEdicion ? 8 : 80 }}>
+        {modoEdicion ? (guardandoEdicion ? 'Guardando...' : '✓ Guardar cambios') : '✓ Guardar Pedido'}
       </button>
+      {modoEdicion && (
+        <button className="btn btn-ghost" onClick={() => onFinEdicion && onFinEdicion()} style={{ marginBottom: 80 }}>Cancelar edición</button>
+      )}
 
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>

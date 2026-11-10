@@ -27,15 +27,18 @@ describe('AC-REN-3 boleta con saldo a favor', () => {
   it('AC-REN-3 muestra "Saldo a favor" cuando no hay deuda', async () => {
     await generarFacturaFile(pedido, {}, {}, 0, null, { saldoAFavor: 150 });
     expect(buscar(/^Saldo a favor: \$150$/)).toHaveLength(1);
-    expect(buscar(/^Deuda pendiente/)).toHaveLength(0);
+    expect(buscar(/^Deuda pendiente|^Saldo anterior/)).toHaveLength(0);
   });
-  it('AC-REN-3 con deuda neta solo se muestra la deuda; sin opción nada cambia', async () => {
+  // ADAPTADO (AC-RTO-5): "Deuda pendiente" pasa a llamarse "Saldo anterior" y se suma "Total a cobrar".
+  it('AC-REN-3 con deuda neta solo se muestra el saldo anterior; sin opción nada cambia', async () => {
     await generarFacturaFile(pedido, {}, {}, 50, null, { saldoAFavor: 150 });
     expect(buscar(/^Saldo a favor/)).toHaveLength(0);
-    expect(buscar(/^Deuda pendiente: \$50$/)).toHaveLength(1);
+    expect(buscar(/^Saldo anterior: \$50$/)).toHaveLength(1);
+    expect(buscar(/^Total a cobrar: \$250$/)).toHaveLength(1);
+    expect(buscar(/^Deuda pendiente/)).toHaveLength(0);
     mockReg.textos = [];
     await generarFacturaFile(pedido, {}, {}, 0, null);
-    expect(buscar(/Saldo a favor|Deuda pendiente/)).toHaveLength(0);
+    expect(buscar(/Saldo a favor|Deuda pendiente|Saldo anterior/)).toHaveLength(0);
   });
 });
 

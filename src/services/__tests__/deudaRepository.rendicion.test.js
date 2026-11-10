@@ -47,11 +47,12 @@ describe('AC-REN-3 cobros y deudas de una rendición', () => {
 });
 
 describe('AC-REN-4 reversión del cargo de un cambio', () => {
-  it('AC-REN-4 anula solo deudas sin cobros (con remoteId online: borra en Supabase como quitarDeudaDePedido)', async () => {
+  it('AC-REN-4 anula solo deudas sin cobros (con remoteId: se anula, online y offline; ya no se borra en Supabase, AC-SEG2-1)', async () => {
     expect(await anularDeudaRendicion(1)).toBe(false);
     expect(await anularDeudaRendicion(2)).toBe(true);
-    expect(mockSb.deletes).toEqual(['r2']);
-    expect(mockDb.deudas.map(d => d.id)).toEqual([1]);
+    expect(mockSb.deletes).toEqual([]);
+    expect(mockDb.deudas.map(d => d.id)).toEqual([1, 2]);
+    expect(mockDb.deudas.find(d => d.id === 2)).toMatchObject({ monto: 0, pagada: true, concepto: 'Anulada', synced: false });
     mockDb.deudas.push({ id: 3, clienteId: 5, monto: 10, montoPagado: 0 }, { id: 4, clienteId: 5, monto: 10, montoPagado: 0, remoteId: 'r4' });
     expect(await anularDeudaRendicion(3)).toBe(true);
     Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });

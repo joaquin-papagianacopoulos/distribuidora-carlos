@@ -21,6 +21,7 @@ import { soloProveedoresActivos } from '../domain/proveedores';
 import { tienePin, estaActivo } from '../domain/vendedores';
 import { syncStock } from '../services/stockService';
 import { syncComisiones } from '../services/comisionesService';
+import { bajarAjustes, leerRedondeoLocal } from '../services/ajustesService';
 import { setUsuarioSesion, datosPersistibles, marcarSesionValidada, sesionValidada, limpiarSesion } from '../services/sesion';
 import {
   syncPedidosPendientes,
@@ -35,6 +36,7 @@ import {
   pullPedidosWebPorRevisar,
   pullPedidosWebRecientes,
   pullPedidosByRango,
+  pullPedidosPendientes,
 } from '../sync/syncService';
 
 const AppContext = createContext(null);
@@ -69,6 +71,8 @@ export const AppProvider = ({ children }) => {
   const [lastSync, setLastSync] = useState(null);
   const [syncError, setSyncError] = useState(null);
   const [syncNote, setSyncNote] = useState(null);
+  // REQ-RED (AC-RED-1): redondeo del total (0 / 500 / 1000), sincronizado desde la nube; cache local.
+  const [redondeoTotal, setRedondeoTotal] = useState(() => leerRedondeoLocal());
   const isSyncing = useRef(false);
   const lastMaestrosSyncRef = useRef(0);
   const lastFaltantesSyncRef = useRef(0);
@@ -200,7 +204,12 @@ export const AppProvider = ({ children }) => {
 
         step = 'syncClientes';
         console.log('2. syncClientes...');
-        await syncClientes();
+        const rc = await syncClientes();
+        // AC-SEG2-7: si Supabase no deja escribir clientes, se avisa (antes se perdia en silencio).
+        if (rc && rc.ok === false && rc.motivo === 'sin_permiso') {
+          avisoProductos = avisoProductos ? `${avisoProductos} ${rc.mensaje}` : rc.mensaje;
+          setSyncNote(avisoProductos);
+        }
 
         step = 'downloadMaestros';
         console.log('3. downloadMaestros...');
@@ -279,6 +288,9 @@ export const AppProvider = ({ children }) => {
 
         lastFaltantesSyncRef.current = Date.now();
       }
+
+      // Ajustes (REQ-RED): no bloqueante; sin conexion o sin migracion 025 queda el cache.
+      bajarAjustes().then(r => { if (r?.ok) setRedondeoTotal(r.redondeoTotal); }).catch(() => {});
 
       // Comisiones (REQ-COM): solo admin. Reintenta cierres/anulaciones que
       // quedaron sin respuesta y baja los cierres de otros dispositivos.
@@ -420,6 +432,21 @@ export const AppProvider = ({ children }) => {
     await recargar();
   }, [recargar, vendedorActual, zonaActiva]);
 
+  // REQ-PEN (AC-PEN-1): baja los pedidos no facturados de cualquier fecha para el bloque "Pendientes".
+  const traerPedidosPendientes = useCallback(async () => {
+    if (!navigator.onLine) return;
+    const permisoActual = Number(vendedorActual?.permiso || 2);
+    const verTodo = permisoActual === 1 || permisoActual === 3;
+    const vendedorNombre = verTodo ? null : (vendedorActual?.nombre || null);
+    const zona = verTodo ? null : (vendedorActual?.zona || null);
+    try {
+      await pullPedidosPendientes({ vendedorNombre, zona });
+    } catch (e) {
+      console.warn('traerPedidosPendientes error:', e?.message || e);
+    }
+    await recargar();
+  }, [recargar, vendedorActual]);
+
   // Stock: productos + ledger de movimientos al dia (se usa al abrir la pantalla Stock y al
   // volver a verla). No depende del resto del sync: si otro paso falla, este igual corre.
   const syncStockAhora = useCallback(async () => {
@@ -552,10 +579,13 @@ export const AppProvider = ({ children }) => {
       lastSync,
       syncError,
       syncNote,
+      redondeoTotal,
+      setRedondeoTotal,
       zonaActiva,
       setZona,
       syncNow,
       syncPedidosFecha,
+      traerPedidosPendientes,
       syncPedidosRango,
       syncStockAhora,
       syncPedidosCliente,

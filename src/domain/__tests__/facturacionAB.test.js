@@ -24,8 +24,11 @@ describe('AC-FAB-1 normalizar y efectivo', () => {
   it('AC-FAB-1 guardado manda; si no hay, sugerencia', () => {
     const cli = { tipoIva: 'Responsable Inscripto' };
     expect(tipoFacturaEfectivo({ tipoFactura: 'B' }, cli)).toEqual({ tipo: 'B', sugerido: false });
-    expect(tipoFacturaEfectivo({}, cli)).toEqual({ tipo: 'A', sugerido: true });
-    expect(tipoFacturaEfectivo({ tipoFactura: 'basura' }, cli)).toEqual({ tipo: 'A', sugerido: true });
+    // ADAPTADO (AC-RTO-1): el default sin marca pasa de la sugerencia por IVA a "Sin factura".
+    expect(tipoFacturaEfectivo({}, cli)).toEqual({ tipo: 'ninguna', sugerido: true });
+    expect(tipoFacturaEfectivo({ tipoFactura: 'basura' }, cli)).toEqual({ tipo: 'ninguna', sugerido: true });
+    // El reporte sigue sugiriendo por IVA para facturados viejos sin marca.
+    expect(sugerirTipoFactura(cli)).toBe('A');
   });
 });
 

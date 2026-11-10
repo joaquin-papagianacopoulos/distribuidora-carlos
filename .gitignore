@@ -11,3 +11,8 @@ _backup_antes_harness_*/
 
 # Tienda Coco Store: repo propio (cocostore_web)
 cocostore/
+
+# REQ-SEG2 (AC-SEG2-6): respaldos y SQL sueltos de limpieza con datos reales
+backups/
+supabase/limpieza_datos.sql
+supabase/truncate_todas.sql

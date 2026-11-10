@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { deleteFaltante } from '../db';
-import { supabase } from '../lib/supabase';
+import { borrarFaltanteRemoto } from '../services/faltanteRepository';
 import { generarFaltantesDiaFile } from '../utils/pdfGen';
 import { shareFiles, canShareFiles } from '../utils/share';
 import { getTodayStr } from '../utils/fuzzy';
@@ -270,7 +270,7 @@ const Faltantes = () => {
     if (!window.confirm('¿Eliminar este registro de faltante?')) return;
     const f = (faltantes || []).find(x => x.id === id);
     if (f?.remoteId && navigator.onLine) {
-      const { error } = await supabase.from('faltantes').delete().eq('id', f.remoteId);
+      const { error } = await borrarFaltanteRemoto(f.remoteId);
       if (error) {
         alert('No se pudo borrar en la nube: ' + (error.message || String(error)));
         return;

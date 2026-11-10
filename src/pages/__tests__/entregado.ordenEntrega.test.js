@@ -11,7 +11,8 @@ jest.mock('../../hooks/useAppContext', () => ({ useApp: () => mockApp }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(() => { throw new Error('no deberia llamar a Supabase'); }) } }));
 jest.mock('../../db', () => ({ updateCliente: jest.fn(), getPedidos: jest.fn(() => Promise.resolve([])) }));
 jest.mock('../../sync/syncService', () => ({ syncClientes: jest.fn() }));
-jest.mock('../../utils/pdfGen', () => ({ generarFacturaFile: jest.fn() }));
+// ADAPTADO (AC-HRU-1): el modulo de PDF ahora tambien exporta generarHojaRutaFile.
+jest.mock('../../utils/pdfGen', () => ({ generarFacturaFile: jest.fn(), generarHojaRutaFile: jest.fn() }));
 jest.mock('../../utils/share', () => ({ shareFiles: jest.fn(), canShareFiles: jest.fn(() => false) }));
 jest.mock('../../utils/pdfMerge', () => ({ mergePdfFilesToSingleFile: jest.fn() }));
 jest.mock('../../services/pedidoRepository', () => ({ marcarEntregadoOnlineFirst: jest.fn(() => Promise.resolve({ mode: 'offline' })) }));

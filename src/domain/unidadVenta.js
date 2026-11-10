@@ -158,9 +158,9 @@ export function avisoMultiplo(cantidad, producto) {
   return `Se vende por ${normalizarBultoNombre(producto.bultoNombre)} de ${bx}: ${c} u. no es múltiplo`;
 }
 
-// Solo el admin, en Facturación, puede guardar cantidades no múltiplo.
+// Solo el admin, en Facturación o en Armado (AC-MIN2-1), puede guardar cantidades no múltiplo.
 export function puedeGuardarNoMultiplo(permiso, pantalla) {
-  return Number(permiso) === 1 && pantalla === 'facturacion';
+  return Number(permiso) === 1 && (pantalla === 'facturacion' || pantalla === 'armado');
 }
 
 const claveItem = (it) => (it && it.productoId !== undefined && it.productoId !== null ? String(it.productoId) : null);

@@ -9,17 +9,29 @@ import { shareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
 import { borrarPedidoOnlineFirst, guardarPedidoOnlineFirst, marcarEntregadoOnlineFirst } from '../services/pedidoRepository';
 import { getOrdenEntrega, withOrdenEntrega } from '../utils/ordenEntrega';
+import { alFacturar, alRevertirPendiente, recalcularRedondeoCongelado, totalACobrar } from '../domain/redondeo';
+import { leerRedondeoLocal } from '../services/ajustesService';
 import { registrarDeudaFacturado, quitarDeudaDePedido, actualizarMontoDeudaDePedido } from '../services/deudaRepository';
 import { borrarFaltantesDeProducto } from '../services/faltanteRepository';
 import { previsualizarStockPedido } from '../services/stockService';
 import { isPedidoVisible, normalizePedidoFecha, getArmadoLog, getDeudaPendienteParaPedido } from '../utils/pedidos';
+import { cambiarCasillero } from '../domain/casilleros';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
 import { acotarCambiosArmado } from '../domain/armado';
 import BultoControl from '../components/BultoControl';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
-import { avisoSinStock, stockParaAviso, resumenSinStock } from '../domain/stock';
-import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon, completarPreciosBulto } from '../domain/precios';
-import { validarMinimosItems, mensajeMinimo } from '../domain/minimos';
+import { avisoSinStock, stockParaAviso, resumenSinStock, etiquetaSinStock } from '../domain/stock';
+import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon, completarPreciosBulto, etiquetaEscala } from '../domain/precios';
+import { validarMinimosItems, mensajeMinimo, cantidadConPasoMinimo, validarMultiplosMinimoItems, mensajeMultiploMinimo } from '../domain/minimos';
+
+// AC-MUL-1/2: paso de los botones +/− (de a mínimo, de a bulto desde el bulto). Un renglón que ya estaba
+// por debajo del mínimo no se sube solo con el "−".
+const cantidadConPasoBoton = (cantidad, producto, op) => {
+  const n = cantidadConPasoMinimo(cantidad, producto, op);
+  if (op === 'restar') return n > cantidad ? cantidad : n;
+  // Tope MAX_CANTIDAD: se deja pasar para que el guardado lo frene y avise (AC-BUL-7, AC-STK-8).
+  return n === cantidad ? cantidad + pasoCantidad(producto) : n;
+};
 import { pedidosEnCierresVigentes, pedidoIdComision, puedeMarcarEntregado, puedeDesmarcarEntregado } from '../domain/comisiones';
 import TipoFacturaSelector from '../components/TipoFacturaSelector';
 import AgruparRenglones from '../components/AgruparRenglones';
@@ -106,7 +118,9 @@ const FacturacionItemRow = ({
   puedeBulto = false,
   onBulto,
   avisoStock = null,
+  etiquetaStock = null,
   errorMinimo = null,
+  errorMultiplo = null,
 }) => {
   // Backward-compat: durante la transicion a drafts, mantener handlers locales
   // para que el JSX no dependa de eventos blur "perdidos" en mobile.
@@ -157,9 +171,24 @@ const FacturacionItemRow = ({
               {'\u26A0\uFE0F'} {avisoStock}
             </div>
           )}
+          {etiquetaStock && (
+            <div data-testid="sin-stock-por-recibir" style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>
+              {etiquetaStock}
+            </div>
+          )}
           {errorMinimo && (
             <div data-testid="aviso-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
               {'\u26D4'} {errorMinimo}
+            </div>
+          )}
+          {errorMultiplo && (
+            <div data-testid="aviso-multiplo-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
+              {'\u26D4'} {errorMultiplo}
+            </div>
+          )}
+          {etiquetaEscala(item) && !item.eliminado && (
+            <div data-testid="escala-aplicada" style={{ fontSize: 10, color: 'var(--success)', marginTop: 2 }}>
+              Escala: {etiquetaEscala(item)}
             </div>
           )}
           {item.precioPorBulto === true && !precioModificado && (
@@ -221,10 +250,10 @@ const FacturacionItemRow = ({
         </button>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>×</span>
         <div className="qty-control">
-          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, -paso); setCantidadText(String(Math.max(paso, item.cantidad - paso))); }}>−</button>
+          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, -paso); setCantidadText(String(cantidadConPasoBoton(item.cantidad, producto, 'restar'))); }}>−</button>
           <input className="qty-input" type="text" value={cantidadText}
             onChange={handleCantidadChange} onBlur={handleCantidadBlur} inputMode="numeric" />
-          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, paso); setCantidadText(String(item.cantidad + paso)); }}>+</button>
+          <button className="qty-btn" onClick={() => { onCambiarCantidad(item.productoId, paso); setCantidadText(String(cantidadConPasoBoton(item.cantidad, producto, 'sumar'))); }}>+</button>
         </div>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>=</span>
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
@@ -241,6 +270,8 @@ const FacturacionItemRow = ({
         puedeRestar={Number(item.cantidad) > Math.max(CANTIDAD_MINIMA_RENGLON, paso)}
         onSumar={() => onBulto && onBulto(item.productoId, 'sumar')}
         onRestar={() => onBulto && onBulto(item.productoId, 'restar')}
+        onSumarSueltas={() => onBulto && onBulto(item.productoId, 'sumarSueltas')}
+        onRestarSueltas={() => onBulto && onBulto(item.productoId, 'restarSueltas')}
       />
       {puedeAplicarPrecioLista && (
         <div style={{ fontSize: 11, color: 'var(--warning)', fontWeight: 700 }}>
@@ -252,7 +283,7 @@ const FacturacionItemRow = ({
 };
 
 const Facturacion = () => {
-  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres, stockMap } = useApp();
+  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres, stockMap, redondeoTotal } = useApp();
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const isAdmin = permisoNorm === 1;
   const puedeBulto = puedeUsarBulto(permisoNorm, 'facturacion'); // AC-BUL-8 (defensa en profundidad)
@@ -501,12 +532,13 @@ const Facturacion = () => {
       destacharRemovido(p.id);
       return;
     }
-    const cantidadNueva = (itemsEdit.find(i => i.productoId === p.id)?.cantidad ?? 0) + pasoCantidad(p);
+    const cantidadActual = itemsEdit.find(i => i.productoId === p.id)?.cantidad ?? 0;
+    const cantidadNueva = cantidadActual > 0 ? cantidadConPasoMinimo(cantidadActual, p, 'sumar') : pasoCantidad(p);
     setItemsEdit(prev => {
       const existe = prev.find(i => i.productoId === p.id);
       if (existe) {
         // AC-BUL-9: volver a tocar el producto cambia la cantidad => ya no es la unidad por defecto.
-        const next = prev.map(i => i.productoId === p.id ? reprecio(quitarMarcasRenglon({ ...i, cantidad: i.cantidad + pasoCantidad(p) })) : i);
+        const next = prev.map(i => i.productoId === p.id ? reprecio(quitarMarcasRenglon({ ...i, cantidad: cantidadConPasoMinimo(i.cantidad, p, 'sumar') })) : i);
         return sortItems(next);
       }
       // AC-BUL-9: el renglón arranca en 1 con la marca "cantidad por defecto".
@@ -528,9 +560,9 @@ const Facturacion = () => {
   };
 
   const cambiarCantidad = (productoId, delta) => {
-    const piso = pasoCantidad(productosIndex.byId.get(String(productoId)));
+    const prodPaso = productosIndex.byId.get(String(productoId));
     setItemsEdit(prev => {
-      const next = sortItems(prev.map(i => i.productoId === productoId ? reprecio(quitarMarcasRenglon({ ...i, cantidad: Math.max(piso, i.cantidad + delta) })) : i));
+      const next = sortItems(prev.map(i => i.productoId === productoId ? reprecio(quitarMarcasRenglon({ ...i, cantidad: cantidadConPasoBoton(i.cantidad, prodPaso, delta < 0 ? 'restar' : 'sumar') })) : i));
       const it = next.find(x => x.productoId === productoId);
       if (it) {
         setDraftByPid(d => {
@@ -557,9 +589,11 @@ const Facturacion = () => {
     const prodBulto = productoParaBulto(actual, productosIndex.byId);
     const bx = prodBulto?.bultoX;
     const minimo = Math.max(CANTIDAD_MINIMA_RENGLON, pasoCantidad(prodBulto));
-    const cantidad = op === 'sumar'
-      ? sumarBultoRenglon(actual.cantidad, bx, { cantidadPorDefecto: actual[MARCA_CANTIDAD_POR_DEFECTO] === true })
-      : restarBulto(actual.cantidad, bx, { minimo });
+    const cantidad = op === 'sumarSueltas' || op === 'restarSueltas'
+      ? cambiarCasillero(actual.cantidad, prodBulto, 'sueltas', op === 'sumarSueltas' ? 'sumar' : 'restar') // AC-CBU-2
+      : op === 'sumar'
+        ? sumarBultoRenglon(actual.cantidad, bx, { cantidadPorDefecto: actual[MARCA_CANTIDAD_POR_DEFECTO] === true })
+        : restarBulto(actual.cantidad, bx, { minimo });
     if (cantidad === actual.cantidad) return;
     const cambiar = (lista) => sortItems(lista.map(i => i.productoId === productoId ? reprecio(quitarMarcasRenglon({ ...i, cantidad })) : i));
     itemsEditRef.current = cambiar(itemsEditRef.current);
@@ -715,6 +749,12 @@ const Facturacion = () => {
     return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
   }, [itemsEdit, productosIndex, permisoNorm, pedidoEditando]);
 
+  // AC-MUL-2: renglones fuera de múltiplo del mínimo (aviso en el renglón; el admin guarda con confirmación).
+  const erroresMultiploEdit = useMemo(() => {
+    const r = validarMultiplosMinimoItems(itemsEdit, productosIndex.byId, { permiso: permisoNorm, pantalla: 'facturacion', previos: pedidoEditando?.items });
+    return new Map(r.errores.map(e => [String(e.productoId), e.minimo]));
+  }, [itemsEdit, productosIndex, permisoNorm, pedidoEditando]);
+
   // AC-PBU-3: cuando el precio cambia solo (precio por bulto) el campo de precio lo refleja.
   useEffect(() => {
     let cambio = false;
@@ -776,6 +816,13 @@ const Facturacion = () => {
         if (!vmin.requiereConfirmacion) { alert(`Hay productos por debajo del mínimo: ${detalleMin}`); return; }
         if (!window.confirm(`Estos productos quedan por debajo del mínimo: ${detalleMin}.\n\n¿Guardar igual?`)) return;
       }
+      // AC-MUL-2 / AC-MIN2-1: fuera de múltiplo del mínimo de venta; el admin guarda con confirmación.
+      const vmm = validarMultiplosMinimoItems(itemsFinal, productosIndex.byId, { permiso: permisoNorm, pantalla: 'facturacion', previos: pedidoEditando.items });
+      if (vmm.errores.length) {
+        const detalleMul = vmm.errores.map(e => `${e.nombre} (de a ${e.minimo})`).join(', ');
+        if (vmm.bloquea) { alert(`Hay cantidades fuera de múltiplo: ${detalleMul}`); return; }
+        if (!window.confirm(`Estas cantidades están fuera de múltiplo del mínimo: ${detalleMul}.\n\n¿Guardar igual?`)) return;
+      }
       // AC-VTA-2: la cantidad queda en unidades; se congelan bultos/bultoX/bultoNombre.
       const itemsGuardar = congelarBultosItems(itemsFinal, productosIndex.byId, { previos: pedidoEditando.items });
 
@@ -785,7 +832,7 @@ const Facturacion = () => {
         .map(r => r.productoId)
         .filter(id => !removidosEdit.some(r => r.productoId === id));
 
-      const pedidoFinal = {
+      const pedidoFinal = recalcularRedondeoCongelado({
         ...pedidoEditando,
         ...(logOriginal ? {
           armadoLog: {
@@ -803,13 +850,13 @@ const Facturacion = () => {
         total: itemsFinal.reduce((acc, i) => acc + Number(i.cantidad) * Number(i.precio), 0),
         // REQ-AGR (AC-AGR-2): los grupos son solo presentacion; los renglones quedan separados.
         ...(isAdmin && gruposEdit !== undefined ? { grupos: normalizarGrupos(gruposEdit, itemsGuardar) } : {}),
-      };
+      });  // AC-RED-2: con multiplo congelado el ajuste se recalcula con SU multiplo; total = suma de renglones.
 
       await guardarPedidoOnlineFirst(pedidoFinal);
       await registrarFaltantes(pedidoEditando, itemsFinal);
       // Ya no faltan: se borran de Faltantes (local y nube).
       for (const id of idsRestaurados) await borrarFaltantesDeProducto(faltantes, pedidoEditando, id);
-      if (pedidoEditando.deudaGenerada) await actualizarMontoDeudaDePedido(pedidoEditando, pedidoFinal.total);
+      if (pedidoEditando.deudaGenerada) await actualizarMontoDeudaDePedido(pedidoEditando, totalACobrar(pedidoFinal));
       await recargar();
       setPedidoEditando(null);
     } catch (e) {
@@ -886,7 +933,12 @@ const Facturacion = () => {
       // a deudas") una vez que el pedido ya quedo con el monto definitivo.
       // Tampoco asigna mas un numero de entrega aca: ese numero ahora sale de
       // "Orden de entrega", calculado al imprimir (ver src/pages/OrdenEntrega.js).
-      await guardarPedidoOnlineFirst({ ...p, estado: 'facturado' }, { iniciarStock: true });
+      // AC-RED-2: el redondeo se congela al facturar (ajuste vigente; idempotente si ya estaba congelado).
+      const facturado = alFacturar({ ...alRevertirPendiente(p), estado: 'facturado' }, redondeoTotal ?? leerRedondeoLocal());
+      await guardarPedidoOnlineFirst(facturado, { iniciarStock: true });
+      // Si el pedido conservo una deuda con cobros (se revirtio y se refactura con otro multiplo), la deuda
+      // acompana el nuevo total a cobrar sin tocar lo ya cobrado.
+      if (p.deudaGenerada) await actualizarMontoDeudaDePedido(facturado, totalACobrar(facturado));
       await recargar();
     } catch (e) {
       console.error('Error marcando facturado:', e);
@@ -919,7 +971,7 @@ const Facturacion = () => {
       // Si el pedido ya tenia deuda: se quita (salvo que ya se haya cobrado algo).
       const { conservada } = await quitarDeudaDePedido(p);
       const pedidoRevertido = {
-        ...p,
+        ...alRevertirPendiente(p),
         estado: 'pendiente',
         ordenEntrega: null,
         items: (p.items || []).map(({ __ordenEntrega, ...rest }) => rest),
@@ -1112,7 +1164,9 @@ const Facturacion = () => {
                 puedeBulto={puedeBulto}
                 onBulto={aplicarBulto}
                 avisoStock={avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId, cantidadYaDescontada(item.productoId)))}
+                etiquetaStock={etiquetaSinStock(stockParaAviso(stockMap, item.productoId, cantidadYaDescontada(item.productoId)))}
                 errorMinimo={erroresMinimoEdit.has(String(item.productoId)) ? mensajeMinimo(erroresMinimoEdit.get(String(item.productoId))) : null}
+                errorMultiplo={erroresMultiploEdit.has(String(item.productoId)) ? mensajeMultiploMinimo(erroresMultiploEdit.get(String(item.productoId))) : null}
               />
             );
           })}
@@ -1331,7 +1385,7 @@ const Facturacion = () => {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 16 }}>
-                  ${(p.total || 0).toLocaleString('es-AR')}
+                  ${totalACobrar(p).toLocaleString('es-AR')}
                 </div>
                 <span className={`badge badge-${p.estado === 'pendiente' ? 'pending' : p.estado === 'facturado' ? 'facturado' : 'done'}`}>
                   {p.estado}

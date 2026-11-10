@@ -6,12 +6,14 @@
 // fila se valida con validarProducto / validarCliente (las mismas reglas del
 // formulario). Aca no hay React, IndexedDB ni xlsx: solo datos.
 import { CAMPOS_PRODUCTO, validarProducto } from './productos';
+import { debeRecalcularPrecio } from './precioCosto';
 import { CAMPOS_CLIENTE, TIPOS_IVA, validarCliente, clienteVacio } from './clientes';
 import { texto, csvSafe, claveUnica, esFechaISO } from './validacion';
 import { filtrarActivos } from './vendedores';
 import { listarRubros, resolverRubro } from './rubros';
 import { listarMarcas, resolverMarca } from './marcas';
 import { normalizarVentaPor, parsearBooleano } from './unidadVenta';
+import { parsearEscalasTexto } from './precios';
 import { fechaDesdeCelda, errorLimitesArchivo, problemasDeFila, largoEncabezado } from './importacion';
 
 export const ENTIDADES = ['productos', 'clientes'];
@@ -37,14 +39,15 @@ const INFO_PRODUCTO = {
   // AC-PLA-3b: descuentos, ganancia, precio 2 y minimo venta no son obligatorios.
   descuento1: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 100 (acepta "10%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '10' },
   descuento2: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 100 (acepta "10%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '5' },
-  ganancia: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 1000 (acepta "35%"). Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '35' },
-  precio: { obligatorio: 'No', formato: 'Número ≥ 0. Si queda vacío se calcula: costo × (1 − desc1/100) × (1 − desc2/100) × (1 + ganancia/100)', ejemplo: '' },
+  ganancia: { obligatorio: 'No (vacío = 0)', formato: '% entre 0 y 1000 (acepta "35%"). Es el margen sobre el costo neto. Si el producto es nuevo y dejás el precio vacío, la ganancia tiene que ser mayor que 0. En productos existentes vacío = se conserva', ejemplo: '35' },
+  precio: { obligatorio: 'No', formato: 'Número ≥ 0. Si queda vacío y hay % de ganancia mayor que 0 se calcula: costo × (1 − desc1/100) × (1 − desc2/100) × (1 + ganancia/100). Sin precio y sin ganancia la fila se rechaza (nunca se guarda el costo como precio). En productos existentes vacío = se conserva el precio', ejemplo: '' },
   precioBulto: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Precio por unidad cuando se lleva al menos un bulto completo. Vacío, "-" o 0 = no hay precio por bulto; en productos existentes se conserva', ejemplo: '800' },
   precioVenta2: { obligatorio: 'No (vacío = 0)', formato: 'Número ≥ 0. Vacío o "-" = 0; en productos existentes se conserva', ejemplo: '1300' },
   bultoX: { obligatorio: 'No', formato: 'Entero ≥ 1 (vacío = 1)', ejemplo: '12' },
   ventaPor: { obligatorio: 'No', formato: 'Unidad, Bulto o Ambos. "Bulto" exige "Bulto x" mayor que 1. Vacío = Ambos si Bulto x es mayor que 1, si no Unidad', ejemplo: 'Bulto' },
   bultoNombre: { obligatorio: 'No (vacío = Bulto)', formato: 'Bulto, Display, Caja o Pack', ejemplo: 'Display' },
   grupoBulto: { obligatorio: 'No', formato: 'Texto, hasta 40 caracteres. Productos con el mismo grupo (sin importar mayúsculas ni tildes) y el mismo "Bulto x" se combinan para llegar al bulto: ej. Prime Rojo, Prime Azul y Prime Violeta con "Prime". En la factura salen en una sola línea. Vacío = se conserva; "-" = se saca del grupo', ejemplo: 'Prime' },
+  escalasBulto: { obligatorio: 'No', formato: 'Hasta 3 escalas de descuento por cantidad de bultos, con el formato "bultos=%" separadas por ";". Ej: 5=8; 10=12 (desde 5 bultos 8 % menos, desde 10 bultos 12 % menos). Los bultos van de menor a mayor (enteros desde 2) y el % entre 0 y 100 (acepta coma decimal). Necesita "Bulto x" mayor que 1. Vacío = se conserva; "-" = se borran las escalas', ejemplo: '5=8; 10=12' },
   visibleTienda: { obligatorio: 'No (vacío = Sí)', formato: 'Sí o No. Si se muestra en la tienda online', ejemplo: 'Sí' },
   minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
   stockMinimo: { obligatorio: 'No (vacío = usa Mínimo venta)', formato: 'Entero ≥ 0. Punto de reposición: con stock igual o menor se avisa. Vacío o "-" = se usa Mínimo venta; en productos existentes se conserva', ejemplo: '10' },
@@ -132,6 +135,7 @@ const ALIAS = {
     bulto: 'bultoX', bultos: 'bultoX',
     sevendepor: 'ventaPor', ventapor: 'ventaPor',
     etiquetadelbulto: 'bultoNombre', tipobulto: 'bultoNombre',
+    escalas: 'escalasBulto', escalasbulto: 'escalasBulto', escalasporbulto: 'escalasBulto', descuentoporescala: 'escalasBulto',
     grupobulto: 'grupoBulto', grupodebulto: 'grupoBulto', combinable: 'grupoBulto', combinablecon: 'grupoBulto', combinables: 'grupoBulto',
     mostrarentienda: 'visibleTienda', tienda: 'visibleTienda', visible: 'visibleTienda',
     minimo: 'minimoVenta', minimodeventa: 'minimoVenta',
@@ -163,7 +167,7 @@ const PARCIALES_PRODUCTO = [
 ];
 
 // Columnas que solo trae la plantilla nueva (no los archivos viejos).
-const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'grupoBulto', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stockMinimo', 'stock'];
+const SOLO_PLANTILLA_PRODUCTO = ['marca', 'ventaPor', 'bultoNombre', 'grupoBulto', 'escalasBulto', 'visibleTienda', 'proveedorId', 'costoFinal', 'descuento1', 'descuento2', 'ganancia', 'precioBulto', 'precioVenta2', 'bultoX', 'minimoVenta', 'stockMinimo', 'stock'];
 
 /**
  * Mapea los encabezados de un archivo a campos.
@@ -313,6 +317,8 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     ventaPor: strOr(existente?.ventaPor),
     bultoNombre: strOr(existente?.bultoNombre),
     grupoBulto: strOr(existente?.grupoBulto),
+    // AC-ESC-1: vacío conserva las del existente.
+    escalasBulto: Array.isArray(existente?.escalasBulto) ? existente.escalasBulto : [],
     visibleTienda: existente?.visibleTienda === false ? false : '',
     stock: '',
   };
@@ -324,6 +330,10 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   if (tiene('bultoNombre')) form.bultoNombre = celda(valores.bultoNombre);
   // AC-GBU-1: "-" saca el producto del grupo; vacío conserva el del existente.
   if (tiene('grupoBulto')) form.grupoBulto = celdaSinDato(valores.grupoBulto) ? '' : textoSeguro(valores.grupoBulto, 40);
+  // AC-ESC-1: "5=8; 10=12". "-" borra; vacío conserva; el texto pasa por textoSeguro (anti formula).
+  if (Object.prototype.hasOwnProperty.call(valores, 'escalasBulto') && !vacia(valores.escalasBulto)) {
+    form.escalasBulto = celdaSinDato(valores.escalasBulto) ? [] : parsearEscalasTexto(textoSeguro(valores.escalasBulto, 120));
+  }
   if (tiene('visibleTienda')) {
     const vt = parsearBooleano(celda(valores.visibleTienda));
     if (vt === null) errores.push('Mostrar en tienda: poné Sí o No');
@@ -348,7 +358,9 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   // un producto existente al que no se le cambio ningun costo: ahi se conserva.
   if (tiene('precio')) form.precio = celda(valores.precio);
   else if (modo === 'legacy') errores.push('Precio vacío o inválido');
-  else if (!existente || CAMPOS_COSTO.some(tiene)) form.precio = '';
+  else if (!existente) form.precio = '';
+  else if (debeRecalcularPrecio(existente, form)) form.precio = '';
+  else form.precio = Number(existente.precio) > 0 ? String(existente.precio) : ''; // AC-PVC-1: se conserva
 
   // Stock: solo productos nuevos (regla dura 4 / AC-PROD-3).
   const stockIgnorado = !!existente && tiene('stock');
@@ -369,6 +381,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     ok: errores.length === 0,
     errores,
     valor: { producto: { ...r.producto, unidad }, stock: existente ? null : r.stock },
+    avisos: Object.values(r.avisos || {}).filter(Boolean),
     stockIgnorado,
   };
 };
@@ -523,6 +536,7 @@ export const planificarImportacion = (rows, entidad = 'productos', { existentes 
       valor: res.valor,
       errores: [],
       stockIgnorado: !!res.stockIgnorado,
+      ...(res.avisos && res.avisos.length ? { avisos: res.avisos } : {}),
     });
     const codFinal = claveUnica(entidad === 'productos' ? res.valor.producto.codigo : res.valor.codigo);
     if (codFinal) vistosCodigo.set(codFinal, idx);

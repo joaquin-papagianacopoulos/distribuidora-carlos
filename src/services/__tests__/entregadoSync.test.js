@@ -40,6 +40,8 @@ jest.mock('../../lib/supabase', () => ({
       const q = { table, op: 'select', filtros: [] };
       const api = {
         insert: (row) => { q.op = 'insert'; q.row = row; return api; },
+        // AC-SEG2-3 (test adaptado): los altas en lote son upsert por client_uuid.
+        upsert: (row) => { q.op = 'upsert'; q.row = row; return api; },
         update: (row) => { q.op = 'update'; q.row = row; return api; },
         select: () => api,
         single: () => api,
@@ -165,10 +167,10 @@ describe('AC-COM-1 AC-CLI-5 sync diferido de entregado', () => {
   });
 
   it('AC-COM-1 syncPedidosPendientes: insert en lote con columna faltante también reintenta', async () => {
-    mockLocal.pedidos = [{ ...PEDIDO, remoteId: null, synced: false, entregado: true }, { ...PEDIDO, id: 6, remoteId: null, synced: false }];
-    mockSb.respuestas = [{ data: null, error: ERR_COL }, { data: [{ id: 'R-9' }, { id: 'R-10' }], error: null }];
+    mockLocal.pedidos = [{ ...PEDIDO, remoteId: null, synced: false, entregado: true, clientUuid: 'u-5' }, { ...PEDIDO, id: 6, remoteId: null, synced: false, clientUuid: 'u-6' }];
+    mockSb.respuestas = [{ data: null, error: ERR_COL }, { data: [{ id: 'R-10', client_uuid: 'u-6' }, { id: 'R-9', client_uuid: 'u-5' }], error: null }];
     await syncPedidosPendientes();
-    const ins = mockSb.calls.filter(c => c.op === 'insert');
+    const ins = mockSb.calls.filter(c => c.op === 'upsert');
     expect(ins).toHaveLength(2);
     expect(ins[1].row.every(r => !('entregado' in r))).toBe(true);
     expect(mockLocal.pedidos.find(p => p.id === 5)).toMatchObject({ remoteId: 'R-9', entregaPendiente: true });

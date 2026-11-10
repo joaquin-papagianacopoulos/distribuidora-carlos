@@ -21,6 +21,8 @@ jest.mock('../../lib/supabase', () => ({
       const q = { table, op: null };
       const api = {
         insert: (row) => { q.op = 'insert'; q.row = row; return api; },
+        // AC-SEG2-3 (test adaptado): el alta sin remoteId es un upsert idempotente por client_uuid.
+        upsert: (row, opts) => { q.op = 'upsert'; q.row = row; q.opts = opts; return api; },
         update: (row) => { q.op = 'update'; q.row = row; return api; },
         eq: () => api,
         select: () => api,
@@ -84,7 +86,8 @@ describe('guardarPedidoOnlineFirst + stock', () => {
     setOnline(true);
     const r = await guardarPedidoOnlineFirst(PEDIDO);
     expect(r).toEqual({ remoteId: 'R-NEW', mode: 'online' });
-    expect(mockSb.calls[0]).toMatchObject({ table: 'pedidos', op: 'insert' });
+    expect(mockSb.calls[0]).toMatchObject({ table: 'pedidos', op: 'upsert', opts: { onConflict: 'client_uuid', ignoreDuplicates: true } });
+    expect(mockSb.calls[0].row.client_uuid).toEqual(expect.any(String));
     expect(aplicarStockPedido).toHaveBeenCalledWith(expect.objectContaining({ id: 5, remoteId: 'R-NEW' }), { usuario: 'Admin' });
   });
 

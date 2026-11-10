@@ -9,7 +9,8 @@ jest.mock('../../hooks/useAppContext', () => ({ useApp: () => mockApp }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(() => { throw new Error('no deberia llamar a Supabase'); }) } }));
 jest.mock('../../db', () => ({ updateCliente: jest.fn(), getPedidos: jest.fn() }));
 jest.mock('../../sync/syncService', () => ({ syncClientes: jest.fn() }));
-jest.mock('../../utils/pdfGen', () => ({ generarFacturaFile: jest.fn() }));
+// ADAPTADO (AC-HRU-1): el modulo de PDF ahora tambien exporta generarHojaRutaFile.
+jest.mock('../../utils/pdfGen', () => ({ generarFacturaFile: jest.fn(), generarHojaRutaFile: jest.fn() }));
 jest.mock('../../utils/share', () => ({ shareFiles: jest.fn(), canShareFiles: jest.fn() }));
 jest.mock('../../utils/pdfMerge', () => ({ mergePdfFilesToSingleFile: jest.fn() }));
 jest.mock('../../services/pedidoRepository', () => ({ marcarEntregadoOnlineFirst: jest.fn() }));
@@ -19,7 +20,7 @@ import OrdenEntrega from '../OrdenEntrega';
 // eslint-disable-next-line import/first
 import { updateCliente, getPedidos } from '../../db';
 // eslint-disable-next-line import/first
-import { generarFacturaFile } from '../../utils/pdfGen';
+import { generarFacturaFile, generarHojaRutaFile } from '../../utils/pdfGen';
 // eslint-disable-next-line import/first
 import { mergePdfFilesToSingleFile } from '../../utils/pdfMerge';
 // eslint-disable-next-line import/first
@@ -186,5 +187,62 @@ describe('AC-ZON-2 imprimir por fecha de pedido y zonas', () => {
     await imprimir();
     expect(generarFacturaFile).not.toHaveBeenCalled();
     expect(window.alert).toHaveBeenCalledWith(expect.stringMatching(/No hay pedidos/));
+  });
+});
+
+// REQ-HRU (AC-HRU-1) y REQ-RTO (AC-RTO-5): boton "Hoja de ruta" y saldo anterior en los remitos.
+describe('AC-HRU-1 hoja de ruta desde Orden de entrega', () => {
+  const FECHA = sumarDias(null, -1);
+  const P = (id, clienteId, clienteNombre, total = 1200) => ({ id, clienteId, clienteNombre, fecha: FECHA, estado: 'pendiente', vendedorNombre: 'V', items: [], total });
+  const DEUDA_ANA = { id: 'd1', clienteId: 1, clienteNombre: 'Ana', monto: 800, montoPagado: 0, pagada: false, pedidoId: 'viejo' };
+
+  const armar = async () => {
+    await click(boton('Reparto de hoy'));
+    await click(boton('Hoja de ruta'));
+  };
+
+  it('AC-HRU-1 el boton esta deshabilitado sin fechas', async () => {
+    setApp();
+    await render();
+    expect(boton('Hoja de ruta').disabled).toBe(true);
+  });
+
+  it('AC-HRU-1 genera la hoja con orden, cliente, importe redondeado, saldo anterior y total a cobrar', async () => {
+    setApp({ deudas: [DEUDA_ANA] });
+    getPedidos.mockResolvedValue([P(10, 3, 'Cami'), P(11, 1, 'Ana'), P(12, 4, 'Dani')]);
+    generarHojaRutaFile.mockResolvedValue(new File(['x'], 'h.pdf'));
+    await render();
+    await armar();
+    expect(mockApp.syncPedidosFecha).toHaveBeenCalledWith(FECHA);
+    expect(generarHojaRutaFile).toHaveBeenCalledTimes(1);
+    const [resultado, opciones] = generarHojaRutaFile.mock.calls[0];
+    expect(opciones).toEqual({ fechas: [FECHA], zonas: [] });
+    expect(resultado.filas.map(f => [f.clienteNombre, f.orden])).toEqual([['Ana', 1], ['Cami', 2], ['Dani', 1]]);
+    // multiplo vigente por defecto = $500: 1200 pendiente => vista previa 1000 (mitad hacia arriba solo desde 1250)
+    expect(resultado.filas[0]).toMatchObject({ importe: 1000, saldoAnterior: 800, totalACobrar: 1800 });
+    expect(resultado.filas[1]).toMatchObject({ saldoAnterior: 0, totalACobrar: 1000 });
+    expect(resultado.totales).toMatchObject({ pedidos: 3, importe: 3000, saldoAnterior: 800, totalACobrar: 3800 });
+    expect(generarFacturaFile).not.toHaveBeenCalled();
+    expect(shareFiles).toHaveBeenCalled();
+  });
+
+  it('AC-HRU-1 sin pedidos avisa y no genera el PDF', async () => {
+    setApp();
+    getPedidos.mockResolvedValue([]);
+    await render();
+    await armar();
+    expect(generarHojaRutaFile).not.toHaveBeenCalled();
+    expect(window.alert).toHaveBeenCalledWith(expect.stringMatching(/No hay pedidos/));
+  });
+
+  it('AC-RTO-5 el remito recibe el saldo anterior del cliente y el redondeo de vista previa; el saldo se cuenta una sola vez', async () => {
+    setApp({ deudas: [DEUDA_ANA] });
+    getPedidos.mockResolvedValue([P(11, 1, 'Ana'), P(13, 1, 'Ana')]);
+    await render();
+    await click(boton('Reparto de hoy'));
+    await click(boton('Imprimir pedidos para entregar'));
+    const saldos = generarFacturaFile.mock.calls.map(c => c[3]);
+    expect(saldos).toEqual([800, 0]);
+    expect(generarFacturaFile.mock.calls[0][5]).toEqual({ redondeoVistaPrevia: 500 });
   });
 });

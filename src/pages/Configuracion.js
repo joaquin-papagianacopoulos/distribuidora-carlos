@@ -3,13 +3,14 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import {
   addProductoLocal, updateProducto, deleteProducto,
-  addCliente, deleteCliente,
+  addCliente,
   getProductos,
-  updateCliente, putProveedor, deleteProveedor,
+  updateCliente, putProveedor,
 } from '../db';
 import ClienteForm from '../components/ClienteForm';
 import LinksTienda from '../components/LinksTienda';
 import ConfigTienda from '../components/ConfigTienda';
+import ConfigRedondeo from '../components/ConfigRedondeo';
 import { subirImagenTienda } from '../services/tiendaConfigService';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
@@ -17,6 +18,7 @@ import ComisionRubroGrid from '../components/ComisionRubroGrid';
 import CambiosPrecio from './CambiosPrecio';
 import { listarRubros } from '../domain/rubros';
 import { conservarCostosDesconocidos } from '../domain/productos';
+import { productosConPrecioSospechoso } from '../domain/precioCosto';
 import { listarMarcas, marcaParaGuardar } from '../domain/marcas';
 import { ajustarStock, syncStock } from '../services/stockService';
 import { puedeBorrarProveedor } from '../domain/proveedores';
@@ -30,6 +32,8 @@ import { leerFilasArchivo } from '../services/lectorPlanillas';
 import { ACCEPT_IMPORT, rechazosVisibles } from '../domain/importacion';
 import { COLUMNAS_PLANTILLA } from '../domain/plantillas';
 import { syncProductos, buscarImagenesFaltantes } from '../sync/syncService';
+import { borrarClienteAdmin } from '../services/clientesAdminService';
+import { exportarRespaldo } from '../services/respaldoService';
 import { guardarVendedorAdmin, darDeBajaVendedorAdmin } from '../services/vendedoresService';
 import { filtrarActivos, vendedoresParaSelector, MSG_BAJA_SIN_CONEXION } from '../domain/vendedores';
 import { supabase } from '../lib/supabase';
@@ -97,7 +101,9 @@ const importarProductos = async (rows, { proveedores, usuario, origen }) => {
     entradas.push(e);
   }
   const resumen = resumirEntradas(entradas, { excluidas: plan.excluidas });
-  return { tipo: 'success', msg: textoResumen(resumen), resumen };
+  // AC-PVC-2: avisos por fila (p. ej. precio igual al costo), no bloquean.
+  const avisos = entradas.filter(e => e.avisos && e.avisos.length && e.accion !== 'rechazar').map(e => ({ fila: e.fila, texto: e.avisos.join('; ') }));
+  return { tipo: 'success', msg: textoResumen(resumen), resumen, avisos };
 };
 
 // AC-PLA-4: mismas altas/ediciones que ClienteForm (extrasDirty => AC-CLI-5).
@@ -136,6 +142,11 @@ const ResultadoImport = ({ r, testId }) => {
           Creados: {r.resumen.creados} · Actualizados: {r.resumen.actualizados} · Rechazados: {r.resumen.rechazados}
           {r.resumen.stockIgnorado > 0 && ` · Stock ignorado en ${r.resumen.stockIgnorado} producto(s) existente(s)`}
         </div>
+      )}
+      {r.avisos?.length > 0 && (
+        <ul data-testid={`${testId}-avisos`} style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--text2)' }}>
+          {r.avisos.map(x => <li key={x.fila}>Fila {x.fila}: {x.texto}</li>)}
+        </ul>
       )}
       {r.resumen?.stockFallido?.length > 0 && (
         <ul data-testid={`${testId}-stock-fallido`} style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--danger)' }}>
@@ -184,6 +195,10 @@ const Configuracion = () => {
   const [prodMsg, setProdMsg] = useState('');
   const [verCambiosPrecio, setVerCambiosPrecio] = useState(false);
   const [subiendoProd, setSubiendoProd] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  const [respaldoMsg, setRespaldoMsg] = useState('');
+  const [borrarClienteItem, setBorrarClienteItem] = useState(null);
+  const [borrarClientePin, setBorrarClientePin] = useState('');
   const [borrarProdItem, setBorrarProdItem] = useState(null);
   const [borrarProdPin, setBorrarProdPin] = useState('');
   // REQ-COMR (AC-COMR-6): grilla Rubro -> % del vendedor elegido (solo admin).
@@ -392,6 +407,35 @@ const Configuracion = () => {
     }
   };
 
+  const exportarRespaldoAhora = async () => {
+    setExportando(true);
+    setRespaldoMsg('');
+    const r = await exportarRespaldo({ esAdmin: isAdmin });
+    setExportando(false);
+    setRespaldoMsg(r.ok ? `Listo: ${r.nombre} (${r.registros} registros, sin PINs).` : `No se pudo exportar: ${r.mensaje || ''}`);
+  };
+
+  // AC-SEG2-1: el borrado de un cliente va por RPC con el PIN del admin (migracion 023).
+  const confirmarBorrarCliente = async () => {
+    const item = borrarClienteItem;
+    if (!item) return;
+    const pin = borrarClientePin;
+    setBorrarClientePin('');
+    setBorrandoId(item.id);
+    let r;
+    try {
+      r = await borrarClienteAdmin({ pin, cliente: item });
+    } finally {
+      setBorrandoId(null);
+    }
+    if (!r.ok) {
+      alert('No se pudo borrar el cliente:\n' + (r.mensaje || ''));
+      return;
+    }
+    setBorrarClienteItem(null);
+    await recargar();
+  };
+
   const confirmarBorrarProducto = async () => {
     const item = borrarProdItem;
     if (!item) return;
@@ -453,14 +497,9 @@ const Configuracion = () => {
         alert('Para borrar un cliente tenés que tener internet. Si no, vuelve a aparecer al sincronizar.');
         return;
       }
-      try {
-        const { error } = await supabase.from('clientes').delete().eq('id', item.id);
-        if (error) throw error;
-        await deleteCliente(item.id);
-      } catch (e) {
-        alert('No se pudo borrar el cliente:\n' + (e?.message || String(e)));
-        return;
-      }
+      setBorrarClientePin('');
+      setBorrarClienteItem(item);
+      return;
     }
     else if (tab === 'proveedores') {
       // AC-PROV-3: no borrar si tiene productos asociados.
@@ -489,16 +528,18 @@ const Configuracion = () => {
         await recargar();
         return;
       }
+      // AC-SEG2-1: siempre baja logica (activo=false), tambien sin ingresos: la tabla ya no admite delete.
       if (!navigator.onLine) {
-        alert('Para borrar un proveedor tenés que tener internet. Si no, vuelve a aparecer al sincronizar.');
+        alert('Para dar de baja un proveedor tenés que tener internet.');
         return;
       }
       try {
-        const { error } = await supabase.from('proveedores').delete().eq('id', item.id);
-        if (error) throw error;
-        await deleteProveedor(item.id);
+        await putProveedor({ ...item, activo: false });
+        await syncStock();
       } catch (e) {
-        alert('No se pudo borrar el proveedor:\n' + (e?.message || String(e)));
+        await putProveedor({ ...item, activo: true });
+        alert('No se pudo dar de baja el proveedor en el servidor:\n' + (e?.message || String(e)) + '\n\nSi dice que falta la columna "activo", correr supabase/migrations/021_proveedores_baja.sql.');
+        await recargar();
         return;
       }
     }
@@ -506,6 +547,7 @@ const Configuracion = () => {
   };
 
   const editandoProducto = showForm && tab === 'productos';
+  const precioSospechoso = isAdmin && tab === 'productos' ? productosConPrecioSospechoso(productos) : [];
   const listaBase = tab === 'productos' ? productos
     : tab === 'clientes' ? clientes
       : tab === 'proveedores' ? proveedores
@@ -622,6 +664,14 @@ const Configuracion = () => {
     <div className="page">
       <h1 className="page-title">Configuración</h1>
 
+      {/* AC-SEG2-6: respaldo de todos los datos locales (solo admin; esta pantalla ya lo es). Sin PIN ni claves. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={exportarRespaldoAhora} disabled={exportando} data-testid="exportar-respaldo">
+          {exportando ? 'Exportando...' : 'Exportar respaldo'}
+        </button>
+        {respaldoMsg && <span style={{ fontSize: 12, color: 'var(--text3)' }} data-testid="respaldo-msg">{respaldoMsg}</span>}
+      </div>
+
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         {TABS.map(t => (
           <button
@@ -686,6 +736,20 @@ const Configuracion = () => {
               {subiendoProd ? 'Subiendo...' : 'Subir productos'}
             </button>
           </div>
+        </div>
+      )}
+      {/* AC-PVC-4: precios iguales o menores al costo (solo admin, con costos bajados por PIN). No corrige solo. */}
+      {tab === 'productos' && !editandoProducto && isAdmin && precioSospechoso.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, fontSize: 13 }} data-testid="precios-sospechosos">
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{precioSospechoso.length} productos con precio igual o menor al costo</div>
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', maxHeight: 220, overflowY: 'auto' }}>
+            {precioSospechoso.map(x => (
+              <li key={x.id} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '4px 0' }}>
+                <span>{x.codigo ? `${x.codigo} · ` : ''}{x.nombre}: precio ${x.precio} / costo neto ${x.costoNeto}</span>
+                <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => { const prod = productos.find(pp => pp.id === x.id); if (prod) openEdit(prod); }}>Editar</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {tab === 'productos' && prodMsg && (
@@ -934,6 +998,7 @@ const Configuracion = () => {
       )}
 
       {/* REQ-POR (AC-POR-2..5): Configuración → Tienda */}
+      {tab === 'tienda' && <ConfigRedondeo online={!!online} />}
       {tab === 'tienda' && <ConfigTienda productos={productos} stockDe={id => stockDe(stockMap, id)} online={!!online} />}
 
       {/* REQ-WEB (AC-WEB-7): links de tienda por vendedor */}
@@ -987,6 +1052,35 @@ const Configuracion = () => {
               disabled={borrandoId === bajaItem.id}
               data-testid="confirmar-baja"
             >{borrandoId === bajaItem.id ? 'Dando de baja...' : 'Dar de baja'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* AC-SEG2-1: confirmar el borrado de un cliente con el PIN del admin */}
+      {borrarClienteItem && tab === 'clientes' && (
+        <div className="card" style={{ marginTop: 16 }} data-testid="borrar-cliente">
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Borrar "{borrarClienteItem.nombre}"</div>
+          <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>
+            Se borra del servidor y de todos los dispositivos. Queda una copia de resguardo en el servidor.
+          </div>
+          <div className="input-group">
+            <label className="input-label">Tu PIN de admin (para confirmar)</label>
+            <input
+              className="input" type="password" inputMode="numeric" autoComplete="off"
+              data-testid="admin-pin-borrar-cliente"
+              value={borrarClientePin} onChange={e => setBorrarClientePin(e.target.value)}
+              placeholder="Se verifica en el servidor; necesitás conexión" autoFocus
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 80 }}>
+            <button className="btn btn-ghost" onClick={() => { setBorrarClienteItem(null); setBorrarClientePin(''); }}>Cancelar</button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)' }}
+              onClick={confirmarBorrarCliente}
+              disabled={borrandoId === borrarClienteItem.id}
+              data-testid="confirmar-borrar-cliente"
+            >{borrandoId === borrarClienteItem.id ? 'Borrando...' : 'Borrar cliente'}</button>
           </div>
         </div>
       )}

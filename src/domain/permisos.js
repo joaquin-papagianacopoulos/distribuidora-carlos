@@ -26,3 +26,43 @@ export const validarPinIngresado = (pin) => {
   if (p.length > MAX_PIN || /[\u0000-\u001F\u007F]/.test(p)) return { ok: false, pin: null, error: 'PIN inválido' };
   return { ok: true, pin: p, error: null };
 };
+
+// ---------------------------------------------------------------------------
+// REQ-EDP / REQ-ASV (Tanda 1): quién edita un pedido y quién asigna vendedor.
+// ---------------------------------------------------------------------------
+const nombreClave = (v) => (typeof v === 'string' ? v.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() : '');
+const esFacturado = (p) => String((p && p.estado) || '').toLowerCase() === 'facturado';
+const esBorrado = (p) => !!p && (p.borrado === true || ['cancelado', 'eliminado', 'borrado'].includes(String(p.estado || '').toLowerCase()));
+const esWebNoAceptado = (p) => !!p && p.origen === 'web' && p.webEstado !== 'aceptado';
+
+// AC-EDP-1/3: { ok, pantalla, motivo }. El admin edita todo (facturado por Facturación,
+// como hoy); el vendedor solo sus pedidos (dueño o quien los cargó) no facturados;
+// el armador y los permisos inválidos, nunca.
+// T1-A-05: el vendedor no edita pedidos ya entregados ni con comisiones cerradas (`cerradoEn` = id del cierre vigente).
+export function puedeEditarPedido(usuario, pedido, { cerradoEn = null } = {}) {
+  const no = (motivo) => ({ ok: false, pantalla: null, motivo });
+  const permiso = permisoValido(usuario && usuario.permiso);
+  if (permiso === null || !pedido || typeof pedido !== 'object') return no('Sin permiso para editar pedidos');
+  if (esBorrado(pedido)) return no('El pedido está eliminado');
+  if (esWebNoAceptado(pedido)) return no('El pedido web todavía no fue aceptado');
+  if (permiso === ROLES.ADMIN) return { ok: true, pantalla: esFacturado(pedido) ? 'facturacion' : 'pedido', motivo: null };
+  if (permiso !== ROLES.VENDEDOR) return no('Sin permiso para editar pedidos');
+  if (esFacturado(pedido)) return no('El pedido ya está facturado');
+  if (pedido.entregado === true) return no('El pedido ya fue entregado');
+  if (cerradoEn !== null && cerradoEn !== undefined && cerradoEn !== '') return no('El pedido está en un cierre de comisiones');
+  const yo = nombreClave(usuario && usuario.nombre);
+  if (!yo) return no('Sin permiso para editar pedidos');
+  const suyo = [pedido.vendedor, pedido.vendedorNombre, pedido.cargadoPor].some(n => nombreClave(n) === yo);
+  return suyo ? { ok: true, pantalla: 'pedido', motivo: null } : no('Solo podés editar tus pedidos');
+}
+
+// AC-ASV-1/2: el admin asigna siempre (los web no aceptados solo desde la bandeja);
+// el vendedor solo al crear el pedido (`alCrear`).
+export function puedeAsignarVendedor(usuario, pedido, { alCrear = false } = {}) {
+  const permiso = permisoValido(usuario && usuario.permiso);
+  if (permiso === null) return false;
+  if (alCrear) return permiso === ROLES.ADMIN || permiso === ROLES.VENDEDOR;
+  if (permiso !== ROLES.ADMIN || !pedido || typeof pedido !== 'object') return false;
+  if (esBorrado(pedido) || esWebNoAceptado(pedido)) return false;
+  return true;
+}

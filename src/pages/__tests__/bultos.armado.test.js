@@ -138,8 +138,9 @@ describe('REQ-BUL Armado', () => {
   test('AC-BUL-3 "− Bulto" desde 5 deja 1 y el renglón sigue existiendo', async () => {
     setApp();
     await abrirArmado();
+// ADAPTADO (AC-CBU-2 BUG-1): con 0 bultos (5 sueltas) "− Bulto" no hace nada: las sueltas quedan (antes 1).
     await click(menos());
-    expect(cantidades()).toContain('1');
+    expect(cantidades()).toContain('5');
     expect(container.textContent).toContain('Coca 500');
     expect(menos().disabled).toBe(true);
   });

@@ -6,9 +6,18 @@ import SelectorMarca from './SelectorMarca';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta, validarProducto } from '../domain/productos';
 import { validarImagen } from '../domain/tiendaPortada';
-import { avisoPrecioBulto } from '../domain/precios';
+import { avisoPrecioBulto, normalizarEscalasBulto, MAX_ESCALAS_BULTO } from '../domain/precios';
+import { normalizarBultoX } from '../domain/bultos';
+import { autocompletarPrecio } from '../domain/precioCosto';
 
 const str = (v, def = '') => (v === undefined || v === null ? def : String(v));
+
+// AC-ESC-1: siempre 3 filas en el formulario (las vacias se ignoran al guardar).
+const filasEscalas = (arr) => {
+  const base = normalizarEscalasBulto(arr).map(e => ({ desde: String(e.desde), pct: String(e.pct).replace('.', ',') }));
+  while (base.length < MAX_ESCALAS_BULTO) base.push({ desde: '', pct: '' });
+  return base;
+};
 
 // rubros (REQ-COMR, AC-COMR-3/4): rubros existentes para el selector de Rubro.
 // subirFoto (REQ-FOT): async (pin, file) => { ok, url, mensaje }. Sin ella no se muestra el bloque de foto.
@@ -31,6 +40,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
     ventaPor: ventaPorEfectivo(inicial || {}),
     bultoNombre: normalizarBultoNombre(inicial?.bultoNombre),
     grupoBulto: str(inicial?.grupoBulto),
+    escalasBulto: filasEscalas(inicial?.escalasBulto),
     visibleTienda: inicial?.visibleTienda !== false,
     minimoVenta: str(inicial?.minimoVenta, '1'),
     stockMinimo: str(inicial?.stockMinimo),
@@ -66,13 +76,19 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
 
   const { costoNeto, precioVenta1 } = useMemo(() => calcularPrecioVenta(valores), [valores]);
 
+  // AC-PVC-2: aviso (no bloquea) si el precio escrito a mano es igual al costo.
+  const avisosPrecio = useMemo(() => validarProducto(valores, { existentes: [], proveedores: [] }).avisos || {}, [valores]);
+
   const onChange = (k, v) => {
     setErrores(prev => ({ ...prev, [k]: undefined }));
     if (k === 'precio') setPrecioManual(v !== '');
     setValores(prev => {
       const next = { ...prev, [k]: v };
-      if (!precioManual && k !== 'precio' && ['costoFinal', 'descuento1', 'descuento2', 'ganancia'].includes(k)) {
-        next.precio = String(calcularPrecioVenta(next).precioVenta1);
+      if (k !== 'precio' && ['costoFinal', 'descuento1', 'descuento2', 'ganancia'].includes(k)) {
+        // AC-PVC-3: solo con ganancia > 0 conocida; si no, el precio no se toca.
+        const gananciaDesconocida = !!inicial && inicial.ganancia === undefined && k !== 'ganancia' && prev.ganancia === '';
+        const auto = autocompletarPrecio(next, { precioManual, gananciaDesconocida });
+        if (auto !== null) next.precio = auto;
       }
       return next;
     });
@@ -108,6 +124,24 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
         renderCampo={{
           categoria: (props) => <SelectorRubro {...props} rubros={rubros} />,
           marca: (props) => <SelectorMarca {...props} marcas={marcas} />,
+          // AC-ESC-1: 3 filas "Desde (bultos)" + "% desc."; sin Bulto x > 1 quedan deshabilitadas.
+          escalasBulto: ({ id, value, onChange: set, error }) => {
+            const filas = Array.isArray(value) ? value : filasEscalas([]);
+            const sinBulto = normalizarBultoX(valores.bultoX) === null;
+            const cambiar = (i, campo, v) => set(filas.map((f, k) => (k === i ? { ...f, [campo]: v } : f)));
+            return (
+              <div id={id} data-testid="escalas-bulto" role="group" aria-label="Descuento por escala de bultos">
+                {filas.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                    <input className="input" inputMode="numeric" autoComplete="off" placeholder="Desde (bultos)" aria-label={`Escala ${i + 1} desde (bultos)`}
+                      value={f.desde} disabled={sinBulto} aria-invalid={error ? 'true' : 'false'} onChange={e => cambiar(i, 'desde', e.target.value)} />
+                    <input className="input" inputMode="decimal" autoComplete="off" placeholder="% desc." aria-label={`Escala ${i + 1} % desc.`}
+                      value={f.pct} disabled={sinBulto} onChange={e => cambiar(i, 'pct', e.target.value)} />
+                  </div>
+                ))}
+              </div>
+            );
+          },
           // AC-VTA-1: casilla "Mostrar en tienda" (el label del campo apunta a su id).
           visibleTienda: ({ id, value, onChange: set, disabled }) => (
             <input id={id} name="visibleTienda" type="checkbox" checked={value === true || value === 'true'} onChange={e => set(e.target.checked)} disabled={disabled} />
@@ -116,8 +150,12 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
         ayudas={{
           // AC-PBU-1: si el precio por bulto supera al unitario se avisa, no se bloquea.
           precioBulto: avisoPrecioBulto(valores.precio, valores.precioBulto) || 'Opcional. Precio por unidad cuando se lleva al menos un bulto completo.',
+          escalasBulto: errores.escalasBulto ? undefined
+            : (normalizarBultoX(valores.bultoX) === null
+              ? 'Cargá primero "Bulto x" mayor que 1 para usar escalas.'
+              : (avisosPrecio.escalasBulto || 'Opcional. Desde cuántos bultos se hace cada % de descuento (de menor a mayor, hasta 3 escalas). Aplica a todas las unidades.')),
           ventaPor: 'El precio es por unidad. "Bulto" exige Bulto x mayor que 1.',
-          precio: `Costo neto ${fmt(costoNeto)} · sugerido ${fmt(precioVenta1)}${precioManual ? ' (precio cargado a mano)' : ''}`,
+          precio: errores.precio ? undefined : `Costo neto ${fmt(costoNeto)} · sugerido ${fmt(precioVenta1)}${precioManual ? ' (precio cargado a mano)' : ''}${avisosPrecio.precio ? ' · ' + avisosPrecio.precio : ''}`,
           stock: inicial
             ? `Stock actual: ${stockActual}. Si lo cambiás se registra un ajuste de inventario.`
             : 'Stock inicial (opcional). Después se suma con "Ingreso de mercadería".',
@@ -139,7 +177,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
           <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }} data-testid="foto-msg">{fotoMsg || 'JPG, PNG o WEBP, hasta 2 MB. Para subirla, poné tu PIN de admin abajo.'}</div>
         </div>
       )}
-      {precioManual && (
+      {precioManual && precioVenta1 > costoNeto && (
         <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}
           onClick={() => { setPrecioManual(false); setValores(v => ({ ...v, precio: String(precioVenta1) })); }}>
           Usar precio calculado ({fmt(precioVenta1)})

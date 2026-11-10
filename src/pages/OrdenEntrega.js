@@ -10,11 +10,13 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { updateCliente, getPedidos } from '../db';
 import { syncClientes } from '../sync/syncService';
-import { generarFacturaFile } from '../utils/pdfGen';
+import { generarFacturaFile, generarHojaRutaFile } from '../utils/pdfGen';
+import { filasHojaRuta } from '../domain/cobranza';
+import { leerRedondeoLocal } from '../services/ajustesService';
 import { listarZonas, clientesDeZona, moverEnZona, calcularOrdenPorZona } from '../domain/zonas';
 import { shareFiles, canShareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
-import { isPedidoVisible, normalizePedidoFecha, getDeudaPendienteParaPedido } from '../utils/pedidos';
+import { isPedidoVisible, normalizePedidoFecha } from '../utils/pedidos';
 import { sumarDias } from '../utils/diasSemana';
 import { marcarEntregadoOnlineFirst } from '../services/pedidoRepository';
 import { puedeMarcarEntregado, puedeDesmarcarEntregado, pedidosEnCierresVigentes, pedidoIdComision } from '../domain/comisiones';
@@ -90,7 +92,7 @@ export const EntregasDelDia = ({ pedidos, permiso, recargar, cierres = [] }) => 
 };
 
 const OrdenEntrega = () => {
-  const { clientes, deudas, recargar, syncPedidosFecha, pedidos, vendedorActual, comisionesCierres } = useApp();
+  const { clientes, deudas, recargar, syncPedidosFecha, pedidos, vendedorActual, comisionesCierres, redondeoTotal } = useApp();
 
   // Sube los clientes recien guardados ya mismo y avisa si no llegaron a Supabase
   // (syncClientes puede saltear en silencio un error de permisos de escritura).
@@ -166,26 +168,55 @@ const OrdenEntrega = () => {
   const toggleZonaImprimir = (clave) =>
     setZonasImprimir(prev => (prev.includes(clave) ? prev.filter(x => x !== clave) : [...prev, clave]));
 
+  // Arma los grupos por zona (con el numero sin huecos de cada fecha) de todas las fechas elegidas.
+  // Es la base comun del remito y de la hoja de ruta: asi los dos salen con el mismo orden.
+  const armarReparto = async () => {
+    const grupos = [];
+    for (const fechaPedido of fechasImprimir) {
+      await syncPedidosFecha(fechaPedido);
+      const todos = await getPedidos();
+      const pedidosDelDia = todos.filter(p =>
+        isPedidoVisible(p) && normalizePedidoFecha(p.fecha) === fechaPedido
+      );
+      // Numeracion sin huecos dentro de cada zona, segun quien tiene pedido ese dia.
+      grupos.push(...calcularOrdenPorZona(pedidosDelDia, clientes || [], { zonas: zonasImprimir }));
+    }
+    // REQ-RED: los pedidos pendientes muestran el redondeo vigente (vista previa, no se guarda).
+    const multiploVistaPrevia = redondeoTotal ?? leerRedondeoLocal();
+    // REQ-RTO/HRU: el saldo anterior de cada cliente se cuenta una sola vez y sin las deudas de los pedidos impresos.
+    const hoja = filasHojaRuta(grupos, { deudas, multiploVistaPrevia });
+    return { grupos, hoja, multiploVistaPrevia };
+  };
+
+  const entregarArchivo = async (file, title) => {
+    if (canShareFiles()) {
+      try {
+        await shareFiles({ title, files: [file] });
+        return;
+      } catch (e) {
+        // cancelado o no soportado: cae al visor
+      }
+    }
+    const w = window.open('', '_blank');
+    const url = URL.createObjectURL(file);
+    if (w) w.location.href = url;
+    else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   const imprimirPedidos = async () => {
     if (fechasImprimir.length === 0) return;
     setImprimiendo(true);
     try {
+      const { grupos, hoja, multiploVistaPrevia } = await armarReparto();
       const files = [];
-      for (const fechaPedido of fechasImprimir) {
-        await syncPedidosFecha(fechaPedido);
-        const todos = await getPedidos();
-        const pedidosDelDia = todos.filter(p =>
-          isPedidoVisible(p) && normalizePedidoFecha(p.fecha) === fechaPedido
-        );
-
-        // Numeracion sin huecos dentro de cada zona, segun quien tiene pedido ese dia.
-        const porZona = calcularOrdenPorZona(pedidosDelDia, clientes || [], { zonas: zonasImprimir });
-        for (const grupo of porZona) {
-          for (const { pedido, orden: n } of grupo.pedidos) {
-            const cliente = (clientes || []).find(c => c.id === pedido.clienteId);
-            const deudaPendiente = getDeudaPendienteParaPedido(deudas, pedido);
-            files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, deudaPendiente, n));
-          }
+      let i = 0;
+      for (const grupo of grupos) {
+        for (const { pedido, orden: n } of grupo.pedidos) {
+          const cliente = (clientes || []).find(c => c.id === pedido.clienteId);
+          const saldoAnterior = hoja.filas[i]?.saldoAnterior ?? 0;
+          i += 1;
+          files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, saldoAnterior, n, { redondeoVistaPrevia: multiploVistaPrevia }));
         }
       }
 
@@ -198,26 +229,34 @@ const OrdenEntrega = () => {
         ? `pedidos_${fechasImprimir[0]}_a_${fechasImprimir[fechasImprimir.length - 1]}.pdf`
         : `pedidos_${fechasImprimir[0]}.pdf`;
       const merged = await mergePdfFilesToSingleFile(files, nombreArchivo);
-
-      if (canShareFiles()) {
-        try {
-          await shareFiles({ title: 'Pedidos para entregar', files: [merged] });
-          return;
-        } catch (e) {
-          // cancelado o no soportado: cae al visor
-        }
-      }
-      const w = window.open('', '_blank');
-      const url = URL.createObjectURL(merged);
-      if (w) w.location.href = url;
-      else window.location.href = url;
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      await entregarArchivo(merged, 'Pedidos para entregar');
     } catch (e) {
       alert('No se pudo generar el PDF: ' + (e?.message || String(e)));
     } finally {
       setImprimiendo(false);
     }
   };
+
+  // REQ-HRU (AC-HRU-1): hoja de ruta con las mismas fechas y zonas que los remitos.
+  const imprimirHojaRuta = async () => {
+    if (fechasImprimir.length === 0) return;
+    setImprimiendo(true);
+    try {
+      const { hoja } = await armarReparto();
+      if (hoja.filas.length === 0) {
+        alert('No hay pedidos para las fechas y zonas elegidas.');
+        return;
+      }
+      const file = await generarHojaRutaFile(hoja, { fechas: fechasImprimir, zonas: zonasImprimir });
+      await entregarArchivo(file, 'Hoja de ruta');
+    } catch (e) {
+      alert('No se pudo generar la hoja de ruta: ' + (e?.message || String(e)));
+    } finally {
+      setImprimiendo(false);
+    }
+  };
+
+
 
   return (
     <div className="page">
@@ -357,6 +396,17 @@ const OrdenEntrega = () => {
         >
           {imprimiendo ? 'Generando...' : `\u{1F5A8}️ Imprimir pedidos para entregar (${fechasImprimir.length || 0} día${fechasImprimir.length === 1 ? '' : 's'})`}
         </button>
+        <button
+          className="btn btn-ghost"
+          style={{ marginTop: 8 }}
+          onClick={imprimirHojaRuta}
+          disabled={fechasImprimir.length === 0 || imprimiendo}
+        >
+          Hoja de ruta (cobranza)
+        </button>
+        <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
+          La hoja de ruta lista orden, cliente, dirección, importe, saldo anterior y total a cobrar, con columnas vacías para anotar Efectivo, Transferencia y Transf. a proveedor.
+        </div>
         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
           Los pedidos salen agrupados por zona y numerados según el puesto de cada cliente en su zona.
         </div>

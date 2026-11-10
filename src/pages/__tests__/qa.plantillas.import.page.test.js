@@ -108,7 +108,7 @@ afterEach(() => {
 describe('AC-PLA-3 CSV con ";" y con ","', () => {
   it('AC-PLA-3 CSV separado por ";" (Excel es-AR), con CRLF y comillas: se importa bien', async () => {
     await render();
-    const txt = 'Código;Descripción;Proveedor;Costo final;Mínimo venta\r\nA1;"Coca; 500ml";Arcor;100;2\r\nA2;Fanta;;50;1\r\n';
+    const txt = 'Código;Descripción;Proveedor;Costo final;Mínimo venta;Precio por unidad\r\nA1;"Coca; 500ml";Arcor;100;2;150\r\nA2;Fanta;;50;1;80\r\n';
     await subir(inputProductos(), csv('p.csv', txt));
     expect(addProductoLocal).toHaveBeenCalledTimes(2);
     expect(addProductoLocal.mock.calls[0][0]).toMatchObject({ codigo: 'A1', nombre: 'Coca; 500ml', proveedorId: 'prov-1', costoFinal: 100, minimoVenta: 2 });
@@ -125,7 +125,7 @@ describe('AC-PLA-3 CSV con ";" y con ","', () => {
 
   it('AC-PLA-3 CSV con "," entre comillas ("1.234,50") separado por ";" no se parte', async () => {
     await render();
-    const txt = 'Código;Descripción;Costo final\nC1;Quoted;"1.234,50"\n';
+    const txt = 'Código;Descripción;Costo final;Precio por unidad\nC1;Quoted;"1.234,50";2000\n';
     await subir(inputProductos(), csv('p.csv', txt));
     expect(addProductoLocal.mock.calls[0][0]).toMatchObject({ codigo: 'C1', costoFinal: 1234.5 });
   });
@@ -205,8 +205,8 @@ describe('AC-PLA-3 CSV con ";" y con ","', () => {
 describe('AC-PLA-5 archivo grande desde la pantalla', () => {
   it('AC-PLA-3 AC-PLA-5 AC-PROD-3 CSV de 1000 filas: se guardan todas, un movimiento inicial por cada producto con stock y el resumen cuadra', async () => {
     await render();
-    const filas = ['Código;Descripción;Costo final;Stock'];
-    for (let i = 0; i < 1000; i++) filas.push(`P${i};Producto ${i};${100 + i};${i % 2 ? 5 : 0}`);
+    const filas = ['Código;Descripción;Costo final;Stock;Precio por unidad'];
+    for (let i = 0; i < 1000; i++) filas.push(`P${i};Producto ${i};${100 + i};${i % 2 ? 5 : 0};${200 + i}`);
     await subir(inputProductos(), csv('p.csv', filas.join('\n')));
     expect(addProductoLocal).toHaveBeenCalledTimes(1000);
     expect(ajustarStock).toHaveBeenCalledTimes(500);

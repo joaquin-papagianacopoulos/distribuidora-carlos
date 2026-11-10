@@ -5,9 +5,11 @@
 // recien despues anotar el monto EXACTO que va a salir a cobrar. Al cierre
 // del dia se va cobrando desde Deudas, completa o parcialmente (lo que no se
 // cobra queda como saldo).
-import { supabase } from '../lib/supabase';
 import { addDeuda, updateDeuda, deleteDeuda, getDeudas } from '../db';
 import { syncDeudas } from '../sync/syncService';
+import { anularDeuda } from '../domain/deudas';
+import { totalACobrar } from '../domain/redondeo';
+import { validarCobro, registrarCobroEnDeuda } from '../domain/cobranza';
 import { getLocalTodayStr, normalizePedidoFecha, deudaEsDePedido, saldoDeuda } from '../utils/pedidos';
 
 // Se guarda localmente siempre. Esto sube el cambio a Supabase; si falla
@@ -35,7 +37,8 @@ const deudasDePedido = async (pedido) => (await getDeudas()).filter(d => deudaEs
 // impedia crear la deuda.)
 export const registrarDeudaFacturado = async (pedido, cliente) => {
   if (!pedido) return false;
-  const monto = Number(pedido.total || 0);
+  // AC-RED-2: la deuda es lo que se cobra (total redondeado si el pedido lo tiene congelado).
+  const monto = totalACobrar(pedido);
   if (monto <= 0) return false;
   if ((await deudasDePedido(pedido)).length > 0) return false;
 
@@ -69,13 +72,9 @@ export const quitarDeudaDePedido = async (pedido) => {
       conservada = true;
       continue;
     }
-    if (d.remoteId && navigator.onLine) {
-      const { error } = await supabase.from('deudas').delete().eq('id', d.remoteId);
-      if (error) throw error;
-      await deleteDeuda(d.id);
-    } else if (d.remoteId) {
-      // Sin internet no se puede borrar en la nube: se anula y se sube despues.
-      await updateDeuda({ ...d, monto: 0, pagada: true, concepto: 'Anulada', synced: false, updatedAt: Date.now() });
+    if (d.remoteId) {
+      // AC-SEG2-1: la nube no admite delete (migracion 023): se anula, online y offline, y se sube.
+      await updateDeuda(anularDeuda(d));
     } else {
       await deleteDeuda(d.id);
     }
@@ -86,7 +85,8 @@ export const quitarDeudaDePedido = async (pedido) => {
 };
 
 // Si cambia el total de un pedido ya facturado (edicion en Facturacion/Armado),
-// la deuda acompana el nuevo monto. Lo ya cobrado se respeta.
+// la deuda acompana el nuevo monto. Lo ya cobrado se respeta. `nuevoTotal` es lo que se
+// cobra: quien llama pasa totalACobrar(pedido) (con el redondeo congelado, AC-RED-2).
 export const actualizarMontoDeudaDePedido = async (pedido, nuevoTotal) => {
   const total = Number(nuevoTotal || 0);
   const deudas = await deudasDePedido(pedido);
@@ -111,36 +111,42 @@ export const actualizarMontoDeudaDePedido = async (pedido, nuevoTotal) => {
 };
 
 // Cobro total (sin monto) o parcial (con monto). Lo que no se cobra queda como saldo.
-export const cobrarDeuda = async (deuda, monto = null, por = null) => {
+// AC-DMP-1: con `medio` ('efectivo' | 'transferencia') el cobro se anota en el historial de la deuda
+// (UUID, idempotente) con su referencia opcional; la UI exige elegir el medio. Sin `medio` se conserva
+// el cobro de siempre (queda como "sin dato").
+export const cobrarDeuda = async (deuda, monto = null, por = null, { medio = null, referencia = '' } = {}) => {
   const saldo = saldoDeuda(deuda);
   const cobra = monto == null ? saldo : Math.min(Math.max(Number(monto) || 0, 0), saldo);
   if (cobra <= 0) return deuda;
 
-  const montoPagado = Number(deuda.montoPagado || 0) + cobra;
-  const pagada = montoPagado >= Number(deuda.monto || 0) - 0.001;
-  const actualizada = {
-    ...deuda,
-    montoPagado,
-    pagada,
-    pagadaAt: pagada ? Date.now() : null,
-    pagadaPor: por || null,
-    synced: false,
-    updatedAt: Date.now(),
-  };
+  let actualizada;
+  if (medio) {
+    const v = validarCobro({ medio, referencia, monto: cobra }, deuda);
+    if (!v.ok) throw new Error(v.errores[0]);
+    actualizada = registrarCobroEnDeuda(deuda, v.cobro, { por });
+  } else {
+    const montoPagado = Number(deuda.montoPagado || 0) + cobra;
+    const pagada = montoPagado >= Number(deuda.monto || 0) - 0.001;
+    actualizada = { ...deuda, montoPagado, pagada, pagadaAt: pagada ? Date.now() : null, pagadaPor: por || null };
+  }
+  actualizada = { ...actualizada, synced: false, updatedAt: Date.now() };
   await updateDeuda(actualizada);
   await syncSafe();
   return actualizada;
 };
 
 // Cobra el saldo completo de todas las deudas de un cliente (de la mas vieja a la mas nueva).
-export const cobrarTodoDelCliente = async (deudasCliente, por = null) => {
+export const cobrarTodoDelCliente = async (deudasCliente, por = null, opciones = {}) => {
   const ordenadas = [...deudasCliente].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
-  for (const d of ordenadas) await cobrarDeuda(d, null, por);
+  for (const d of ordenadas) await cobrarDeuda(d, null, por, opciones);
 };
 
 // Anula todos los cobros de una deuda (vuelve a deber el monto completo).
 export const deshacerCobros = async (deuda) => {
-  await updateDeuda({ ...deuda, montoPagado: 0, pagada: false, pagadaAt: null, pagadaPor: null, synced: false, updatedAt: Date.now() });
+  await updateDeuda({
+    ...deuda, montoPagado: 0, pagada: false, pagadaAt: null, pagadaPor: null,
+    cobros: [], medioPago: null, referenciaPago: null, synced: false, updatedAt: Date.now(),
+  });
   await syncSafe();
 };
 
@@ -163,9 +169,10 @@ export const crearDeudaManual = async ({ cliente, monto, concepto }) => {
 
 export const borrarDeuda = async (deuda) => {
   if (deuda.remoteId) {
-    if (!navigator.onLine) throw new Error('Necesitas conexion para borrar una deuda ya sincronizada.');
-    const { error } = await supabase.from('deudas').delete().eq('id', deuda.remoteId);
-    if (error) throw error;
+    // AC-SEG2-1: ya no se borra en la nube (migracion 023): se anula y la anulacion se sube.
+    await updateDeuda(anularDeuda(deuda));
+    await syncSafe();
+    return;
   }
   await deleteDeuda(deuda.id);
 };
@@ -186,11 +193,9 @@ export const clienteIdLocal = (v) => (typeof v === 'string' && /^\d{1,15}$/.test
 const cobrarLocal = async (deuda, montoPesos, por) => {
   const cobra = Math.min(Math.max(Number(montoPesos) || 0, 0), saldoDeuda(deuda));
   if (cobra <= 0) return false;
-  const montoPagado = Number(deuda.montoPagado || 0) + cobra;
-  const pagada = montoPagado >= Number(deuda.monto || 0) - 0.001;
-  await updateDeuda({
-    ...deuda, montoPagado, pagada, pagadaAt: pagada ? Date.now() : null, pagadaPor: por || null, synced: false, updatedAt: Date.now(),
-  });
+  // AC-DMP-1: lo aplicado por una rendicion se anota con el medio interno 'rendicion' (no elegible en la UI).
+  const actualizada = registrarCobroEnDeuda(deuda, { medio: 'rendicion', montoCents: Math.round(cobra * 100) }, { por });
+  await updateDeuda({ ...actualizada, synced: false, updatedAt: Date.now() });
   return true;
 };
 
@@ -224,12 +229,8 @@ export const crearDeudaRendicion = async ({ clienteId, clienteNombre, montoCents
 export const anularDeudaRendicion = async (deudaId) => {
   const d = (await getDeudas()).find(x => x.id === deudaId);
   if (!d || d.pagada || Number(d.montoPagado || 0) > 0) return false;
-  if (d.remoteId && navigator.onLine) {
-    const { error } = await supabase.from('deudas').delete().eq('id', d.remoteId);
-    if (error) throw error;
-    await deleteDeuda(d.id);
-  } else if (d.remoteId) {
-    await updateDeuda({ ...d, monto: 0, pagada: true, concepto: 'Anulada', synced: false, updatedAt: Date.now() });
+  if (d.remoteId) {
+    await updateDeuda(anularDeuda(d));
   } else {
     await deleteDeuda(d.id);
   }

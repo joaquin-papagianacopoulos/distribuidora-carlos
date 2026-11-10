@@ -45,7 +45,8 @@ describe('AC-MIN-1/2 validarMinimosItems', () => {
   it('AC-MIN-2 admin en Facturación guarda con confirmación; armador no', () => {
     expect(puedeGuardarBajoMinimo(1, 'facturacion')).toBe('confirmar');
     expect(puedeGuardarBajoMinimo(3, 'armado')).toBe('no');
-    expect(puedeGuardarBajoMinimo(1, 'armado')).toBe('no');
+    // ADAPTADO (AC-MIN2-1 modifica AC-MIN-2): el admin también guarda en Armado, con confirmación.
+    expect(puedeGuardarBajoMinimo(1, 'armado')).toBe('confirmar');
     expect(puedeGuardarBajoMinimo(2, 'facturacion')).toBe('no');
     const r = validarMinimosItems([{ productoId: 1, cantidad: 3 }], prods, { permiso: 1, pantalla: 'facturacion' });
     expect(r.requiereConfirmacion).toBe(true);

@@ -50,7 +50,9 @@ describe('pedidos web (AC-WEB-1, 3, 4, 5, 6)', () => {
   });
 
   it('AC-WEB-4 vendedorAlAceptar: link, ficha, admin', () => {
-    expect(vendedorAlAceptar({ vendedor: 'Ana' }, { vendedor: 'Juan' }, 'Pepe')).toEqual({ vendedor: 'Ana', requiereElegir: false });
+    expect(vendedorAlAceptar({ vendedor: 'Ana' }, { vendedor: 'Juan' })).toEqual({ vendedor: 'Ana', requiereElegir: false });
+    // ADAPTADO (AC-ASV-2): lo que elige el admin en el selector pre-cargado gana sobre el link (antes 'Ana').
+    expect(vendedorAlAceptar({ vendedor: 'Ana' }, { vendedor: 'Juan' }, 'Pepe')).toEqual({ vendedor: 'Pepe', requiereElegir: false });
     expect(vendedorAlAceptar({ vendedor: '' }, { vendedor: 'Juan' })).toEqual({ vendedor: 'Juan', requiereElegir: false });
     expect(vendedorAlAceptar({}, {}, 'Pepe')).toEqual({ vendedor: 'Pepe', requiereElegir: false });
     expect(vendedorAlAceptar({}, null)).toEqual({ vendedor: null, requiereElegir: true });

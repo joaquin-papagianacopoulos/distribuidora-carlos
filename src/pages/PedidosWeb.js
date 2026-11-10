@@ -86,7 +86,8 @@ const Detalle = ({ pedido, acciones, clientes, vendedores, productos, onResuelto
     <div className="card" style={{ marginTop: 10 }} data-testid="detalle-pedido-web">
       <div style={{ fontWeight: 700 }}>{contacto.nombre || pedido.clienteNombre}</div>
       <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }} data-testid="contacto-web">
-        Fecha {pedido.fecha} · Vendedor del link: {pedido.vendedor || 'sin vendedor (link general)'}<br />
+        Fecha {pedido.fecha} · Vendedor del link: {pedido.vendedor && pedido.vendedor !== 'WEB' ? pedido.vendedor : 'sin vendedor (link general)'}
+        {(!pedido.vendedor || pedido.vendedor === 'WEB') && <span className="badge badge-pending" data-testid="badge-sin-vendedor" style={{ marginLeft: 6 }}>Sin vendedor</span>}<br />
         {pedido.webContacto ? (
           <>
             Tel: {contacto.telefono} · {contacto.direccion}, {contacto.ciudad}{contacto.cp ? ` (${contacto.cp})` : ''}{contacto.provincia ? `, ${contacto.provincia}` : ''}
@@ -173,7 +174,15 @@ const Detalle = ({ pedido, acciones, clientes, vendedores, productos, onResuelto
                 {filtrarActivos(vendedores).map(v => <option key={v.id} value={v.nombre}>{v.nombre}</option>)}
               </select>
             </div>
-          ) : (cliente ? <div style={{ fontSize: 13, marginTop: 6 }}>Vendedor: {vend.vendedor}</div> : null)}
+          ) : (cliente ? (
+            <div style={{ marginTop: 8 }}>
+              <label className="input-label">Vendedor del pedido (podés cambiarlo)</label>
+              <select className="input" aria-label="Vendedor del pedido" value={elegido || vend.vendedor || ''} onChange={e => setElegido(e.target.value)}>
+                {vend.vendedor && !filtrarActivos(vendedores).some(v => v.nombre === vend.vendedor) && <option value={vend.vendedor}>{vend.vendedor}</option>}
+                {filtrarActivos(vendedores).map(v => <option key={v.id} value={v.nombre}>{v.nombre}</option>)}
+              </select>
+            </div>
+          ) : null)}
 
           <div style={{ marginTop: 10 }}>
             <label className="input-label" htmlFor="fecha-web">Fecha del pedido (día de entrega)</label>

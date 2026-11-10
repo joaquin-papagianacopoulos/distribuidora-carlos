@@ -23,14 +23,19 @@ const TipoFacturaSelector = ({ pedido, cliente, onChange, disabled = false }) =>
         >
           {TIPOS_FACTURA.map(t => <option key={t} value={t}>{ETIQUETA_TIPO_FACTURA[t]}</option>)}
         </select>
+        {/* AC-RTO-1: "Sin factura" es el valor de arranque (no una sugerencia por IVA): el texto
+            "sugerido por el IVA del cliente" solo corresponde cuando lo sugerido es Factura A o B. */}
         {sugerido && (
           <>
-            <span style={{ fontSize: 12, color: 'var(--text3)' }}>(sugerido por el IVA del cliente)</span>
+            {tipo !== 'ninguna' && <span style={{ fontSize: 12, color: 'var(--text3)' }}>(sugerido por el IVA del cliente)</span>}
             <button type="button" className="btn btn-ghost btn-sm" style={{ width: 'auto' }} disabled={disabled} onClick={() => onChange && onChange(tipo)}>
               Confirmar
             </button>
           </>
         )}
+      </div>
+      <div data-testid="tipo-factura-nota" style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+        Solo para el reporte de facturas a emitir: el remito impreso no cambia.
       </div>
       {aviso && (
         <div data-testid="aviso-factura-a" role="alert" style={{ marginTop: 6, fontSize: 13, color: 'var(--warning)', fontWeight: 700 }}>

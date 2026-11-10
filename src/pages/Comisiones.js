@@ -55,6 +55,7 @@ const Avisos = ({ avisos, onCargarPct }) => {
   const c2 = avisos.productosSinRubro || [];
   const filas = [
     ['a', c.a, 'pedido(s) cargado(s) por un vendedor distinto al de la ficha', avisos.cargadoPorOtro.map(l => `${l.clienteNombre} (cargó ${l.cargadoPor})`)],
+    ['e', c.e || 0, 'pedido(s) web sin vendedor (no suman comisión a nadie hasta asignarlo)', (avisos.sinVendedorPedido || []).map(l => l.clienteNombre)],
     ['b', c.b, 'cliente(s) sin vendedor en la ficha', avisos.clienteSinVendedor.map(x => x.clienteNombre)],
     ['c', c.c, 'cliente(s) sin % de comisión (comisión 0)', avisos.clienteSinPct.map(x => x.clienteNombre)],
     ['c2', c.c2 || 0, 'producto(s) sin rubro vendido(s) en el período (comisión 0)', c2.map(x => `${x.nombre} (${x.renglones} renglón/es, ${pesos(x.monto)})`)],
@@ -622,6 +623,7 @@ const Comisiones = () => {
                   {a.clienteNombre} · #{a.pedidoId} · cerrado {pesos(a.comisionCerrada)} → ahora {pesos(a.comisionActual)} ·{' '}
                   <strong style={{ color: a.diferencia < 0 ? 'var(--danger)' : 'var(--success)' }}>{a.diferencia > 0 ? '+' : ''}{pesos(a.diferencia)}</strong>
                   {a.motivo === 'ya_no_cuenta' ? ' (ya no cuenta: revertido, borrado o desmarcado)' : ''}
+                  {a.motivo === 'vendedor_asignado' ? ' (se asignó vendedor después del cierre)' : ''}
                 </div>
               ))}
             </div>

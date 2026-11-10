@@ -77,15 +77,16 @@ afterEach(async () => {
 
 describe('AC-PBU-3 Armado: precio llevando bulto', () => {
   test('AC-PBU-3 al sumar un bulto el precio baja y se guarda a $8 por unidad', async () => {
-    setApp([pedido(8)]);
+    // AC-MUL-2: el mínimo es 6, así que se parte de un múltiplo (6 + 12 = 18).
+    setApp([pedido(6)]);
     await abrirArmado();
-    await click(container.querySelector('[data-testid="bulto-mas"]')); // 8 + 12 = 20
-    expect(cantidad().value).toBe('20');
+    await click(container.querySelector('[data-testid="bulto-mas"]')); // 6 + 12 = 18
+    expect(cantidad().value).toBe('18');
     await click(boton('Guardar'));
     expect(guardarPedidoOnlineFirst).toHaveBeenCalledTimes(1);
     const g = guardarPedidoOnlineFirst.mock.calls[0][0];
-    expect(g.items[0]).toMatchObject({ cantidad: 20, precio: 8, precioOriginal: 10, precioPorBulto: true });
-    expect(g.total).toBe(160);
+    expect(g.items[0]).toMatchObject({ cantidad: 18, precio: 8, precioOriginal: 10, precioPorBulto: true });
+    expect(g.total).toBe(144);
   });
 });
 

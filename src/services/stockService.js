@@ -13,6 +13,7 @@ import {
   movimientoToRemote, movimientoFromRemote, ingresoToRemote, ingresoFromRemote,
 } from '../domain/stock';
 import { proveedorToRemote, proveedorFromRemote } from '../domain/proveedores';
+import { esFuncionInexistente } from '../sync/tolerancia';
 import { validarCostosIngreso, costoProductoDesdeIngreso } from '../domain/compras';
 
 export const getStockMap = async () => calcularStock(await getMovimientosStock());
@@ -163,6 +164,32 @@ const pushPendientes = async (rows, table, toRemote, clear, { retener = () => fa
   }
   if (fallidos.length) console.warn(`syncStock: ${fallidos.length} fila(s) de ${table} rechazadas por Supabase`, fallidos);
   return { subidos: pend.length - fallidos.length, fallidos };
+};
+
+/**
+ * AC-SEG2-5: con la migracion 023 el anon no puede insertar movimientos 'ajuste'/'inicial': quedan
+ * pendingSync (el stock local se ve al instante) y suben con las credenciales de admin por la RPC
+ * admin_registrar_ajustes_stock. `cred` = { p_admin_id, p_admin_pin }. Solo limpia los ids confirmados.
+ * Sin la 023 (RPC inexistente) devuelve { ok:false, faltaMigracion:true } y no toca nada.
+ */
+export const subirAjustesConPin = async (cred) => {
+  const movs = ((await getMovimientosStock()) || []).filter(m => m.pendingSync
+    && (m.tipo === 'ajuste' || m.tipo === 'inicial') && String(m.ref || '').startsWith('ajuste:'));
+  if (movs.length === 0) return { ok: true, subidos: 0 };
+  let subidos = 0;
+  for (let i = 0; i < movs.length; i += 500) {
+    const slice = movs.slice(i, i + 500);
+    const { data, error } = await supabase.rpc('admin_registrar_ajustes_stock', { ...cred, p_movs: slice.map(movimientoToRemote) });
+    if (error) {
+      if (esFuncionInexistente(error)) return { ok: false, faltaMigracion: true, subidos };
+      throw error;
+    }
+    if (!data || data.ok !== true) return { ok: false, motivo: data?.motivo || 'error', subidos };
+    const ids = Array.isArray(data.ids) ? data.ids : [];
+    if (ids.length) await clearMovimientosPendingSync(ids);
+    subidos += ids.length;
+  }
+  return { ok: true, subidos, rechazados: movs.length - subidos };
 };
 
 const pullDesde = async (table, cursor) => {

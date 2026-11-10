@@ -1,7 +1,7 @@
 // QA bordes lote 011 (REQ-FAB, REQ-AGR, REQ-TRQ, REQ-ZON). Solo casos que no cubrian los tests del implementador.
 import { sugerirTipoFactura, armarReporteFacturas, avisoFacturaA, tipoFacturaEfectivo, marcarTipoFactura } from '../facturacionAB';
 import { filasBoleta, totalFilasBoleta, textoBultosGrupo, normalizarGrupos, crearGrupo } from '../gruposFactura';
-import { layoutPieBoleta, ALTO_TROQUEL, MARGEN_INFERIOR_PAGINA } from '../boletaLayout';
+import { layoutPieBoleta, MARGEN_INFERIOR_PAGINA } from '../boletaLayout';
 import { calcularOrdenPorZona, moverEnZona, clientesDeZona } from '../zonas';
 
 describe('QA AC-FAB-1 sugerencia por IVA', () => {
@@ -93,35 +93,29 @@ describe('QA AC-AGR bordes de grupos', () => {
   });
 });
 
-describe('QA AC-TRQ-1 troquel', () => {
-  const cut = 297 - MARGEN_INFERIOR_PAGINA;
-  const corte = cut - ALTO_TROQUEL;
+// ADAPTADO (AC-TRQ-1 -> AC-RTO-6): el troquel ya no existe; se verifica que el pie del remito nunca pase del margen inferior.
+describe('QA AC-RTO-6 pie del remito (antes troquel AC-TRQ-1)', () => {
+  const limite = 297 - MARGEN_INFERIOR_PAGINA;
   const verifica = (l) => {
-    const corte = l.corteY; const cut = corte + ALTO_TROQUEL;
-    const ys = [l.totalesY, l.deudaY, l.obsY].filter(y => y !== null);
-    ys.forEach(y => expect(y).toBeLessThan(corte));
-    const ultimas = l.casillas.map(c => c.y);
-    expect(Math.min(...ultimas, l.clienteY, l.proveedorY)).toBeGreaterThan(corte);
-    expect(l.proveedorY).toBeLessThan(cut);
-    // las casillas no se pisan entre si (>= 5 mm) ni con el total del troquel
-    const sorted = [...ultimas].sort((a, b) => a - b);
-    for (let i = 1; i < sorted.length; i++) expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(5);
+    const ys = [l.totalesY, l.saldoAnteriorY, l.totalCobrarY, l.obsY].filter(y => y !== null);
+    ys.forEach(y => expect(y).toBeLessThan(l.limiteY));
+    expect(l.casillas).toBeUndefined();
+    expect(l.corteY).toBeUndefined();
   };
-  it('AC-TRQ-1 boleta larga + descuento + deuda + obs de varias lineas no pisa el troquel', () => {
+  it('AC-RTO-6 boleta larga + descuento + deuda + obs de varias lineas no pasa del margen', () => {
     for (const finalY of [20, 100, 200, 235, 240, 250, 255, 260, 270, 280, 290, 296]) {
-      const l = layoutPieBoleta({ finalY, hayDescuento: true, hayDeuda: true, hayObs: true, lineasObs: 4 });
+      const l = layoutPieBoleta({ finalY, hayDescuento: true, hayRedondeo: true, hayDeuda: true, hayObs: true, lineasObs: 4 });
       verifica(l);
     }
   });
-  it('AC-TRQ-1 hoja distinta (A5, 210 alto) y finalY invalido', () => {
+  it('AC-RTO-6 hoja distinta (A5, 210 alto) y finalY invalido', () => {
     verifica(layoutPieBoleta({ finalY: 150, pageH: 210, hayDeuda: true, hayObs: true, lineasObs: 2 }));
     verifica(layoutPieBoleta({ finalY: NaN, hayDeuda: true }));
     verifica(layoutPieBoleta({}));
   });
-  it('AC-TRQ-1 observaciones enormes (30 lineas) igual no llegan al troquel', () => {
-    // Con pagina nueva entra hasta ~50 lineas; mas alla no hay corte (limite aceptado).
+  it('AC-RTO-6 observaciones enormes (30 lineas) igual no pasan del margen', () => {
     const l = layoutPieBoleta({ finalY: 100, hayObs: true, hayDeuda: true, lineasObs: 30 });
-    expect(l.obsY + 4 * 29).toBeLessThan(corte);
+    expect(l.obsY + 4 * 29).toBeLessThan(limite);
   });
 });
 

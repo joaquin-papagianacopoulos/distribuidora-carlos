@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { totalACobrar } from '../domain/redondeo';
 import { getTodayStr, formatFecha } from '../utils/fuzzy';
 import { useApp } from '../hooks/useAppContext';
 import { isPedidoVisible, normalizePedidoFecha } from '../utils/pedidos';
@@ -43,7 +44,7 @@ const ReportesVentas = () => {
       const k = normalizePedidoFecha(r.fecha);
       const prev = map.get(k) || { fecha: k, pedidos: 0, total: 0 };
       prev.pedidos += 1;
-      prev.total += Number(r.total || 0);
+      prev.total += totalACobrar(r); // AC-RED-2: lo que se cobra
       map.set(k, prev);
     }
     return [...map.values()].sort((a, b) => (a.fecha < b.fecha ? -1 : 1));

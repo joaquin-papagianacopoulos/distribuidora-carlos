@@ -1,7 +1,7 @@
 // src/tienda/DetalleProducto.js — AC-TIE-8 y AC-TIE-9: detalle compartible con selector de cantidad.
 import React, { useState } from 'react';
 import {
-  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe, textoPrecioBulto, precioUnitarioTienda, porcentajeOff, precioDelBulto,
+  formatearPesos, textoBulto, textoEquivalencia, unidadesIniciales, pasoUnidades, minimoDe, textoPrecioBulto, textoEscalasTienda, precioUnitarioTienda, porcentajeOff, precioDelBulto,
 } from '../domain/tienda';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { normalizarBultoX } from '../domain/bultos';
@@ -31,6 +31,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
   const img = imagenSegura(prod.imagen);
   const bulto = textoBulto(prod);
   const precioBultoTxt = textoPrecioBulto(prod);
+  const escalasTxt = textoEscalasTienda(prod);
   const precioBultoSel = modo === 'bulto' || vp === 'bulto' ? precioDelBulto(prod) : null;
   const relacionados = productos.filter(p => p.rubro && p.rubro === prod.rubro && String(p.id) !== String(prod.id)).slice(0, 4);
 
@@ -70,6 +71,7 @@ const DetalleProducto = ({ prod, productos, config, onAgregar, navegar, cantidad
               {precioBultoTxt ? <div className="t-bulto" data-testid="precio-bulto">{precioBultoTxt}</div> : null}
             </>
           )}
+          {escalasTxt ? <div className="t-bulto t-bulto-ahorro" data-testid="escalas-bulto">{escalasTxt}</div> : null}
           {min > 1 ? <div className="t-aviso">Compra mínima: {min} u.</div> : null}
 
           {vp === 'ambos' ? (

@@ -13,6 +13,8 @@ jest.mock('../../utils/pdfGen', () => ({ generarFacturasAEmitirFile: jest.fn() }
 // eslint-disable-next-line import/first
 import FacturasAEmitir from '../FacturasAEmitir';
 // eslint-disable-next-line import/first
+import { hoyISO } from '../../domain/validacion';
+// eslint-disable-next-line import/first
 import { consultarFacturasAEmitir, aplicarTiposRemotos } from '../../services/facturacionService';
 // eslint-disable-next-line import/first
 import { credencialesAdminProductos } from '../../services/productosAdminService';
@@ -22,9 +24,9 @@ import { generarFacturasAEmitirFile } from '../../utils/pdfGen';
 let container;
 let root;
 const FILAS = [
-  { pedidoId: '1', fecha: '2026-10-01', clienteNombre: 'Kiosco Uno', cuit: '20123456786', tipoIva: 'Responsable Inscripto', tipoFactura: 'A', total: 150 },
-  { pedidoId: '2', fecha: '2026-10-02', clienteNombre: 'Pepe Dos', cuit: '', tipoIva: 'Monotributo', tipoFactura: 'B', total: 300 },
-  { pedidoId: '3', fecha: '2026-10-03', clienteNombre: 'Sin Factura', cuit: '', tipoIva: '', tipoFactura: 'ninguna', total: 999 },
+  { pedidoId: '1', fecha: hoyISO(), clienteNombre: 'Kiosco Uno', cuit: '20123456786', tipoIva: 'Responsable Inscripto', tipoFactura: 'A', total: 150 },
+  { pedidoId: '2', fecha: hoyISO(), clienteNombre: 'Pepe Dos', cuit: '', tipoIva: 'Monotributo', tipoFactura: 'B', total: 300 },
+  { pedidoId: '3', fecha: hoyISO(), clienteNombre: 'Sin Factura', cuit: '', tipoIva: '', tipoFactura: 'ninguna', total: 999 },
 ];
 const setApp = (permiso = 1, over = {}) => {
   Object.keys(mockApp).forEach(k => delete mockApp[k]);
@@ -75,11 +77,11 @@ describe('AC-FAB-3 reporte', () => {
   it('AC-FAB-3 pide el PIN, consulta con el rango y muestra A y B con subtotales y total (sin los "ninguna")', async () => {
     setApp(1);
     await render();
-    await escribir(container.querySelector('#fe-desde'), '2026-10-01');
-    await escribir(container.querySelector('#fe-hasta'), '2026-10-31');
+    await escribir(container.querySelector('#fe-desde'), hoyISO().slice(0, 8) + '01');
+    await escribir(container.querySelector('#fe-hasta'), hoyISO());
     await armar();
     expect(credencialesAdminProductos).toHaveBeenCalledWith('1234');
-    expect(consultarFacturasAEmitir).toHaveBeenCalledWith({ p_admin_id: '1', p_admin_pin: '1234' }, '2026-10-01', '2026-10-31');
+    expect(consultarFacturasAEmitir).toHaveBeenCalledWith({ p_admin_id: '1', p_admin_pin: '1234' }, hoyISO().slice(0, 8) + '01', hoyISO());
     expect(q('grupo-A').textContent).toMatch(/Kiosco Uno/);
     expect(q('grupo-A').textContent).toMatch(/20-12345678-6/);
     expect(q('grupo-B').textContent).toMatch(/Pepe Dos/);

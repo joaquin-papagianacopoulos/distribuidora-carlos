@@ -6,8 +6,9 @@ jest.mock('../../db', () => {
     getPedidos: async () => mockLocal.pedidos.map(p => ({ ...p })),
     getProductos: async () => [],
     getVendedores: async () => [],
+    // AC-SEG2-7 (test adaptado): el sync pasa objetos { id, updatedAt } (tambien acepta ids).
     clearClientesPendingSync: async (ids) => {
-      const s = new Set(ids);
+      const s = new Set(ids.map(x => (x && typeof x === 'object' ? x.id : x)));
       mockLocal.clientes = mockLocal.clientes.map(c => (s.has(c.id) ? { ...c, pendingSync: false } : c));
     },
     putClientesBatch: async (rows) => {
@@ -132,7 +133,7 @@ describe('AC-ZON-3 clientes.orden_zona en el sync', () => {
     mockLocal.clientes = [CLI];
     await syncClientes();
     expect(mockSb.upserts[0].rows[0]).toMatchObject({ id: 7, orden_zona: 3, dia_entrega: 'lunes', orden_entrega: 2 });
-    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([7]);
+    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([{ id: 7 }]);
   });
 
   it('AC-ZON-3 sin ordenZona manda null', async () => {
@@ -148,6 +149,6 @@ describe('AC-ZON-3 clientes.orden_zona en el sync', () => {
     expect(mockSb.upserts).toHaveLength(2);
     expect(mockSb.upserts[1].rows[0]).not.toHaveProperty('orden_zona');
     expect(mockSb.upserts[1].rows[0]).toMatchObject({ id: 7, dia_entrega: 'lunes', orden_entrega: 2 });
-    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([7]);
+    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([{ id: 7 }]);
   });
 });

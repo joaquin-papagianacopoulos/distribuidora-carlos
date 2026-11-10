@@ -29,7 +29,9 @@ export const sugerirTipoFactura = (cliente) => {
 export const tipoFacturaEfectivo = (pedido, cliente) => {
   const guardado = normalizarTipoFactura(pedido?.tipoFactura);
   if (guardado) return { tipo: guardado, sugerido: false };
-  return { tipo: sugerirTipoFactura(cliente), sugerido: true };
+  // AC-RTO-1: el default de un pedido sin marca es "Sin factura". La sugerencia por IVA
+  // (sugerirTipoFactura) solo la usa el reporte "Facturas a emitir" para pedidos viejos sin marca.
+  return { tipo: 'ninguna', sugerido: true };
 };
 
 // Marcado masivo. Devuelve una lista nueva; solo cambian los pedidos de `ids`.

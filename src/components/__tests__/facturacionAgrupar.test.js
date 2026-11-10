@@ -34,13 +34,15 @@ const escribir = async (el, valor) => {
 };
 
 describe('AC-FAB-1 TipoFacturaSelector', () => {
-  it('AC-FAB-1 sugiere A para Responsable Inscripto y deja confirmar', async () => {
+  // ADAPTADO (AC-RTO-1): el default de un pedido sin marca es "Sin factura" aunque el cliente sea RI.
+  it('AC-FAB-1 sin marca el default es Sin factura (aunque sea Responsable Inscripto) y deja confirmar', async () => {
     const onChange = jest.fn();
     await render(<TipoFacturaSelector pedido={{ id: 1 }} cliente={{ tipoIva: 'Responsable Inscripto', cuit: '20-12345678-6' }} onChange={onChange} />);
-    expect(porAria('Tipo de factura').value).toBe('A');
-    expect(container.textContent).toMatch(/sugerido/i);
+    expect(porAria('Tipo de factura').value).toBe('ninguna');
+    // AC-RTO-1: junto a "Sin factura" ya no aparece el texto de sugerencia por IVA.
+    expect(container.textContent).not.toMatch(/sugerido/i);
     await click(botonConTexto('Confirmar'));
-    expect(onChange).toHaveBeenCalledWith('A');
+    expect(onChange).toHaveBeenCalledWith('ninguna');
   });
 
   it('AC-FAB-1 sin dato de IVA => Sin factura; cambiar el select avisa el tipo', async () => {

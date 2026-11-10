@@ -1,11 +1,15 @@
 // src/pages/ListaPedidos.js
+import { totalACobrar } from '../domain/redondeo';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { getTodayStr, formatFecha } from '../utils/fuzzy';
 import { generarFacturaFile } from '../utils/pdfGen';
 import { shareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
-import { borrarPedidoOnlineFirst, guardarPedidoOnlineFirst } from '../services/pedidoRepository';
+import { borrarPedidoOnlineFirst, guardarPedidoOnlineFirst, asignarVendedorOnlineFirst, reasignarVendedorAdmin, resolverConflictoEdicion } from '../services/pedidoRepository';
+import { puedeEditarPedido, puedeAsignarVendedor } from '../domain/permisos';
+import { pedidosPendientesVisibles } from '../domain/pedidosPendientes';
+import { esSinVendedor } from '../domain/vendedorPedido';
 import { isPedidoVisible, normalizePedidoFecha, getDeudaPendienteParaPedido } from '../utils/pedidos';
 import { quitarDeudaDePedido } from '../services/deudaRepository';
 import { filtrarActivos } from '../domain/vendedores';
@@ -14,7 +18,8 @@ import { pedidoTieneRendicionVigente, MSG_PEDIDO_CON_RENDICION } from '../domain
 
 const ESTADOS = ['todos', 'pendiente', 'facturado'];
 
-const ListaPedidos = () => {
+// onEditar (REQ-EDP): abre el pedido en Nuevo pedido en modo edicion.
+const ListaPedidos = ({ onEditar = null } = {}) => {
   const {
     pedidos,
     clientes,
@@ -27,6 +32,7 @@ const ListaPedidos = () => {
     syncNow,
     syncPedidosFecha,
     syncPedidosCliente,
+    traerPedidosPendientes,
   } = useApp();
   const isAdmin = Number(vendedorActual?.permiso || 2) === 1;
   const zonaLocked = isAdmin ? null : (vendedorActual?.zona || '');
@@ -47,6 +53,11 @@ const ListaPedidos = () => {
     // Cuando cambias de dia, traer del remoto solo esa fecha (evita bajar miles de pedidos).
     syncPedidosFecha(filtroFecha);
   }, [filtroFecha, syncPedidosFecha]);
+
+  // REQ-PEN (AC-PEN-1): al abrir en la fecha de hoy se bajan los no facturados de cualquier fecha.
+  useEffect(() => {
+    if (filtroFecha === getTodayStr() && typeof traerPedidosPendientes === 'function') traerPedidosPendientes();
+  }, [filtroFecha, traerPedidosPendientes]);
 
   useEffect(() => {
     if (!isAdmin) setZona(zonaLocked || '');
@@ -109,6 +120,14 @@ const ListaPedidos = () => {
     }
   };
 
+  // AC-EDP-1 / AC-ASV-1: el vendedor ve sus pedidos (como dueno o porque los cargo); admin y armador ven todo.
+  const esDelUsuario = (p) => {
+    if (isAdmin) return true;
+    const yo = String(vendedorActual?.nombre || '');
+    return String(p.vendedorNombre || p.vendedor || '') === yo || String(p.cargadoPor || '') === yo;
+  };
+  const usuarioActual = { nombre: vendedorActual?.nombre, permiso: Number(vendedorActual?.permiso || 2) };
+
   const filtrados = useMemo(() => {
     // Defensa contra duplicados visuales: si por cualquier motivo entran pedidos repetidos
     // (por rehidratacion/caches en iOS), nos quedamos con uno solo por remoteId/id.
@@ -126,9 +145,7 @@ const ListaPedidos = () => {
     }
 
     return [...dedup.values()].filter(p => {
-      if (!isAdmin) {
-        if (String(p.vendedorNombre || p.vendedor || '') !== String(vendedorActual?.nombre || '')) return false;
-      }
+      if (!esDelUsuario(p)) return false;
       const zonaPedido = String(p.zona || '');
       if (zona && zonaPedido !== zona) return false;
       const q = clienteQ.trim().toLowerCase();
@@ -139,9 +156,16 @@ const ListaPedidos = () => {
     }).sort((a, b) => (Number(b.createdAt || 0) - Number(a.createdAt || 0)));
   }, [pedidos, isAdmin, vendedorActual, zona, clienteQ, filtroFecha, filtroEstado]);
 
+  // AC-PEN-1: bloque "Pendientes" (no facturados de otras fechas), solo en la fecha de hoy y sin busqueda por cliente.
+  const pendientes = useMemo(() => {
+    if (filtroFecha !== getTodayStr() || clienteQ.trim()) return [];
+    const base = (pedidos || []).filter(p => esDelUsuario(p) && (!zona || String(p.zona || '') === zona));
+    return pedidosPendientesVisibles(base, getTodayStr());
+  }, [pedidos, filtroFecha, clienteQ, zona, isAdmin, vendedorActual]);
+
   const totalDia = filtrados
     .filter(isPedidoVisible)
-    .reduce((acc, p) => acc + (p.total || 0), 0);
+    .reduce((acc, p) => acc + totalACobrar(p), 0);
 
   const handleAsignarVendedor = async (p) => {
     const nombreVendedor = vendedorAsignById[p.id];
@@ -149,7 +173,13 @@ const ListaPedidos = () => {
     const vend = (vendedores || []).find(v => v.nombre === nombreVendedor);
     setAsignandoId(p.id);
     try {
-      await guardarPedidoOnlineFirst({ ...p, vendedor: nombreVendedor, vendedorNombre: nombreVendedor, zona: vend?.zona || p.zona });
+      // T1-A-01: con la migracion 024 la reasignacion pasa por una RPC con el PIN del admin.
+      if (typeof reasignarVendedorAdmin === 'function' && vend) {
+        const pin = p.remoteId ? window.prompt('PIN de admin para asignar el vendedor del pedido') : '';
+        if (p.remoteId && !pin) { setAsignandoId(null); return; }
+        await reasignarVendedorAdmin({ pin, pedido: p, vendedor: vend });
+      } else if (typeof asignarVendedorOnlineFirst === 'function' && vend) await asignarVendedorOnlineFirst(p, vend);
+      else await guardarPedidoOnlineFirst({ ...p, vendedor: nombreVendedor, vendedorNombre: nombreVendedor, zona: vend?.zona || p.zona });
       await recargar();
       setVendedorAsignById(prev => { const n = { ...prev }; delete n[p.id]; return n; });
     } catch (e) {
@@ -157,6 +187,27 @@ const ListaPedidos = () => {
     } finally {
       setAsignandoId(null);
     }
+  };
+
+  // AC-EDP-3: el usuario decide cuando una edicion offline choco con otra del servidor.
+  const handleConflicto = async (p, eleccion) => {
+    try {
+      const r = await resolverConflictoEdicion(p, eleccion);
+      if (r && r.mode === 'conflicto') alert('El pedido volvió a cambiar en el servidor. Probá de nuevo.');
+      await recargar();
+    } catch (e) {
+      alert('No se pudo resolver: ' + (e?.message || String(e)));
+    }
+  };
+
+  const botonEditar = (p) => {
+    const chk = puedeEditarPedido(usuarioActual, p);
+    if (!onEditar || !chk.ok || chk.pantalla !== 'pedido') return null;
+    return (
+      <button className="btn btn-primary btn-sm" data-testid="btn-editar-pedido" style={{ width: 'auto', marginRight: 8 }} onClick={() => onEditar(p)}>
+        Editar
+      </button>
+    );
   };
 
   const handleCancelar = async (p) => {
@@ -283,7 +334,7 @@ const ListaPedidos = () => {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="pedido-total">${(p.total || 0).toLocaleString('es-AR')}</div>
+                  <div className="pedido-total">${totalACobrar(p).toLocaleString('es-AR')}</div>
                   <div className="pedido-fecha">{formatFecha(normalizePedidoFecha(p.fecha))}</div>
                 </div>
               </div>
@@ -297,7 +348,20 @@ const ListaPedidos = () => {
                 </span>
               </>}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                {/* AC-SEG2-3: pedido guardado en este dispositivo que todavia no subio. */}
+                {!p.synced && !p.borrado && (
+                  <span className="badge badge-pending" data-testid="badge-sin-subir">Sin subir</span>
+                )}
+                {esSinVendedor(p) && p.origen === 'web' && (
+                  <span className="badge badge-pending" data-testid="badge-sin-vendedor">Sin vendedor</span>
+                )}
+                {p.modificadoTrasArmado && (
+                  <span className="badge badge-pending" data-testid="badge-modificado">Modificado</span>
+                )}
+                {p.conflictoEdicion && (
+                  <span className="badge badge-cancelled" data-testid="badge-conflicto">Conflicto</span>
+                )}
                 <span className={`badge badge-${p.estado === 'pendiente' ? 'pending' : p.estado === 'facturado' ? 'facturado' : 'cancelled'}`}>
                   {p.estado}
                 </span>
@@ -319,9 +383,18 @@ const ListaPedidos = () => {
             {expandido === p.id && (
               <div className="card" style={{ marginTop: -8, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
                 <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Detalle del pedido</div>
-                {isAdmin && (p.vendedor === 'WEB' || p.vendedorNombre === 'WEB') && (
+                {p.conflictoEdicion && (
+                  <div role="alert" data-testid="aviso-conflicto" style={{ marginBottom: 12, background: '#fdecea', borderRadius: 8, padding: '10px 12px', fontSize: 13 }}>
+                    Este pedido se editó en otro dispositivo mientras vos lo editabas sin conexión. Elegí qué versión queda.
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} onClick={() => handleConflicto(p, 'servidor')}>Usar la del servidor</button>
+                      <button className="btn btn-primary btn-sm" style={{ width: 'auto' }} onClick={() => handleConflicto(p, 'mia')}>Subir la mía igual</button>
+                    </div>
+                  </div>
+                )}
+                {puedeAsignarVendedor(usuarioActual, p) && !p.borrado && (
                   <div style={{ marginBottom: 14, background: '#e8f0fe', borderRadius: 8, padding: '10px 12px' }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#1a56db', marginBottom: 8 }}>🌐 Pedido recibido por web — Asignar vendedor</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#1a56db', marginBottom: 8 }}>{(p.vendedor === 'WEB' || p.vendedorNombre === 'WEB') ? '🌐 Pedido recibido por web — Asignar vendedor' : 'Cambiar el vendedor del pedido (la comisión va al nuevo)'}</div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <select
                         className="input"
@@ -410,6 +483,7 @@ const ListaPedidos = () => {
                   </div>
                 ))}
                 <div className="divider" />
+                {botonEditar(p)}
                 {!p.borrado && (
                   <button
                     className="btn btn-danger btn-sm"
@@ -423,6 +497,27 @@ const ListaPedidos = () => {
             )}
           </div>
         ))
+      )}
+      {pendientes.length > 0 && (
+        <div data-testid="bloque-pendientes">
+          <h2 style={{ fontSize: 16, margin: '16px 0 8px' }}>Pendientes ({pendientes.length})</h2>
+          {pendientes.map(({ pedido: p, fecha, etiqueta, dias }) => (
+            <div key={p.remoteId ? `r:${p.remoteId}` : `l:${p.id}`} className="pedido-card" data-testid="pendiente-item">
+              <div className="pedido-header">
+                <div>
+                  <div className="pedido-cliente">{p.clienteNombre}</div>
+                  <div className="pedido-vendedor">{p.vendedorNombre || p.vendedor || 'Sin vendedor'}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="pedido-total">${totalACobrar(p).toLocaleString('es-AR')}</div>
+                  <div className="pedido-fecha">{fecha ? formatFecha(fecha) : 'Sin fecha'}</div>
+                  <div style={{ fontSize: 11, color: dias !== null && dias < 0 ? 'var(--danger)' : 'var(--text3)' }}>{etiqueta}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>{botonEditar(p)}</div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

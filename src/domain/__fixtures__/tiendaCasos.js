@@ -37,7 +37,8 @@ export const casosCarrito = [
   ['Dos Corazones x1 display = 16 u. / $14.400', [{ productoId: 'p-dos-corazones', cantidad: 1, modo: 'bulto' }], 14400, 16],
   ['Dos Corazones x3 displays = 48 u. / $43.200', [{ productoId: 'p-dos-corazones', cantidad: 3, modo: 'bulto' }], 43200, 48],
   ['Dos Corazones 32 u. sueltas (múltiplo) = $28.800', [{ productoId: 'p-dos-corazones', cantidad: 32, modo: 'unidad' }], 28800, 32],
-  ['Gaseosa con centavos 3 u. = $3.751,50', [{ productoId: 'p-gaseosa', cantidad: 3, modo: 'unidad' }], 3751.5, 3],
+  // ADAPTADO (AC-MUL-2): minimoVenta 2 => de a 2 u.; antes 3 u. = $3.751,50.
+  ['Gaseosa con centavos 4 u. = $5.002', [{ productoId: 'p-gaseosa', cantidad: 4, modo: 'unidad' }], 5002, 4],
   ['Renglones repetidos se suman', [
     { productoId: 'p-gaseosa', cantidad: 2, modo: 'unidad' },
     { productoId: 'p-gaseosa', cantidad: 1, modo: 'bulto' },

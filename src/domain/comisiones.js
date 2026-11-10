@@ -14,6 +14,7 @@
 import { texto, toNum, claveUnica, nuevoId, esFechaISO } from './validacion';
 import { isPedidoOculto, normalizePedidoFecha } from '../utils/pedidos';
 import { rubroDeRenglon, indexarTablaRubros, pctDe, vendedorIdPorNombre } from './rubros';
+import { esSinVendedor } from './vendedorPedido';
 
 // AC-COMR-13: versión del modelo de cálculo. Los servicios siempre mandan
 // MODELO_VIGENTE; sin `modelo` se usa 'cliente' (compatibilidad).
@@ -462,7 +463,26 @@ export const esCargaDeOtroVendedor = (pedido, cliente, vendedores, config = CONF
 // ---------------------------------------------------------------------------
 // Asignación (AC-COM-7, AC-COM-8)
 // ---------------------------------------------------------------------------
+// AC-ASV-2: pedido del carrito/tienda al que todavía nadie le asignó vendedor.
+export const esSinVendedorWeb = (pedido) => !!pedido && pedido.origen === 'web' && esSinVendedor(pedido);
+
+// AC-ASV-1: el pedido lo cargó alguien a nombre de otro vendedor (cargadoPor distinto del dueño).
+const cargadoANombreDeOtro = (pedido) => {
+  const dueno = vendedorQueCargo(pedido);
+  const quien = texto(pedido?.cargadoPor, MAX_NOMBRE);
+  return !!dueno && !!quien && claveUnica(dueno) !== claveUnica(quien);
+};
+
 export const asignacionPorDefecto = (pedido, cliente, vendedores) => {
+  // AC-ASV-2: sin vendedor no suma comisión a nadie (queda aviso (e)).
+  if (esSinVendedorWeb(pedido)) return { modo: 'sin_comision', partes: [] };
+  // AC-ASV-1: la comisión va al vendedor elegido al cargar (el dueño), si existe y está en la lista.
+  if (cargadoANombreDeOtro(pedido)) {
+    const dueno = buscarVendedor(vendedorQueCargo(pedido), vendedores);
+    if (dueno || !vendedores || vendedores.length === 0) {
+      return { modo: 'cargador', partes: [{ vendedor: dueno ? texto(dueno.nombre, MAX_NOMBRE) : vendedorQueCargo(pedido), pct: 100 }] };
+    }
+  }
   const ficha = fichaValida(cliente, vendedores);
   if (!ficha) return { modo: null, partes: [] };
   return { modo: 'ficha', partes: [{ vendedor: ficha, pct: 100 }] };
@@ -649,6 +669,7 @@ export const armarLinea = (pedido, { clientes, vendedores, asignacionBorrador = 
     aviso, // null | 'sin_pct' | 'total_invalido'
     cargaDeOtro, // aviso (a)
     sinVendedor: !ficha, // aviso (b)
+    ...(esSinVendedorWeb(pedido) ? { sinVendedorWeb: true } : {}), // aviso (e), AC-ASV-2
     asignacion,
     asignacionErrores,
     asignacionEditada: !!asignacionBorrador,
@@ -711,6 +732,7 @@ export const armarLineaRubro = (pedido, { clientes, vendedores, productosById, i
     aviso: totalCents === null || totalCents < 0 ? 'total_invalido' : null,
     cargaDeOtro,
     sinVendedor: !ficha,
+    ...(esSinVendedorWeb(pedido) ? { sinVendedorWeb: true } : {}),
     asignacion,
     asignacionErrores,
     asignacionEditada: !!asignacionBorrador,
@@ -834,15 +856,31 @@ export const calcularAjustesPendientes = (pedidos, cierres, config = CONFIG_COMI
   }
 
   const out = [];
-  for (const [pid, l] of base) {
+  for (const [pid, l0] of base) {
     const pedido = porRemoto.get(pid);
     if (!pedido) continue; // sin datos locales: no se puede saber si cambió
-    if (l.asignacion?.modo === 'sin_comision') continue;
+    let l = l0;
+    let motivoAsignado = false;
+    if (l.asignacion?.modo === 'sin_comision') {
+      // AC-ASV-2 / AC-COM-13: línea cerrada sin vendedor (pedido web) y ahora tiene uno => ajuste
+      // con TODO el pedido a nombre del vendedor asignado. Lo demás sin_comision no genera ajustes.
+      if (l.sinVendedorWeb !== true || esSinVendedor(pedido)) continue;
+      const nombre = vendedorQueCargo(pedido);
+      const vId = vendedorIdPorNombre(nombre, ctx?.vendedores);
+      l = {
+        ...l,
+        total: 0,
+        comision: 0,
+        asignacion: { modo: 'otro', partes: [{ vendedor: nombre, pct: 100 }] },
+        partes: l.modelo === 'rubro' ? [{ vendedor: nombre, vendedorId: vId, pct: 100, monto: 0, total: 0, desglose: [] }] : [],
+      };
+      motivoAsignado = true;
+    }
     const prev = ajustes.get(pid) || { sumaCents: 0, sumaTotalCents: 0, maxSeq: 0, partes: [] };
     const sigueContando = esFacturadoActivo(pedido) && estaEntregado(pedido, config);
     if (l.modelo === 'rubro') {
       const a = ajusteRubro(l, pedido, prev, sigueContando, ctx || {});
-      if (a) out.push(a);
+      if (a) out.push(motivoAsignado ? { ...a, motivo: 'vendedor_asignado' } : a);
       continue;
     }
     const cerradoCents = (aCentavos(l.comision) || 0) + prev.sumaCents;
@@ -868,7 +906,7 @@ export const calcularAjustesPendientes = (pedidos, cierres, config = CONFIG_COMI
       diferencia: deCentavos(dif),
       total: deCentavos(difTotal),
       comision: deCentavos(dif),
-      motivo: !sigueContando ? 'ya_no_cuenta' : 'total_cambio',
+      motivo: motivoAsignado ? 'vendedor_asignado' : (!sigueContando ? 'ya_no_cuenta' : 'total_cambio'),
       asignacion,
       partes: conPartes(dif, difTotal, asignacion),
     });
@@ -897,6 +935,7 @@ export const calcularAvisos = (lineas, noEntregados = [], sinSincronizar = []) =
   const cargadoPorOtro = ls.filter(l => l.cargaDeOtro && !l.asignacionConfirmada);
   const clienteSinVendedor = distintosPorCliente(ls.filter(l => l.sinVendedor && !l.asignacionConfirmada));
   const clienteSinPct = distintosPorCliente(ls.filter(l => l.aviso === 'sin_pct'));
+  const sinVendedorPedido = ls.filter(l => l.sinVendedorWeb === true);
   const montoInvalido = ls.filter(l => l.aviso === 'total_invalido');
   const contadores = {
     a: cargadoPorOtro.length,
@@ -907,6 +946,11 @@ export const calcularAvisos = (lineas, noEntregados = [], sinSincronizar = []) =
     montoInvalido: montoInvalido.length,
   };
   contadores.total = contadores.a + contadores.b + contadores.c + contadores.d + contadores.sinSincronizar + contadores.montoInvalido;
+  // AC-ASV-2: (e) pedidos web sin vendedor (no suman comisión a nadie). Solo aparece si hay alguno.
+  if (sinVendedorPedido.length > 0) {
+    contadores.e = sinVendedorPedido.length;
+    contadores.total += contadores.e;
+  }
   const rubro = avisosDeRubro(ls);
   // Los contadores nuevos solo aparecen si hay líneas del modelo 'rubro' (la
   // salida del modelo viejo queda idéntica).
@@ -917,7 +961,7 @@ export const calcularAvisos = (lineas, noEntregados = [], sinSincronizar = []) =
     contadores.renglonInvalido = rubro.renglonInvalido.length;
     contadores.total += contadores.c1 + contadores.c2 + contadores.vendedorSinId + contadores.renglonInvalido;
   }
-  return { cargadoPorOtro, clienteSinVendedor, clienteSinPct, montoInvalido, noEntregados: noEntregados || [], sinSincronizar: sinSincronizar || [], ...rubro, contadores };
+  return { cargadoPorOtro, sinVendedorPedido, clienteSinVendedor, clienteSinPct, montoInvalido, noEntregados: noEntregados || [], sinSincronizar: sinSincronizar || [], ...rubro, contadores };
 };
 
 // AC-COMR-11: (c1) vendedor sin % para un rubro (por vendedor + rubro, con
@@ -1129,6 +1173,7 @@ const lineaCongelada = (l) => ({
   clienteNombre: l.clienteNombre,
   cargadoPor: l.cargadoPor ?? null,
   vendedorFicha: l.vendedorFicha ?? null,
+  ...(l.sinVendedorWeb === true ? { sinVendedorWeb: true } : {}),
   total: l.total,
   pct: l.pct,
   comision: l.comision,

@@ -2,15 +2,19 @@
 // Solo Admin. Cada pedido que se factura genera una deuda del cliente por su
 // total; aca se van cancelando (total o parcial) al hacer el recuento de plata
 // del dia. Lo que no se cobra queda como saldo y se ve en la proxima boleta.
+import { esDeudaAnulada } from '../domain/deudas';
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { fuzzySearch, normalize } from '../utils/fuzzy';
 import { saldoDeuda } from '../utils/pedidos';
+import { MEDIOS_PAGO, ETIQUETA_MEDIO, MAX_REFERENCIA, validarCobro, totalesPorMedio } from '../domain/cobranza';
 import {
   cobrarDeuda, cobrarTodoDelCliente, deshacerCobros, crearDeudaManual, borrarDeuda,
 } from '../services/deudaRepository';
 
 const fmt = (n) => `$${Number(n || 0).toLocaleString('es-AR')}`;
+const fmtCents = (c) => fmt(Number(c || 0) / 100);
+const fmtFechaCobro = (ms) => { const d = new Date(Number(ms)); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('es-AR'); };
 
 const ORDENES = [
   { id: 'monto', label: 'Mayor deuda' },
@@ -30,6 +34,9 @@ const Deudas = () => {
   const [expandidoCliente, setExpandidoCliente] = useState(null);
   const [parcial, setParcial] = useState({ id: null, texto: '' });
   const [trabajando, setTrabajando] = useState(false);
+  // REQ-DMP (AC-DMP-1): cobro en curso. El medio de pago es OBLIGATORIO (no hay valor por defecto).
+  // { tipo: 'total' | 'parcial' | 'cliente', deuda?, cli?, monto?, medio: '', referencia: '', error? }
+  const [cobro, setCobro] = useState(null);
 
   const [mostrarForm, setMostrarForm] = useState(false);
   const [clienteQ, setClienteQ] = useState('');
@@ -40,6 +47,7 @@ const Deudas = () => {
   const deudasVisibles = useMemo(() => {
     const q = normalize(busqueda);
     return (deudas || []).filter(d => {
+      if (esDeudaAnulada(d)) return false; // AC-SEG2-1: las anuladas no se muestran
       if (verPagadas ? !d.pagada : d.pagada) return false;
       if (fechaFiltro && String(d.fecha || '') !== fechaFiltro) return false;
       return !q || normalize(d.clienteNombre || '').includes(q);
@@ -70,6 +78,15 @@ const Deudas = () => {
     return lista;
   }, [deudasVisibles, verPagadas, orden]);
 
+  // AC-DMP-1: totales cobrados por medio (deudas vigentes que pasan el filtro de busqueda y fecha).
+  const porMedio = useMemo(() => {
+    const q = normalize(busqueda);
+    return totalesPorMedio((deudas || []).filter(d =>
+      !esDeudaAnulada(d)
+      && (!fechaFiltro || String(d.fecha || '') === fechaFiltro)
+      && (!q || normalize(d.clienteNombre || '').includes(q))));
+  }, [deudas, busqueda, fechaFiltro]);
+
   const totalGeneral = porCliente.reduce((acc, c) => acc + c.total, 0);
   const clienteSugg = clienteQ.trim() ? fuzzySearch(clienteQ, clientes || [], 'nombre', 8) : [];
 
@@ -97,20 +114,33 @@ const Deudas = () => {
     }
   };
 
-  const cobrarTotal = (d) => ejecutar(() => cobrarDeuda(d, null, por));
+  // Los tres cobros (total, parcial, todo del cliente) abren el mismo modal: sin medio no se cobra.
+  const cobrarTotal = (d) => setCobro({ tipo: 'total', deuda: d, medio: '', referencia: '' });
 
   const cobrarParcial = (d) => {
     const n = parseFloat(String(parcial.texto).replace(',', '.'));
     if (isNaN(n) || n <= 0) return;
-    ejecutar(async () => {
-      await cobrarDeuda(d, n, por);
-      setParcial({ id: null, texto: '' });
-    });
+    setCobro({ tipo: 'parcial', deuda: d, monto: n, medio: '', referencia: '' });
   };
 
-  const cobrarCliente = (cli) => {
-    if (!window.confirm(`¿Marcar como pagado todo lo que debe "${cli.clienteNombre}" (${fmt(cli.total)})?`)) return;
-    ejecutar(() => cobrarTodoDelCliente(cli.ocurrencias, por));
+  const cobrarCliente = (cli) => setCobro({ tipo: 'cliente', cli, medio: '', referencia: '' });
+
+  const confirmarCobro = () => {
+    if (!cobro) return;
+    const { tipo, deuda, cli, monto: montoCobro, medio, referencia } = cobro;
+    // Para "todo del cliente" el monto lo fija cada deuda: se valida contra la primera con saldo (medio y referencia).
+    const base = tipo === 'cliente' ? cli.ocurrencias.find(d => saldoDeuda(d) > 0) : deuda;
+    const v = validarCobro({ medio, referencia, monto: tipo === 'parcial' ? montoCobro : undefined }, base || null);
+    if (!v.ok) { setCobro(c => ({ ...c, error: v.errores[0] })); return; }
+    const opciones = { medio: v.cobro.medio, referencia: v.cobro.referencia };
+    ejecutar(async () => {
+      if (tipo === 'cliente') await cobrarTodoDelCliente(cli.ocurrencias, por, opciones);
+      else if (tipo === 'parcial') {
+        await cobrarDeuda(deuda, montoCobro, por, opciones);
+        setParcial({ id: null, texto: '' });
+      } else await cobrarDeuda(deuda, null, por, opciones);
+      setCobro(null);
+    });
   };
 
   const eliminar = (d) => {
@@ -222,6 +252,71 @@ const Deudas = () => {
         </div>
       )}
 
+      {(porMedio.efectivo + porMedio.transferencia + porMedio.rendicion + porMedio.sinDato) > 0 && (
+        <div className="card" data-testid="totales-por-medio">
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Cobrado por medio de pago</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 13 }}>
+            <span>Efectivo: <b>{fmtCents(porMedio.efectivo)}</b></span>
+            <span>Transferencia: <b>{fmtCents(porMedio.transferencia)}</b></span>
+            {porMedio.rendicion > 0 && <span>Rendición: <b>{fmtCents(porMedio.rendicion)}</b></span>}
+            {porMedio.sinDato > 0 && <span>Sin dato: <b>{fmtCents(porMedio.sinDato)}</b></span>}
+          </div>
+        </div>
+      )}
+
+      {cobro && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Registrar cobro"
+          data-testid="modal-cobro"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 420, margin: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+              {cobro.tipo === 'cliente' ? 'Cobrar todo lo que debe' : cobro.tipo === 'parcial' ? 'Cobro parcial' : 'Cobrar total'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 12 }}>
+              {cobro.tipo === 'cliente'
+                ? `${cobro.cli.clienteNombre}: ${fmt(cobro.cli.total)}`
+                : `${cobro.deuda.clienteNombre}: ${fmt(cobro.tipo === 'parcial' ? Math.min(cobro.monto, saldoDeuda(cobro.deuda)) : saldoDeuda(cobro.deuda))}`}
+            </div>
+            <div className="input-label">Medio de pago (obligatorio)</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {MEDIOS_PAGO.map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  className={cobro.medio === m ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1 }}
+                  aria-pressed={cobro.medio === m}
+                  onClick={() => setCobro(c => ({ ...c, medio: m, error: null }))}
+                >
+                  {ETIQUETA_MEDIO[m]}
+                </button>
+              ))}
+            </div>
+            <label className="input-label" htmlFor="cobro-referencia">Referencia (opcional)</label>
+            <input
+              id="cobro-referencia"
+              className="input"
+              maxLength={MAX_REFERENCIA}
+              value={cobro.referencia}
+              onChange={e => setCobro(c => ({ ...c, referencia: e.target.value }))}
+              placeholder="Ej: n.º de transferencia o comprobante"
+              style={{ marginBottom: 10 }}
+            />
+            {cobro.error && <div role="alert" style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 8 }}>{cobro.error}</div>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-ghost" onClick={() => setCobro(null)} disabled={trabajando}>Cancelar</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={confirmarCobro} disabled={trabajando || !cobro.medio}>
+                {trabajando ? 'Guardando...' : 'Confirmar cobro'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {porCliente.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon" style={{ fontSize: 40 }}>✅</div>
@@ -283,6 +378,21 @@ const Deudas = () => {
                                 Cobrado {fmt(cobrado)} de {fmt(d.monto)}
                               </div>
                             )}
+                            {/* AC-DMP-1: historial de cobros con su medio ("Sin dato" para los anteriores a este cambio) */}
+                            {Array.isArray(d.cobros) && d.cobros.length > 0 ? (
+                              <div data-testid={`historial-${d.id}`} style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+                                {d.cobros.map(c => (
+                                  <div key={c.id}>
+                                    {fmtFechaCobro(c.at)} · {fmtCents(c.montoCents)} · {ETIQUETA_MEDIO[c.medio] || ETIQUETA_MEDIO.sinDato}
+                                    {c.referencia ? ` · Ref: ${c.referencia}` : ''}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : cobrado > 0 ? (
+                              <div data-testid={`historial-${d.id}`} style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+                                Cobrado {fmt(cobrado)} · {ETIQUETA_MEDIO.sinDato}
+                              </div>
+                            ) : null}
                           </div>
                           <div style={{ textAlign: 'right', flex: 'none' }}>
                             <div style={{ fontWeight: 700, fontSize: 14, color: d.pagada ? 'var(--success)' : 'var(--danger)' }}>

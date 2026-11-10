@@ -279,3 +279,10 @@ export const ingresoFromRemote = (r) => ({
   proveedorNombre: r.proveedor_nombre || '', fecha: r.fecha, usuario: r.usuario || '',
   items: Array.isArray(r.items) ? r.items : [], pendingSync: false,
 });
+
+// AC-SST2-1: etiqueta de un producto con stock 0 o negativo. Solo informa: nunca oculta ni bloquea.
+export const etiquetaSinStock = (disponible) => {
+  const n = typeof disponible === 'number' ? disponible : Number(disponible);
+  if (disponible === null || disponible === undefined || disponible === '' || !Number.isFinite(n)) return null;
+  return n <= 0 ? 'Sin stock — por recibir' : null;
+};

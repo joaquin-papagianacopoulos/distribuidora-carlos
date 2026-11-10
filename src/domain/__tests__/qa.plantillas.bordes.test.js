@@ -46,7 +46,7 @@ describe('AC-PLA-3 AC-PLA-7 round-trip con xlsx real y celdas tipadas', () => {
   });
 
   it('AC-PLA-3 productos: celda con formato % (0.1 mostrado como "10%") se interpreta como 10', () => {
-    const ws = XLSX.utils.aoa_to_sheet([LP, fila(LP, { 'Código': 'P1', 'Descripción': 'Pct', 'Costo final': 100, 'Descuento 1': 0.1 })]);
+    const ws = XLSX.utils.aoa_to_sheet([LP, fila(LP, { 'Código': 'P1', 'Descripción': 'Pct', 'Costo final': 100, 'Precio por unidad': 120, 'Descuento 1': 0.1 })]);
     ws[XLSX.utils.encode_cell({ r: 1, c: LP.indexOf('Descuento 1') })].z = '0%';
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'H');
@@ -82,14 +82,15 @@ describe('AC-PLA-3 AC-PLA-7 round-trip con xlsx real y celdas tipadas', () => {
   });
 });
 
+// ADAPTADO: 21 columnas, suma 'Escalas por bulto' (REQ-ESC)
 describe('AC-PLA-3 AC-PLA-4 encabezados con tildes, mayusculas y basura invisible', () => {
   it.each([
-    ['MAYUSCULAS con tilde', ['CÓDIGO', 'DESCRIPCIÓN', 'RUBRO', 'MARCA', 'PROVEEDOR', 'COSTO FINAL', 'DESCUENTO 1', 'DESCUENTO 2', '% GANANCIA', 'PRECIO POR UNIDAD', 'PRECIO POR UNIDAD LLEVANDO BULTO', 'PRECIO VENTA 2', 'BULTO X', 'SE VENDE POR', 'ETIQUETA DEL BULTO', 'MOSTRAR EN TIENDA', 'MÍNIMO VENTA', 'STOCK MÍNIMO', 'STOCK', 'GRUPO BULTO']],
-    ['minusculas sin tilde', ['codigo', 'descripcion', 'rubro', 'marca', 'proveedor', 'costo final', 'descuento 1', 'descuento 2', '% ganancia', 'precio por unidad', 'precio por unidad llevando bulto', 'precio venta 2', 'bulto x', 'se vende por', 'etiqueta del bulto', 'mostrar en tienda', 'minimo venta', 'stock minimo', 'stock', 'grupo bulto']],
-    ['espacios de mas y NBSP', ['  Código ', 'Descripción\u00A0', ' Rubro', 'Marca', 'Proveedor ', 'Costo  final', 'Descuento   1', 'Descuento 2', '%  Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo\u00A0venta', 'Stock mínimo', 'Stock', 'Grupo bulto']],
-    ['tildes descompuestas (NFD)', ['Co\u0301digo', 'Descripcio\u0301n', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mi\u0301nimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto']],
-    ['con BOM al principio', ['\uFEFFCódigo', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto']],
-  ])('AC-PLA-3 productos %s: las 20 columnas se mapean a su campo, sin ignoradas', (_n, headers) => {
+    ['MAYUSCULAS con tilde', ['CÓDIGO', 'DESCRIPCIÓN', 'RUBRO', 'MARCA', 'PROVEEDOR', 'COSTO FINAL', 'DESCUENTO 1', 'DESCUENTO 2', '% GANANCIA', 'PRECIO POR UNIDAD', 'PRECIO POR UNIDAD LLEVANDO BULTO', 'PRECIO VENTA 2', 'BULTO X', 'SE VENDE POR', 'ETIQUETA DEL BULTO', 'MOSTRAR EN TIENDA', 'MÍNIMO VENTA', 'STOCK MÍNIMO', 'STOCK', 'GRUPO BULTO', 'ESCALAS POR BULTO']],
+    ['minusculas sin tilde', ['codigo', 'descripcion', 'rubro', 'marca', 'proveedor', 'costo final', 'descuento 1', 'descuento 2', '% ganancia', 'precio por unidad', 'precio por unidad llevando bulto', 'precio venta 2', 'bulto x', 'se vende por', 'etiqueta del bulto', 'mostrar en tienda', 'minimo venta', 'stock minimo', 'stock', 'grupo bulto', 'escalas por bulto']],
+    ['espacios de mas y NBSP', ['  Código ', 'Descripción\u00A0', ' Rubro', 'Marca', 'Proveedor ', 'Costo  final', 'Descuento   1', 'Descuento 2', '%  Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo\u00A0venta', 'Stock mínimo', 'Stock', 'Grupo bulto', 'Escalas por bulto']],
+    ['tildes descompuestas (NFD)', ['Co\u0301digo', 'Descripcio\u0301n', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mi\u0301nimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto', 'Escalas por bulto']],
+    ['con BOM al principio', ['\uFEFFCódigo', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2', '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto', 'Escalas por bulto']],
+  ])('AC-PLA-3 productos %s: las 21 columnas se mapean a su campo, sin ignoradas', (_n, headers) => {
     const m = mapearEncabezados(headers, 'productos');
     COLUMNAS_PLANTILLA.productos.forEach((c, i) => expect(m.indices[c.key]).toBe(i));
     expect(m.ignoradas).toEqual([]);

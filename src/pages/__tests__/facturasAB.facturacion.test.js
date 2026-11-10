@@ -82,12 +82,15 @@ afterEach(async () => {
 });
 
 describe('AC-FAB-1 Facturación: tipo de factura por pedido', () => {
-  it('AC-FAB-1 el admin ve el selector con la sugerencia (RI => A) y confirma sin tocar stock', async () => {
+  // ADAPTADO (AC-RTO-1): el default sin marca es "Sin factura" (ya no la sugerencia por IVA).
+  it('AC-FAB-1 el admin ve el selector con "Sin factura" por defecto y confirma sin tocar stock', async () => {
     setApp();
     await render();
-    expect(container.querySelector('[aria-label="Tipo de factura"]').value).toBe('A');
+    expect(container.querySelector('[aria-label="Tipo de factura"]').value).toBe('ninguna');
+    // AC-RTO-1: sin texto de sugerencia por IVA junto a "Sin factura".
+    expect(container.textContent).not.toMatch(/sugerido por el IVA/i);
     await click(boton('Confirmar'));
-    expect(guardarTiposFacturaLocal).toHaveBeenCalledWith([7], 'A');
+    expect(guardarTiposFacturaLocal).toHaveBeenCalledWith([7], 'ninguna');
     expect(mockApp.recargar).toHaveBeenCalled();
     expect(mockStock.aplicarStockPedido).not.toHaveBeenCalled();
     expect(guardarPedidoOnlineFirst).not.toHaveBeenCalled();

@@ -125,3 +125,12 @@ describe('AC-GBU-3 factura en una sola linea', () => {
     expect(r.subtotal).toBe(5400);
   });
 });
+
+describe('AC-GBU-4 dominio sin romper pedidos viejos', () => {
+  it('AC-GBU-4 un producto sin grupo no se combina y sus totales no cambian', () => {
+    const suelto = conCant({ id: 9, nombre: 'Suelto', precio: 500, bultoX: 6, ventaPor: 'unidad' }, 3);
+    expect(claveGrupoBulto(undefined)).toBe(claveGrupoBulto(''));
+    const filas = filasBoleta([suelto]);
+    expect(totalFilasBoleta(filas)).toBe(1500);
+  });
+});

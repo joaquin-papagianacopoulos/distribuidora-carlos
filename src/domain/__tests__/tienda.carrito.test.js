@@ -38,7 +38,8 @@ describe('tienda carrito (AC-TIE-9, AC-TIE-10, AC-TIE-11, AC-TIE-15)', () => {
     expect(unidadesIniciales(gaseosa)).toBe(2);
     expect(pasoUnidades(dosCorazones)).toBe(16);
     expect(pasoUnidades(gaseosa, 'bulto')).toBe(6);
-    expect(pasoUnidades(gaseosa, 'unidad')).toBe(1);
+    // ADAPTADO (AC-MUL-2): minimoVenta 2 => por debajo del bulto el paso es el mínimo (antes 1).
+    expect(pasoUnidades(gaseosa, 'unidad')).toBe(2);
   });
 
   it('AC-TIE-9 minimoVenta, múltiplos y sin stock', () => {

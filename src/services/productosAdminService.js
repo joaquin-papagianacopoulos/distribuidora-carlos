@@ -9,6 +9,7 @@ import { syncProductos } from '../sync/syncService';
 import { subirCambiosPrecio, sondearMigracion010 } from './cambiosPrecioService';
 import { bajarCostosProductos } from './costosProductosService';
 import { getUsuarioSesion } from './sesion';
+import { subirAjustesConPin } from './stockService';
 
 const MSG_SIN_ID_ADMIN = 'Tu usuario de admin todavia no esta sincronizado con el servidor: sincroniza y volve a intentar.';
 const MSG_SOLO_ADMIN = 'Solo un admin puede subir o borrar productos.';
@@ -68,10 +69,16 @@ export const subirProductosConPin = async (pin) => {
     // S-012-01: con el PIN ya validado se bajan los costos (la anon key no los lee desde la 013).
     // Sin la 013 o con error no pasa nada: se conservan los costos locales.
     const costos = r.ok ? await bajarCostosProductos(cr.cred) : null;
+    // AC-SEG2-5: los ajustes de stock que el servidor no acepta de anon suben con el mismo PIN.
+    let ajustes = null;
+    if (r.ok) {
+      try { ajustes = await subirAjustesConPin(cr.cred); } catch (e) { console.warn('No se pudieron subir los ajustes de stock:', e?.message || String(e)); }
+    }
     return {
       ...r,
       cambiosPrecio: cambios,
       costosBajados: costos?.ok ? costos.actualizados : 0,
+      ...(ajustes ? { ajustesStock: ajustes } : {}),
       ...(falta010 ? { avisoMigracion: MSG_FALTA_010 } : {}),
       pendientes: r.ok ? await contarProductosPendientes() : r.pendientes,
     };

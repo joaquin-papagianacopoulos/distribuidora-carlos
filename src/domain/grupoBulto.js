@@ -5,7 +5,7 @@
 // item.cantidad sigue siendo SIEMPRE en unidades y por producto (stock, armado y
 // comisiones no cambian).
 import { normalizarBultoX, normalizarCantidad } from './bultos';
-import { precioAplicadoRenglon } from './precios';
+import { precioAplicadoRenglon, etiquetaEscala } from './precios';
 
 export const MAX_GRUPO_BULTO = 40;
 
@@ -77,7 +77,8 @@ export function progresoGrupoBulto(item, items) {
   if (bx === null) return null;
   const total = totalesGrupoBulto(items).get(k) || 0;
   const nombre = normalizarGrupoBulto(item.grupoBulto);
-  if (total >= bx) return { nombre, total, bultoX: bx, llego: true, texto: `${nombre}: ${total} u. combinadas, precio de bulto` };
+  const esc = etiquetaEscala(item);
+  if (total >= bx) return { nombre, total, bultoX: bx, llego: true, texto: `${nombre}: ${total} u. combinadas, precio de bulto${esc ? ` · ${esc}` : ''}` };
   return { nombre, total, bultoX: bx, llego: false, texto: `${nombre}: ${total} de ${bx} para precio de bulto` };
 }
 
@@ -113,7 +114,10 @@ export function lineaGrupoBulto(rengs, { peso, sufijoPrecioBulto = '' } = {}) {
   const precios = new Set(lista.map(i => Math.round(Number(i.precio) * 100)));
   const precioUnit = precios.size === 1 ? Number(lista[0]?.precio) : null;
   const porBulto = lista.some(i => i.precioPorBulto === true);
-  const marca = porBulto ? sufijoPrecioBulto : '';
+  // AC-ESC-3: si todos los renglones tienen la misma escala se muestra (ASCII, va al PDF).
+  const escalas = new Set(lista.map(i => (Number(i.escalaPct) > 0 ? `${i.escalaDesde}|${i.escalaPct}` : '')));
+  const etiqueta = escalas.size === 1 ? etiquetaEscala(lista[0], { pdf: true }) : null;
+  const marca = (porBulto ? sufijoPrecioBulto : '') + (etiqueta ? ` (${etiqueta})` : '');
   if (bx !== null && Number.isInteger(total) && total >= bx) {
     const bultos = Math.floor(total / bx);
     const sueltas = total - bultos * bx;

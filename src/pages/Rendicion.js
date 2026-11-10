@@ -3,6 +3,7 @@
 // anulacion con motivo (solo online). Toda la logica esta en src/domain/rendicion.js y la
 // orquestacion en src/services/rendicionService.js. El PIN vive solo en este estado: no se guarda
 // ni se loguea.
+import { totalACobrar } from '../domain/redondeo';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../hooks/useAppContext';
 import { esAdmin } from '../domain/permisos';
@@ -187,7 +188,7 @@ const Rendicion = () => {
           {candidatos.map(p => (
             <button key={p.id} className="btn btn-ghost btn-sm" data-testid={`pedido-${p.id}`} style={{ width: '100%', marginTop: 6, textAlign: 'left' }}
               onClick={() => { setPedidoSel(p); setForm(formVacio()); setErrores({}); }}>
-              {p.clienteNombre} · Pedido {p.remoteId ?? `${p.id} (sin sincronizar)`} · {fechaCorta(p.fecha)} · ${Number(p.total || 0).toLocaleString('es-AR')}
+              {p.clienteNombre} · Pedido {p.remoteId ?? `${p.id} (sin sincronizar)`} · {fechaCorta(p.fecha)} · ${totalACobrar(p).toLocaleString('es-AR')}
             </button>
           ))}
           {candidatos.length === 0 && (

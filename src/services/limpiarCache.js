@@ -3,6 +3,7 @@
 // todo desde Supabase. Borra la base local (IndexedDB), las caches del navegador, los
 // service workers y los cursores de sync. Conserva el usuario elegido y la zona.
 import { cerrarDB } from '../db';
+import { evaluarBorradoCache } from './respaldoService';
 
 const DB_NAME = 'distribuidoraDB';
 const CLAVES_A_CONSERVAR = ['vendedorActual', 'zonaActiva'];
@@ -44,7 +45,16 @@ const borrarStorage = () => {
   try { sessionStorage.clear(); } catch { /* sin storage */ }
 };
 
-export const limpiarCacheLocal = async () => {
+// AC-SEG2-2: no borra si hay algo sin subir o no hay conexion, salvo { forzado: true } (el llamador ya
+// exporto el respaldo y pidio la confirmacion escrita). Devuelve { bloqueado, motivo, total, porStore }.
+export const limpiarCacheLocal = async ({ forzado = false } = {}) => {
+  if (!forzado) {
+    let ev;
+    // AC-SEG2-2: si no se puede leer la base no se sabe que hay pendiente: NO se borra (falla cerrado).
+    try { ev = await evaluarBorradoCache(); } catch { return { dbOk: false, bloqueado: true, motivo: 'no_se_pudo_leer' }; }
+    if (!ev) return { dbOk: false, bloqueado: true, motivo: 'no_se_pudo_leer' };
+    if (!ev.permitir) return { dbOk: false, bloqueado: true, motivo: ev.motivo, total: ev.total, porStore: ev.porStore };
+  }
   await borrarCachesNavegador();
   borrarStorage();
   const dbOk = await borrarIndexedDB();

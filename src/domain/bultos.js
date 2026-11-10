@@ -6,7 +6,7 @@ import { toInt } from './validacion';
 import { MAX_CANTIDAD } from './stock';
 import { rubroDeProducto } from './rubros';
 import { cantidadInicialConMinimo } from './minimos';
-import { precioAplicado } from './precios';
+import { precioAplicado, normalizarEscalasBulto } from './precios';
 import { normalizarGrupoBulto } from './grupoBulto';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
@@ -70,15 +70,21 @@ export function renglonNuevo(producto, extra = {}) {
   const cantidad = cantidadInicialConMinimo(p);
   // AC-PBU-3: se congelan precio por unidad y precio por bulto; el aplicado depende de la cantidad.
   const conBulto = Number(p.precioBulto) > 0 && normalizarBultoX(p.bultoX) !== null;
-  const aplicado = precioAplicado(p, cantidad);
+  // AC-ESC-2: las escalas solo valen con bulto usable; se congelan aunque no haya precioBulto.
+  const escalas = normalizarBultoX(p.bultoX) !== null ? normalizarEscalasBulto(p.escalasBulto) : [];
+  const aplicado = precioAplicado({ ...p, escalasBulto: escalas }, cantidad);
+  const congela = conBulto || escalas.length > 0;
   // AC-GBU-2: se congela el grupo del producto EN ESE MOMENTO (como el rubro).
   const grupoBulto = normalizarGrupoBulto(p.grupoBulto);
   return {
     productoId: p.id,
     nombre: p.nombre,
-    precio: conBulto ? aplicado.precio : p.precio,
+    precio: congela ? aplicado.precio : p.precio,
     precioOriginal: p.precio,
-    ...(conBulto ? { precioBultoOriginal: Number(p.precioBulto), precioBultoX: normalizarBultoX(p.bultoX), precioPorBulto: aplicado.porBulto } : {}),
+    ...(conBulto ? { precioBultoOriginal: Number(p.precioBulto), precioPorBulto: aplicado.porBulto } : {}),
+    ...(congela ? { precioBultoX: normalizarBultoX(p.bultoX) } : {}),
+    ...(escalas.length > 0 ? { escalasBulto: escalas } : {}),
+    ...(aplicado.escala ? { escalaDesde: aplicado.escala.desde, escalaPct: aplicado.escala.pct } : {}),
     cantidad,
     ...(rubro ? { rubro } : {}),
     ...(grupoBulto ? { grupoBulto } : {}),
@@ -119,7 +125,27 @@ export function restarBulto(cantidad, bultoX, { minimo = 0 } = {}) {
   if (bx === null) return c;
   const piso = Number.isFinite(Number(minimo)) && Number(minimo) > 0 ? Number(minimo) : 0;
   if (c <= piso) return c;
+  // AC-CBU-2 (BUG-1): con 0 bultos (solo sueltas) "− Bulto" no hace nada: no borra las sueltas.
+  if (c < bx) return c;
   return Math.max(piso, c - bx);
+}
+
+// AC-CBU-2/3: parte una cantidad en unidades en { bultos, sueltas } (los pedidos viejos
+// se muestran partidos solos). null si no hay bulto o la cantidad no es un entero >= 0.
+export function partirBultos(cantidad, bultoX) {
+  const bx = normalizarBultoX(bultoX);
+  if (bx === null || typeof cantidad !== 'number' || !Number.isInteger(cantidad) || cantidad < 0) return null;
+  const bultos = Math.floor(cantidad / bx);
+  return { bultos, sueltas: cantidad - bultos * bx };
+}
+
+// AC-CBU-2: inverso de partirBultos. null si algo no es entero >= 0, no hay bulto o supera MAX_CANTIDAD.
+export function juntarBultos(bultos, sueltas, bultoX) {
+  const bx = normalizarBultoX(bultoX);
+  const ok = (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+  if (bx === null || !ok(bultos) || !ok(sueltas)) return null;
+  const total = bultos * bx + sueltas;
+  return total > MAX_CANTIDAD ? null : total;
 }
 
 // AC-BUL-4: desglose con el bultoX ACTUAL del producto.

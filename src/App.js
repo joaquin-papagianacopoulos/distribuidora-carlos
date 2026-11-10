@@ -23,6 +23,8 @@ import { contarStockBajo } from './domain/stockBajo';
 import SelectorVendedor from './components/SelectorVendedor';
 import { useSync } from './sync/useSync';
 import { limpiarCacheLocal } from './services/limpiarCache';
+import { evaluarBorradoCache, exportarRespaldo } from './services/respaldoService';
+import { textoPendientes, confirmacionEscritaValida } from './domain/respaldo';
 import { esAdmin, esArmador } from './domain/permisos';
 import './App.css';
 
@@ -52,6 +54,8 @@ const AppContent = () => {
   const { vendedorActual, online, faltantes, pedidos, seleccionarVendedor, productos, stockMap } = useApp();
   // REQ-CPR (AC-CPR-4): al marcar recibido un pedido al proveedor se abre Stock -> Ingreso precargado.
   const [ingresoPrecargado, setIngresoPrecargado] = useState(null);
+  // REQ-EDP (AC-EDP-1): id local del pedido que se esta editando en la pestana Nuevo pedido (null = pedido nuevo).
+  const [pedidoAEditar, setPedidoAEditar] = useState(null);
   const { syncing, lastSync, error, syncNote, syncNow } = useSync();
   // S-COM-11: permiso entero validado (src/domain/permisos). Un "1" en texto o
   // cualquier valor raro no habilita admin/armador: cae en las pestañas de vendedor.
@@ -102,12 +106,32 @@ const AppContent = () => {
     seleccionarVendedor(null);
   };
 
+  // AC-SEG2-2 / AC-SEG2-6: con todo subido y conexion alcanza una confirmacion. Si hay algo sin
+  // subir (en cualquier store) o no hay conexion, no se borra: se dice que falta y solo se puede
+  // seguir exportando antes un respaldo y escribiendo BORRAR.
   const borrarCache = async () => {
-    const aviso = online
-      ? 'Se borran los datos guardados en este dispositivo y se vuelven a bajar del servidor.\n\nSi hay pedidos sin subir, se pierden: primero tocá "Sync".\n\n¿Borrar caché?'
-      : 'Estás sin conexión: si borrás la caché no vas a poder volver a bajar los datos hasta tener internet.\n\n¿Borrar igual?';
-    if (!window.confirm(aviso)) return;
-    await limpiarCacheLocal();
+    let ev = null;
+    try { ev = await evaluarBorradoCache(); } catch { ev = null; }
+    if (ev && ev.permitir) {
+      if (!window.confirm('Se borran los datos guardados en este dispositivo y se vuelven a bajar del servidor.\n\n¿Borrar caché?')) return;
+      const r = await limpiarCacheLocal();
+      if (r && r.bloqueado) { window.alert('No se pudo verificar qué falta subir, no se borró nada.'); return; }
+      window.location.reload();
+      return;
+    }
+    const nl = String.fromCharCode(10);
+    // ev == null: no se pudo leer la base, se trata como bloqueado (camino forzado con respaldo).
+    const detalle = !ev
+      ? 'No se pudo verificar si hay datos sin subir.'
+      : ev.motivo === 'pendientes'
+        ? `Hay datos sin subir: ${textoPendientes(ev.porStore)}.`
+        : 'Estás sin conexión: después de borrar no se pueden volver a bajar los datos hasta tener internet.';
+    if (!window.confirm(`${detalle}${nl}${nl}No se borra la caché. Si querés borrarla igual, primero se descarga un respaldo de todo lo que hay en este dispositivo.${nl}${nl}¿Descargar el respaldo y seguir?`)) return;
+    const exp = await exportarRespaldo({ esAdmin: !!isAdmin });
+    if (!exp.ok) { window.alert(`No se pudo armar el respaldo, no se borró nada: ${exp.mensaje || ''}`); return; }
+    const txt = window.prompt(`Se descargó ${exp.nombre}.${nl}Para borrar igual la caché escribí BORRAR:`);
+    if (!confirmacionEscritaValida(txt)) { window.alert('No se borró nada.'); return; }
+    await limpiarCacheLocal({ forzado: true });
     window.location.reload();
   };
 
@@ -206,7 +230,7 @@ const AppContent = () => {
           <button
             key={t.id}
             className={`nav-btn ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
+            onClick={() => { setPedidoAEditar(null); setTab(t.id); }}
           >
             <span className="nav-icon" style={{ position: 'relative' }}>
               {t.icon}
@@ -253,8 +277,8 @@ const AppContent = () => {
       </nav>
 
       <main className="app-main">
-        {tab === 'nuevo' && <NuevoPedido />}
-        {tab === 'lista' && <ListaPedidos />}
+        {tab === 'nuevo' && <NuevoPedido key={pedidoAEditar ?? 'nuevo'} pedidoEditarId={pedidoAEditar} onFinEdicion={() => { setPedidoAEditar(null); setTab('lista'); }} />}
+        {tab === 'lista' && <ListaPedidos onEditar={(p) => { setPedidoAEditar(p.id); setTab('nuevo'); }} />}
         {tab === 'armado' && <Armado />}
         {tab === 'facturacion' && <Facturacion />}
         {tab === 'stock' && isAdmin && <Stock precarga={ingresoPrecargado} onPrecargaUsada={() => setIngresoPrecargado(null)} />}

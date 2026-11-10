@@ -5,8 +5,9 @@ jest.mock('../../db', () => {
     getClientes: async () => mockLocal.clientes.map(c => ({ ...c })),
     getProductos: async () => mockLocal.productos.map(p => ({ ...p })),
     getVendedores: async () => [],
+    // AC-SEG2-7 (test adaptado): el sync pasa objetos { id, updatedAt } (tambien acepta ids).
     clearClientesPendingSync: async (ids) => {
-      const s = new Set(ids);
+      const s = new Set(ids.map(x => (x && typeof x === 'object' ? x.id : x)));
       mockLocal.clientes = mockLocal.clientes.map(c => (s.has(c.id) ? { ...c, pendingSync: false } : c));
     },
     clearProductosPendingSync: async (ids) => {
@@ -150,7 +151,7 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     expect(row).not.toHaveProperty('comision');
     // AC-CLI2-2: la provincia tampoco viaja (no pisa la columna en Supabase).
     expect(row).not.toHaveProperty('provincia');
-    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([7]);
+    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([{ id: 7 }]);
   });
 
   it('AC-CLI-5 si la columna no existe en Supabase reintenta solo con columnas legacy y no corta el sync', async () => {
@@ -260,7 +261,7 @@ describe('syncClientes / syncProductos con columnas nuevas', () => {
     mockSb.respuestas = [{ error: ERR_DUP }, { error: ERR_DUP }, { error: null }];
     await syncClientes();
     expect(mockSb.upserts.map(u => u.rows.map(r => r.id))).toEqual([[7, 8], [7], [8]]);
-    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([8]);
+    expect(db.clearClientesPendingSync).toHaveBeenCalledWith([{ id: 8 }]);
     const [c7, c8] = mockLocal.clientes;
     expect(c7).toMatchObject({ pendingSync: true, syncConflicto: expect.stringMatching(/repetido/i) });
     expect(c8).toMatchObject({ pendingSync: false, syncConflicto: null, extrasPendientes: false });

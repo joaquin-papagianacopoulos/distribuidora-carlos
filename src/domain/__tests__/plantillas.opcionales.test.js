@@ -28,7 +28,7 @@ describe('AC-PLA-3b campos opcionales de productos', () => {
   });
 
   test.each([[''], ['   '], ['-'], ['–']])('AC-PLA-3b producto NUEVO con %j en los 5 opcionales: se crea con 0 y minimo 1', (v) => {
-    const rows = [LP, fila({ ...BASE, 'Descuento 1': v, 'Descuento 2': v, '% Ganancia': v, 'Precio venta 2': v, 'Mínimo venta': v })];
+    const rows = [LP, fila({ ...BASE, 'Descuento 1': v, 'Descuento 2': v, '% Ganancia': v, 'Precio venta 2': v, 'Mínimo venta': v, 'Precio por unidad': '100' })];
     const plan = planificarImportacion(rows, 'productos');
     expect(plan.entradas[0]).toMatchObject({ accion: 'crear', errores: [] });
     expect(plan.entradas[0].valor.producto).toMatchObject({ descuento1: 0, descuento2: 0, ganancia: 0, precioVenta2: 0, minimoVenta: 1, precio: 100 });
@@ -72,7 +72,7 @@ describe('AC-PLA-3b campos opcionales de productos', () => {
 
   test('AC-PLA-3b AC-PLA-7 round-trip xlsx: celdas vacias, "-" y "10%" en un libro real', () => {
     const rows = roundTrip([LP,
-      fila({ ...BASE, 'Descuento 1': '10%', 'Descuento 2': '-', '% Ganancia': '', 'Precio venta 2': '–', 'Mínimo venta': 0 }),
+      fila({ ...BASE, 'Descuento 1': '10%', 'Descuento 2': '-', '% Ganancia': '', 'Precio venta 2': '–', 'Mínimo venta': 0, 'Precio por unidad': 90 }),
       fila({ 'Código': 'E1', 'Descuento 1': '-', 'Mínimo venta': '' }),
     ]);
     const plan = planificarImportacion(rows, 'productos', { existentes: [EXISTENTE] });

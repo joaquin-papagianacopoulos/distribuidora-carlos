@@ -101,8 +101,9 @@ describe('REQ-BUL Nuevo Pedido', () => {
     setApp();
     sembrarBorrador(VENDEDOR, 5);
     await render();
+// ADAPTADO (AC-CBU-2 BUG-1): con 0 bultos (5 sueltas) "− Bulto" no hace nada: las sueltas quedan (antes 1).
     await click(menos());
-    expect(cantidadInput().value).toBe('1');
+    expect(cantidadInput().value).toBe('5');
     expect(container.textContent).toContain('Coca 500');
     expect(menos().disabled).toBe(true);
   });

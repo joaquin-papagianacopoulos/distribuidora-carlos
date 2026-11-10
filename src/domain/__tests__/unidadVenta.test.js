@@ -159,7 +159,8 @@ describe('AC-VTA-3 cantidad inicial, paso y avisos', () => {
   it('AC-VTA-3 solo el admin en Facturacion puede guardar no multiplos', () => {
     expect(puedeGuardarNoMultiplo(1, 'facturacion')).toBe(true);
     expect(puedeGuardarNoMultiplo(1, 'pedido')).toBe(false);
-    expect(puedeGuardarNoMultiplo(1, 'armado')).toBe(false);
+    // ADAPTADO (AC-MIN2-1): el admin también puede en Armado (antes false).
+    expect(puedeGuardarNoMultiplo(1, 'armado')).toBe(true);
     expect(puedeGuardarNoMultiplo(2, 'facturacion')).toBe(false);
     expect(puedeGuardarNoMultiplo(3, 'facturacion')).toBe(false);
     expect(puedeGuardarNoMultiplo(undefined, 'facturacion')).toBe(false);
@@ -171,7 +172,9 @@ describe('AC-VTA-3 cantidad inicial, paso y avisos', () => {
     expect(vend).toMatchObject({ ok: false, bloquea: true });
     expect(vend.avisos[0]).toMatchObject({ productoId: 'dc', cantidad: 20, bultoX: 16 });
     expect(validarMultiplosItems(items, byId, { permiso: 1, pantalla: 'facturacion' })).toMatchObject({ ok: false, bloquea: false });
-    expect(validarMultiplosItems(items, byId, { permiso: 1, pantalla: 'armado' }).bloquea).toBe(true);
+    // ADAPTADO (AC-MIN2-1): admin en Armado no bloquea; el armador sí.
+    expect(validarMultiplosItems(items, byId, { permiso: 1, pantalla: 'armado' }).bloquea).toBe(false);
+    expect(validarMultiplosItems(items, byId, { permiso: 3, pantalla: 'armado' }).bloquea).toBe(true);
     // pedido viejo: la cantidad no cambio => no se valida
     expect(validarMultiplosItems(items, byId, { permiso: 2, pantalla: 'pedido', previos: [{ productoId: 'dc', cantidad: 20 }] }).ok).toBe(true);
     // producto desconocido o items invalidos no rompen

@@ -5,6 +5,7 @@ import { resolverMarca, normalizarMarca } from './marcas';
 import { avisoSinStock } from './stock';
 import { minimoEfectivo } from './minimos';
 import { normalizarGrupoBulto } from './grupoBulto';
+import { validarEscalasBulto, normalizarEscalasBulto } from './precios';
 import { validarUnidadVenta, VENTA_POR, BULTO_NOMBRES, ventaPorEfectivo, normalizarBultoNombre, parsearBooleano } from './unidadVenta';
 
 export const CAMPOS_PRODUCTO = [
@@ -35,6 +36,8 @@ export const CAMPOS_PRODUCTO = [
   // AC-GBU-1: productos con el mismo grupo (ej. "Prime") se combinan para llegar al bulto.
   // Va al final para no correr las columnas de las plantillas Excel ya armadas.
   { key: 'grupoBulto', label: 'Grupo bulto' },
+  // AC-ESC-1: hasta 3 escalas "desde N bultos, D % de descuento". Tambien al final.
+  { key: 'escalasBulto', label: 'Escalas por bulto', tipo: 'escalas' },
 ];
 
 // AC-PROD-1: costoNeto = costo × (1-d1) × (1-d2); precio1 = costoNeto × (1+ganancia).
@@ -100,6 +103,14 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
     errores.precio = 'Precio por unidad inválido';
   }
   p.precio = precioManual !== null && precioManual >= 0 ? redondear2(precioManual) : calculado;
+  // AC-PVC-2: con costo y sin precio ni ganancia > 0 no se guarda el costo como precio.
+  const avisos = {};
+  const costoNetoP = calcularPrecioVenta(p).costoNeto;
+  if (precioManual === null && costoNetoP > 0 && !(p.ganancia > 0) && !errores.precio) {
+    errores.precio = 'Falta el precio de venta o el % de ganancia';
+  } else if (precioManual !== null && precioManual >= 0 && costoNetoP > 0 && redondear2(precioManual) === costoNetoP) {
+    avisos.precio = 'El precio es igual al costo: no hay ganancia';
+  }
 
   // AC-PBU-1: vacío/0 = no hay precio por bulto. Si supera al unitario no se bloquea (solo aviso en el form).
   const pb = form.precioBulto === '' || form.precioBulto == null ? 0 : toNum(form.precioBulto);
@@ -135,6 +146,11 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   p.visibleTienda = uv.valor.visibleTienda;
   // AC-GBU-1: vacío = no se combina con otros productos.
   p.grupoBulto = normalizarGrupoBulto(form.grupoBulto);
+  // AC-ESC-1: escalas opcionales (estrictas: si hay error, no se guarda ninguna).
+  const esc = validarEscalasBulto(form.escalasBulto, p.bultoX);
+  if (esc.errores.length) errores.escalasBulto = esc.errores[0];
+  if (esc.avisos.length) avisos.escalasBulto = esc.avisos[0];
+  p.escalasBulto = esc.valor;
 
   let stock = null;
   if (form.stock !== '' && form.stock != null) {
@@ -142,7 +158,7 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
     if (stock === null || stock < 0 || stock > 1_000_000) { errores.stock = 'Stock: entero entre 0 y 1.000.000'; stock = null; }
   }
 
-  return { ok: Object.keys(errores).length === 0, errores, producto: p, stock };
+  return { ok: Object.keys(errores).length === 0, errores, avisos, producto: p, stock };
 };
 
 // S-012-01 (migracion 013): columnas internas de productos. No se leen con la anon key;
@@ -164,6 +180,8 @@ export const COLUMNAS_PRODUCTO_PUBLICAS = Object.freeze([
   'marca', 'venta_por', 'bulto_nombre', 'visible_tienda',
   'precio_bulto', 'stock_minimo',
   'grupo_bulto',
+  // AC-ESC-1 (migracion 026): la mas nueva; si falta, el fallback la descarta.
+  'escalas_bulto',
 ]);
 
 // Columnas de la 001 (base): sin estas no se puede bajar la lista de productos.
@@ -252,6 +270,8 @@ export const productoPreciosToRemote = (p = {}) => ({
   ...(p.stockMinimo !== undefined ? { stock_minimo: stockMinimoValido(p.stockMinimo) } : {}),
   // AC-GBU-1 (migración 022): igual que stock_minimo, si el producto nunca tuvo el dato no viaja.
   ...(p.grupoBulto !== undefined ? { grupo_bulto: normalizarGrupoBulto(p.grupoBulto) || null } : {}),
+  // AC-ESC-1 (migracion 026): array normalizado, o null si no hay escalas. Sin el dato, no viaja.
+  ...(p.escalasBulto !== undefined ? { escalas_bulto: normalizarEscalasBulto(p.escalasBulto).length ? normalizarEscalasBulto(p.escalasBulto) : null } : {}),
 });
 
 // AC-VTA-5: columnas de la migración 006 (aparte de las de la 001 para poder escalonar el sync).
@@ -287,6 +307,8 @@ export const productoExtraFromRemote = (r = {}, local = {}) => {
     stockMinimo: stockMinimoValido(pick('stock_minimo', 'stockMinimo', null)),
     // AC-GBU-1: columna ausente (sin 022) => valor local.
     grupoBulto: normalizarGrupoBulto(pick('grupo_bulto', 'grupoBulto', '')),
+    // AC-ESC-1: columna ausente (sin 026) => valor local; null => sin escalas.
+    escalasBulto: normalizarEscalasBulto(pick('escalas_bulto', 'escalasBulto', [])),
     // AC-VTA-5: columna ausente (sin 006) => valor local => default derivado.
     ventaPor: pick('venta_por', 'ventaPor', undefined),
     bultoNombre: normalizarBultoNombre(pick('bulto_nombre', 'bultoNombre', 'Bulto')),

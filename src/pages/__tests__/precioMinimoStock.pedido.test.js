@@ -73,7 +73,8 @@ describe('AC-PBU-3 Nuevo pedido: precio llevando bulto', () => {
     await click(botonMas()); // 12 u. = 1 bulto
     expect(precioInput().value).toBe('8');
     expect(container.querySelector('[data-testid="precio-por-bulto"]')).not.toBeNull();
-    await click(botonMenos()); // 11 u.
+    // ADAPTADO (AC-CBU-2): el − de sueltas ya no rompe un bulto; se baja con "− Bulto" (12 -> 1 u.).
+    await click(container.querySelector('[data-testid="bulto-menos"]'));
     expect(precioInput().value).toBe('10');
     expect(container.querySelector('[data-testid="precio-por-bulto"]')).toBeNull();
   });

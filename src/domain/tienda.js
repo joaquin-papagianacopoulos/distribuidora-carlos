@@ -6,8 +6,8 @@
 import { normalizarBultoX } from './bultos';
 import { MAX_CANTIDAD } from './stock';
 import { ventaPorEfectivo, normalizarBultoNombre, bultosDeUnidades } from './unidadVenta';
-import { precioAplicado } from './precios';
-import { minimoEfectivo, cantidadInicialConMinimo } from './minimos';
+import { precioAplicado, normalizarEscalasBulto } from './precios';
+import { minimoEfectivo, cantidadInicialConMinimo, pasoMinimo, esCantidadValidaMinimo, mensajeMultiploMinimo } from './minimos';
 import { texto, validarCuit, formatearCuit, soloDigitos } from './validacion';
 import { PROVINCIAS } from './clientes';
 import { direccionExacta, mensajeDireccion } from './direccion';
@@ -96,7 +96,8 @@ export function pasoUnidades(prod, modo) {
   const vp = ventaPorEfectivo(prod);
   if (vp === 'bulto' && bx) return bx;
   if (vp === 'ambos' && modo === 'bulto' && bx) return bx;
-  return 1;
+  // AC-MUL-2: por debajo del bulto el paso es el mínimo de venta (múltiplos del mínimo).
+  return pasoMinimo(prod);
 }
 
 export function validarRenglon(linea, prod, cfg = {}) {
@@ -110,6 +111,8 @@ export function validarRenglon(linea, prod, cfg = {}) {
   if (ventaPorEfectivo(prod) === 'bulto' && bx !== null && u % bx !== 0) {
     errores.push(`Se vende por ${normalizarBultoNombre(prod.bultoNombre)} de ${bx} u.`);
   }
+  // AC-MUL-2: múltiplos del mínimo (el servidor valida lo mismo: tienda_cantidad_valida, migración 024).
+  if (errores.length === 0 && !esCantidadValidaMinimo(u, prod)) errores.push(mensajeMultiploMinimo(pasoMinimo(prod)));
   const tope = Number.isFinite(cfg.maxUnidadesRenglon) ? cfg.maxUnidadesRenglon : MAX_CANTIDAD;
   if (u > tope) errores.push(`Máximo ${tope} u. por producto`);
   if (!prod.disponible && !cfg.permitirSinStock) errores.push('Sin stock');
@@ -145,7 +148,7 @@ export function calcularCarrito(lineas, catalogoById, cfg = {}, hoyISO = '') {
     for (const e of v.errores) errores.push({ productoId: id, mensaje: e });
     const { precio: vigente } = precioVigente(prod, prod.ofertas || [], hoyISO);
     // AC-PBU-4: mismo precio que el servidor; con oferta y bulto se cobra el menor.
-    const precio = vigente === null ? null : precioAplicado({ precio: vigente, precioBulto: prod.precioBulto, bultoX: prod.bultoX }, unidades).precio;
+    const precio = vigente === null ? null : precioAplicado({ precio: vigente, precioBulto: prod.precioBulto, bultoX: prod.bultoX, escalasBulto: prod.escalasBulto }, unidades).precio;
     const pc = aCentavos(precio);
     if (pc === null || pc <= 0) { errores.push({ productoId: id, mensaje: 'Producto sin precio' }); continue; }
     const subC = pc * unidades;
@@ -195,7 +198,7 @@ export function textoBulto(prod) {
 // Sirve de precioVisto y de subtotal en la ficha/carrito.
 export function precioUnitarioTienda(prod, unidades) {
   if (!prod) return null;
-  const base = precioAplicado({ precio: prod.precio, precioBulto: prod.precioBulto, bultoX: prod.bultoX }, unidades).precio;
+  const base = precioAplicado({ precio: prod.precio, precioBulto: prod.precioBulto, bultoX: prod.bultoX, escalasBulto: prod.escalasBulto }, unidades).precio;
   return aCentavos(base) === null ? prod.precio : base;
 }
 
@@ -206,6 +209,15 @@ export function textoPrecioBulto(prod) {
   const p = aCentavos(Number(prod.precio));
   if (pb === null || pb <= 0 || p === null || pb >= p) return null;
   return `Llevando el ${normalizarBultoNombre(prod.bultoNombre).toLowerCase()}: ${formatearPesos(deCentavos(pb))} c/u`;
+}
+
+// AC-ESC-3: "Llevando 5 displays: 8 % menos" (una frase por escala, la tienda no la aplica sola al mostrar).
+export function textoEscalasTienda(prod) {
+  if (!prod || normalizarBultoX(prod.bultoX) === null) return null;
+  const esc = normalizarEscalasBulto(prod.escalasBulto);
+  if (esc.length === 0) return null;
+  const nombre = normalizarBultoNombre(prod.bultoNombre).toLowerCase();
+  return esc.map(e => `Llevando ${e.desde} ${nombre}s: ${String(e.pct).replace('.', ',')} % menos`).join(' · ');
 }
 
 // Precio de un bulto completo con la misma regla que cobra el servidor (AC-PBU-4):

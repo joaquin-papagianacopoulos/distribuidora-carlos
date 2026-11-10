@@ -67,7 +67,10 @@ export function sugerirClientes(contacto, clientes, max = 5) {
 }
 
 // Vendedor al aceptar: el del link; si no, el de la ficha del cliente; si no, lo elige el admin.
+// AC-ASV-2: si el admin eligio otro en el selector, ese gana (el selector viene pre-cargado con link/ficha).
 export function vendedorAlAceptar(pedido, cliente, elegido) {
+  const elegidoAdmin = texto(elegido, 80);
+  if (elegidoAdmin) return { vendedor: elegidoAdmin, requiereElegir: false };
   const link = texto(pedido && (pedido.vendedor || pedido.vendedorNombre), 80);
   if (link) return { vendedor: link, requiereElegir: false };
   const ficha = texto(cliente && cliente.vendedor, 80);

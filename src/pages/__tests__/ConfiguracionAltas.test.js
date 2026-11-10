@@ -37,6 +37,7 @@ jest.mock('../../services/imageSearch', () => ({ isImageSearchConfigured: () => 
 
 jest.mock('../../services/stockService', () => ({
   ajustarStock: jest.fn(() => Promise.resolve(null)),
+  syncStock: jest.fn(() => Promise.resolve({ ok: true })),
 }));
 
 const mockSb = { llamadas: [], errorDelete: null };
@@ -59,6 +60,7 @@ jest.mock('../../lib/supabase', () => {
 });
 
 import Configuracion from '../Configuracion';
+import { syncStock } from '../../services/stockService';
 import {
   addProductoLocal, updateProducto, getProductos, addCliente, updateCliente,
   putProveedor, deleteProveedor,
@@ -210,21 +212,24 @@ describe('Proveedores (REQ-PROV)', () => {
     expect(mockSb.llamadas).toHaveLength(0);
   });
 
-  it('AC-PROV-3 un proveedor sin productos se borra en Supabase y en el dispositivo', async () => {
+  // MOD (RUN 20261110-t0, AC-SEG2-1): la nube ya no admite DELETE; sin productos ni ingresos tambien es baja logica.
+  it('AC-PROV-3 AC-SEG2-1 un proveedor sin productos se da de baja (activo=false), sin delete en Supabase', async () => {
     await render();
     await irATab('proveedores');
     await click(botonBorrar('Molinos'));
-    expect(mockSb.llamadas[0]).toMatchObject({ table: 'proveedores', op: 'delete', filtros: [['id', 'prov-2']] });
-    expect(deleteProveedor).toHaveBeenCalledWith('prov-2');
+    expect(mockSb.llamadas.filter(l => l.op === 'delete')).toHaveLength(0);
+    expect(putProveedor).toHaveBeenCalledWith(expect.objectContaining({ id: 'prov-2', activo: false }));
+    expect(deleteProveedor).not.toHaveBeenCalled();
     expect(mockApp.recargar).toHaveBeenCalled();
   });
 
-  it('AC-PROV-4 si Supabase falla al borrar, no se borra local', async () => {
-    mockSb.errorDelete = { message: 'permission denied' };
+  it('AC-PROV-4 AC-SEG2-1 si la baja no sube al servidor, se deshace la baja local', async () => {
+    syncStock.mockRejectedValueOnce(new Error('permission denied'));
     await render();
     await irATab('proveedores');
     await click(botonBorrar('Molinos'));
     expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('permission denied'));
+    expect(putProveedor).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'prov-2', activo: true }));
     expect(deleteProveedor).not.toHaveBeenCalled();
   });
 

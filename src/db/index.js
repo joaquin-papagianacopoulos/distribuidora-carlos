@@ -17,6 +17,21 @@ const DB_VERSION = 12;
 let db = null;
 
 // Cierra la conexion abierta (necesario para poder borrar la base desde "Borrar cache").
+// AC-SEG2-2: todos los stores (los que existan hoy y los que se agreguen) para contar pendientes y respaldar.
+export const leerTodosLosStores = async () => {
+  const d = await getDB();
+  const nombres = Array.from(d.objectStoreNames);
+  const out = {};
+  for (const n of nombres) {
+    out[n] = await new Promise((res, rej) => {
+      const req = d.transaction(n).objectStore(n).getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  return out;
+};
+
 export const cerrarDB = () => {
   try { if (db) db.close(); } catch { /* ya cerrada */ }
   db = null;
@@ -363,7 +378,7 @@ export const getClientes = async () => {
 export const addCliente = async (c) => {
   const store = await tx('clientes', 'readwrite');
   return new Promise((res, rej) => {
-    const req = store.add({ ...c, pendingSync: true, createdAt: Date.now() });
+    const req = store.add({ ...c, pendingSync: true, createdAt: Date.now(), updatedAt: Date.now() });
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
   });
@@ -376,16 +391,21 @@ export const addCliente = async (c) => {
 // subiendo; limpiar "todo lo pendiente" al terminar el primero borraba
 // tambien la marca del segundo sin haber subido su dato real, y la proxima
 // bajada lo pisaba con el valor viejo de Supabase.
+// AC-SEG2-7: acepta ids (legacy) u objetos { id, updatedAt }; con objetos, ademas, solo limpia
+// si el cliente no cambio desde que se leyo para subirlo.
 export const clearClientesPendingSync = async (ids) => {
   if (!ids || ids.length === 0) return;
   const store = await tx('clientes', 'readwrite');
-  for (const id of ids) {
+  for (const item of ids) {
+    const conVersion = item !== null && typeof item === 'object';
+    const id = conVersion ? item.id : item;
     const c = await new Promise((res, rej) => {
       const req = store.get(id);
       req.onsuccess = () => res(req.result);
       req.onerror = () => rej(req.error);
     });
     if (!c || !c.pendingSync) continue;
+    if (conVersion && (c.updatedAt || 0) !== (item.updatedAt || 0)) continue;
     await new Promise((res, rej) => {
       const req = store.put({ ...c, pendingSync: false });
       req.onsuccess = () => res();
@@ -447,7 +467,8 @@ export const clearProductosPendingSyncSiIgual = async (ids, huellas, extra = {})
 export const updateCliente = async (c) => {
   const store = await tx('clientes', 'readwrite');
   return new Promise((res, rej) => {
-    const req = store.put({ ...c, pendingSync: true });
+    // AC-SEG2-7: updatedAt marca la version local; el push limpia pendingSync solo si no cambio.
+    const req = store.put({ ...c, pendingSync: true, updatedAt: Date.now() });
     req.onsuccess = () => res();
     req.onerror = () => rej(req.error);
   });
@@ -548,10 +569,16 @@ export const deletePedido = async (id) => {
   });
 };
 
-export const markPedidoSynced = async (id, remoteId) => {
+// AC-SEG2-7: con { updatedAtEnviado } el remoteId se guarda siempre, pero el pedido queda
+// synced:false si se edito mientras subia (la proxima tanda sube la edicion).
+export const markPedidoSynced = async (id, remoteId, { updatedAtEnviado, remoteUpdatedAt } = {}) => {
   const todos = await getPedidos();
   const p = todos.find(x => x.id === id);
-  if (p) await putPedido({ ...p, synced: true, remoteId: remoteId ?? p.remoteId });
+  if (p) {
+    const cambio = updatedAtEnviado !== undefined && (p.updatedAt || 0) !== (updatedAtEnviado || 0);
+    // T1-A-03: version del servidor tras el alta (base de la primera edicion).
+    await putPedido({ ...p, synced: cambio ? p.synced : true, remoteId: remoteId ?? p.remoteId, ...(remoteUpdatedAt ? { remoteUpdatedAt } : {}) });
+  }
   // Si el pedido se facturo offline, sus movimientos de stock quedaron con
   // ref local; ahora que tiene id remoto se re-keyean para que cualquier
   // dispositivo pueda revertirlos (AC-STK-8).

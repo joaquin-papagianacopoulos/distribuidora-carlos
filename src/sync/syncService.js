@@ -16,6 +16,10 @@ import { esColumnaInexistente, esEscrituraDenegada, esPermisoDenegado } from './
 let avisoGrants016 = false;
 import { itemsSinCostos } from '../domain/panel';
 import { gruposToRemote, gruposFromRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
+import { vendedorToRemote, vendedorFromRemote, sinColumnas024, nombraColumna024 } from '../domain/vendedorPedido';
+import { redondeoToRemote, redondeoFromRemote, sinColumnas025, nombraColumna025 } from '../domain/redondeo';
+import { deudaMedioToRemote, deudaMedioFromRemote, sinColumnasDmp, nombraColumnaDmp, unirCobrosDeuda } from '../domain/cobranza';
+import { modificadoToRemote, modificadoFromRemote } from '../domain/edicionPedido';
 import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
 import { vendedorDesdeRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO, COLUMNAS_VENDEDOR_LEGACY } from '../domain/vendedores';
 
@@ -67,6 +71,8 @@ export const upsertEscalonado = async (table, variantes) => {
 };
 
 // agregar al import de db
+import { asegurarClientUuid, clientUuidToRemote, esErrorClientUuid, mapearRemoteIds, vincularPorClientUuid } from '../domain/pedidosIdempotencia';
+import { idsFaltantesABorrar } from '../domain/syncGuardas';
 import {
   getPedidos, markPedidoSynced, putPedidoRemoto, deletePedido,
   getClientes, addCliente, updateCliente,
@@ -103,7 +109,14 @@ const putPedidosRemotosSinPisarLocales = async (rows) => {
   // synced:false, no se puede pisar con datos viejos de Supabase.
   const localesActuales = await getPedidos();
   const byRemoteId = new Map(localesActuales.filter(p => p.remoteId).map(p => [p.remoteId, p]));
+  // AC-SEG2-3: una fila remota con el clientUuid de un pedido local todavia sin remoteId ES ese
+  // pedido (el alta llego pero el dispositivo no se entero): se le vincula el remoteId en vez de
+  // duplicarlo. El local sigue pendiente, asi su proximo envio es un update.
+  const { vinculos, descartarRemoteIds } = vincularPorClientUuid(localesActuales, rows.map(r => ({ id: r.remoteId, clientUuid: r.clientUuid })));
+  for (const v of vinculos) await patchRegistros('pedidos', [v.localId], { remoteId: v.remoteId });
+  const descartar = new Set(descartarRemoteIds);
   const safeRows = rows.filter(row => {
+    if (descartar.has(row.remoteId)) return false;
     const current = byRemoteId.get(row.remoteId);
     return !(current && !current.synced);
   });
@@ -126,6 +139,7 @@ const mapPedidoRemoto = (r, local = null) => {
     vendedorNombre: r.vendedor,
     fecha: normalizePedidoFecha(r.fecha),
     zona: r.zona ?? local?.zona ?? '',
+    clientUuid: r.client_uuid ?? local?.clientUuid ?? undefined,
     items: r.items,
     total: r.total,
     estado,
@@ -147,6 +161,13 @@ const mapPedidoRemoto = (r, local = null) => {
     // REQ-AGR: grupos de renglones (dato no confiable: se sanea). tipoFactura* vive solo
     // en el local (viene en ...local), no en la tabla pedidos.
     grupos: gruposFromRemote(r, local),
+    // Tanda 1 (migracion 024): vendedor del pedido, quien lo cargo y marca "Modificado" (tolerante a columnas faltantes).
+    ...vendedorFromRemote(r, local),
+    modificadoTrasArmado: modificadoFromRemote(r, local),
+    // Tanda 2 (migracion 025): redondeo del total (tolerante a columnas faltantes).
+    ...redondeoFromRemote(r, local),
+    // AC-EDP-3: version del servidor (updated_at tal cual vino) sobre la que se edita.
+    remoteUpdatedAt: r.updated_at ?? local?.remoteUpdatedAt ?? null,
     borrado: ['cancelado', 'eliminado', 'borrado'].includes(String(estado).toLowerCase()),
     synced: true,
     createdAt: local?.createdAt ?? Date.now(),
@@ -180,8 +201,23 @@ const pedidoToRemoteRow = (pedido) => {
     ...pedidoEntregaToRemote(p),
     // REQ-AGR: solo si el pedido conoce la clave (un dispositivo viejo no la pisa).
     ...gruposToRemote(p),
+    // Tanda 1 (migracion 024): solo viajan si el pedido las conoce.
+    ...vendedorToRemote(p),
+    ...modificadoToRemote(p),
+    // Tanda 2 (migracion 025): solo viajan si el pedido las conoce.
+    ...redondeoToRemote(p),
+    // AC-SEG2-3: id de idempotencia del alta.
+    ...clientUuidToRemote(p),
     updated_at:     new Date().toISOString(),
   };
+};
+
+// Aviso unico por sesion cuando falta la migracion 023 (pedidos.client_uuid + indice unico).
+let avisoMigracion023 = false;
+const avisarFalta023 = () => {
+  if (avisoMigracion023) return;
+  avisoMigracion023 = true;
+  console.warn('Supabase: falta la migracion 023 (pedidos.client_uuid). El alta de pedidos no es idempotente hasta aplicarla.');
 };
 
 // Aviso unico por sesion cuando faltan las columnas de entregado (migracion 003).
@@ -199,16 +235,40 @@ const avisarFalta011 = () => {
   console.warn('Supabase: falta la columna "grupos" en pedidos. Correr supabase/migrations/011_lote_operacion_facturacion_zonas.sql. Los grupos quedan en este dispositivo.');
 };
 
+let avisoMigracion024 = false;
+const avisarFalta024 = () => {
+  if (avisoMigracion024) return;
+  avisoMigracion024 = true;
+  console.warn('Supabase: faltan las columnas de la migracion 024 en pedidos (cargado_por, vendedor_id, modificado_tras_armado). Correr supabase/migrations/024_pedidos_edicion_vendedor.sql. Esos datos quedan en este dispositivo.');
+};
+
+let avisoMigracion025 = false;
+const avisarFalta025 = () => {
+  if (avisoMigracion025) return;
+  avisoMigracion025 = true;
+  console.warn('Supabase: faltan las columnas de la migracion 025 (redondeo). Correr supabase/migrations/025_remito_redondeo_medio_pago.sql. El redondeo queda en este dispositivo.');
+};
+
 // Reintenta un update/insert de pedidos SIN las columnas de entregado si
 // Supabase todavia no las tiene. Devuelve { data, error, sinEntrega }.
 export const conFallbackEntrega = async (ejecutar, rowOrRows) => {
   let filas = rowOrRows;
   let r1 = await ejecutar(filas);
   if (!r1.error || !esColumnaInexistente(r1.error)) return { ...r1, sinEntrega: false };
-  // REQ-AGR: falta la columna grupos (migracion 011): reintentar sin ella antes del fallback de entrega.
-  if (nombraColumna011(r1.error)) {
-    avisarFalta011();
-    filas = Array.isArray(filas) ? filas.map(sinColumnas011) : sinColumnas011(filas);
+  // Columnas de migraciones posteriores a la 003 (025 redondeo, 024 vendedor/modificado, 011 grupos): cada
+  // reintento saca solo las columnas del error y se prueba de nuevo (una fila puede carecer de varias).
+  const pasos = [
+    { nombra: nombraColumna025, sin: sinColumnas025, aviso: avisarFalta025 },
+    { nombra: nombraColumna024, sin: sinColumnas024, aviso: avisarFalta024 },
+    { nombra: nombraColumna011, sin: sinColumnas011, aviso: avisarFalta011 },
+  ];
+  const usados = new Set();
+  for (;;) {
+    const paso = pasos.find(x => !usados.has(x) && x.nombra(r1.error));
+    if (!paso) break;
+    usados.add(paso);
+    paso.aviso();
+    filas = Array.isArray(filas) ? filas.map(paso.sin) : paso.sin(filas);
     r1 = await ejecutar(filas);
     if (!r1.error || !esColumnaInexistente(r1.error)) return { ...r1, sinEntrega: false };
   }
@@ -476,10 +536,19 @@ export const syncPedidosPendientes = async () => {
 
   const pendientesActivos = pendientes.filter(p => !p.borrado);
   const slice = pendientesActivos.slice(0, MAX_PER_RUN);
-  const toUpdate = slice.filter(p => p.remoteId);
-  const toInsert = slice.filter(p => !p.remoteId);
+  // AC-EDP-3: un pedido en conflicto de edicion espera la decision del usuario (no se reintenta solo).
+  const toUpdate = slice.filter(p => p.remoteId && !p.conflictoEdicion);
+  // AC-SEG2-3: los pendientes sin remoteId reciben su UUID de idempotencia ANTES del primer intento.
+  const toInsert = slice.filter(p => !p.remoteId).map(p => (p.clientUuid ? p : asegurarClientUuid(p)));
+  for (const p of toInsert) {
+    const original = slice.find(x => x.id === p.id);
+    if (original && !original.clientUuid) await patchRegistros('pedidos', [p.id], { clientUuid: p.clientUuid });
+  }
   // id local -> true si la marca de entregado no pudo subir (falta la columna).
   const entregaPorId = new Map();
+  // id local -> updated_at del servidor tras subir (AC-EDP-3).
+  const versionPorId = new Map();
+  const versionRemota = new Map();
 
   // 1) Updates (pocos) - mantener en loop
   for (const p of toUpdate) {
@@ -489,8 +558,14 @@ export const syncPedidosPendientes = async () => {
     const row = pedidoToRemoteRow(p);
 
     if (p.remoteId) {
+      // AC-EDP-3: con base de edicion, el update es condicional (id + updated_at): si el servidor cambio, 0 filas.
+      const conBase = p.baseRemoteUpdatedAt !== undefined && p.baseRemoteUpdatedAt !== null && p.baseRemoteUpdatedAt !== '';
       const { data, error, sinEntrega } = await conFallbackEntrega(
-        (r) => supabase.from('pedidos').update(r).eq('id', p.remoteId).select('id'),
+        (r) => {
+          let q = supabase.from('pedidos').update(r).eq('id', p.remoteId);
+          if (conBase) q = q.eq('updated_at', p.baseRemoteUpdatedAt);
+          return q.select('id,updated_at');
+        },
         row,
       );
       entregaPorId.set(p.id, sinEntrega && !!p.entregado);
@@ -501,6 +576,18 @@ export const syncPedidosPendientes = async () => {
 
       if (data?.length > 0) {
         results.push({ localId: p.id, remoteId: data[0].id });
+        if (data[0].updated_at) versionPorId.set(p.id, data[0].updated_at);
+        continue;
+      }
+
+      if (conBase) {
+        // AC-EDP-3: el pedido cambio en el servidor desde que se abrio: no se pisa. Queda pendiente con el aviso.
+        let actual = null;
+        try {
+          const q = await supabase.from('pedidos').select('id,updated_at').eq('id', p.remoteId);
+          actual = (q && q.data && q.data[0] && q.data[0].updated_at) || null;
+        } catch { /* sin conexion: igual se avisa */ }
+        await patchRegistros('pedidos', [p.id], { conflictoEdicion: { at: Date.now(), remoteUpdatedAt: actual } });
         continue;
       }
 
@@ -514,32 +601,77 @@ export const syncPedidosPendientes = async () => {
   if (toInsert.length > 0) {
     const rows = toInsert.map(pedidoToRemoteRow);
 
-    const { data, error, sinEntrega } = await conFallbackEntrega(
-      (r) => supabase.from('pedidos').insert(r).select('id'),
+    // AC-SEG2-3: upsert por client_uuid (ON CONFLICT DO NOTHING): reintentar no duplica. Los ids se
+    // cruzan por UUID, no por posicion (la respuesta puede venir parcial). Sin la migracion 023 vuelve
+    // al insert de antes (cruce por posicion, como hoy).
+    let r = await conFallbackEntrega(
+      (x) => supabase.from('pedidos').upsert(x, { onConflict: 'client_uuid', ignoreDuplicates: true }).select('id,client_uuid,updated_at'),
       rows,
     );
+    let porUuid = true;
+    if (esErrorClientUuid(r.error)) {
+      porUuid = false;
+      avisarFalta023();
+      r = await conFallbackEntrega(
+        (x) => supabase.from('pedidos').insert(x).select('id'),
+        rows.map(({ client_uuid: _u, ...resto }) => resto), // eslint-disable-line no-unused-vars
+      );
+    }
+    const { data, error, sinEntrega } = r;
     for (const p of toInsert) entregaPorId.set(p.id, sinEntrega && !!p.entregado);
 
     if (error) throw error;
-    const ids = data || [];
-    if (ids.length !== toInsert.length) {
-      // No podemos mapear remoteId con seguridad si la respuesta no coincide.
-      // Igual marcamos como synced en el siguiente pull, pero informamos.
-      console.warn('syncPedidosPendientes: respuesta inesperada en batch insert', { expected: toInsert.length, got: ids.length });
-    }
-
-    for (let i = 0; i < Math.min(toInsert.length, ids.length); i++) {
-      results.push({ localId: toInsert[i].id, remoteId: ids[i].id });
+    let ids = data || [];
+    if (porUuid) {
+      let mapeados = mapearRemoteIds(toInsert.map(p => ({ localId: p.id, clientUuid: p.clientUuid })), ids);
+      // Los que ya existian en la nube (conflicto ignorado) no vuelven en la respuesta: se buscan por UUID.
+      const faltan = toInsert.filter(p => !mapeados.some(m => m.localId === p.id));
+      if (faltan.length > 0) {
+        const { data: ya, error: errYa } = await supabase.from('pedidos').select('id,client_uuid,updated_at').in('client_uuid', faltan.map(p => p.clientUuid));
+        if (errYa) throw errYa;
+        const nuevos = mapearRemoteIds(faltan.map(p => ({ localId: p.id, clientUuid: p.clientUuid })), ya || []);
+        // AC-SEG2-3: ya existian en la nube: se actualiza por id con la version local (puede haber una
+        // edicion posterior al alta). Si falla, throw: quedan pendientes y no se marcan synced.
+        for (const m of nuevos) {
+          const idx = toInsert.findIndex(p => p.id === m.localId);
+          const { client_uuid: _cu, ...cambios } = rows[idx]; // eslint-disable-line no-unused-vars
+          const { error: errUp } = await supabase.from('pedidos').update(cambios).eq('id', m.remoteId);
+          if (errUp) throw errUp;
+        }
+        mapeados = mapeados.concat(nuevos);
+        for (const r of (ya || [])) if (r && r.updated_at) versionRemota.set(r.id, r.updated_at);
+      }
+      for (const r of ids) if (r && r.updated_at) versionRemota.set(r.id, r.updated_at);
+      // T1-A-03: tambien el alta por INSERT guarda la version del servidor (base de la primera edicion).
+      for (const m of mapeados) { results.push(m); if (versionRemota.has(m.remoteId)) versionPorId.set(m.localId, versionRemota.get(m.remoteId)); }
+    } else {
+      if (ids.length !== toInsert.length) {
+        // No podemos mapear remoteId con seguridad si la respuesta no coincide.
+        // Igual marcamos como synced en el siguiente pull, pero informamos.
+        console.warn('syncPedidosPendientes: respuesta inesperada en batch insert', { expected: toInsert.length, got: ids.length });
+      }
+      for (let i = 0; i < Math.min(toInsert.length, ids.length); i++) {
+        results.push({ localId: toInsert[i].id, remoteId: ids[i].id });
+      }
     }
   }
 
+  // AC-SEG2-7: el remoteId se guarda siempre, pero si el pedido se edito mientras subia queda pendiente.
+  const enviadoPorId = new Map(slice.map(p => [p.id, p.updatedAt]));
   await Promise.all(
-    results.map(r => markPedidoSynced(r.localId, r.remoteId))
+    results.map(r => markPedidoSynced(r.localId, r.remoteId, { updatedAtEnviado: enviadoPorId.get(r.localId) }))
   );
   // Recordar (o limpiar) la marca de entregado pendiente de los que se subieron.
   const subidos = results.map(r => r.localId);
   await patchRegistros('pedidos', subidos.filter(id => entregaPorId.get(id)), { entregaPendiente: true });
   await patchRegistros('pedidos', subidos.filter(id => !entregaPorId.get(id)), { entregaPendiente: false });
+  // AC-EDP-3: version del servidor tras subir y fin de la base de edicion (solo si no se re-edito mientras subia).
+  for (const id of subidos) {
+    if (!versionPorId.has(id)) continue;
+    const actual = (await getPedidos()).find(x => x.id === id);
+    if (!actual || (actual.updatedAt || 0) !== (enviadoPorId.get(id) || 0)) continue;
+    await patchRegistros('pedidos', [id], { remoteUpdatedAt: versionPorId.get(id), baseRemoteUpdatedAt: null, conflictoEdicion: null });
+  }
 
   return { ok: true, count: results.length, remaining: Math.max(0, pendientesActivos.length - MAX_PER_RUN) };
 };
@@ -788,7 +920,7 @@ export const syncClientes = async () => {
           conflicto.push(batch[k].id);
         } else { ok.push(batch[k].id); legacy = legacy || r1.legacy; }
       }
-      await clearClientesPendingSync(ok);
+      await clearClientesPendingSync(ok.map(id => ({ id, updatedAt: porId.get(id)?.updatedAt })));
       await patchRegistros('clientes', ok.filter(id => conExtras({ id })), { extrasPendientes: !!legacy, extrasDirty: false, syncConflicto: null });
       await patchRegistros('clientes', ok.filter(id => !conExtras({ id })), { syncConflicto: null });
       await patchRegistros('clientes', conflicto, { syncConflicto: 'Código de cliente repetido en otro dispositivo: cambialo' });
@@ -800,8 +932,9 @@ export const syncClientes = async () => {
     if (error) {
       const status = error?.status ?? error?.code;
       if (status === 401 || status === 403 || String(status) === '401' || String(status) === '403') {
-        console.warn('syncClientes: sin permiso de escritura en Supabase (RLS), saltando push de clientes.');
-        return { ok: true, skipped: true };
+        // AC-SEG2-7: antes devolvia ok y nadie se enteraba de que los clientes no subian.
+        console.warn('syncClientes: sin permiso de escritura en Supabase (RLS), no se subieron los clientes.');
+        return { ok: false, skipped: true, motivo: 'sin_permiso', mensaje: 'No se pudieron subir los clientes: Supabase no da permiso de escritura. Quedan guardados en este dispositivo.' };
       }
       throw error;
     }
@@ -809,7 +942,7 @@ export const syncClientes = async () => {
     // Limpiar la marca apenas se confirma la subida de ESTA tanda puntual,
     // no de "todo lo pendiente" — evita pisar una edicion de otro cliente
     // que haya quedado marcada pendiente mientras esta subida estaba en curso.
-    await clearClientesPendingSync(batch.map(b => b.id));
+    await clearClientesPendingSync(batch.map(b => ({ id: b.id, updatedAt: porId.get(b.id)?.updatedAt })));
     const idsExtras = batch.filter(conExtras).map(b => b.id);
     const idsBasicos = batch.filter(b => !conExtras(b)).map(b => b.id);
     await patchRegistros('clientes', idsExtras, { extrasPendientes: !!legacy, extrasDirty: false, syncConflicto: null });
@@ -913,6 +1046,75 @@ export const pullPedidosByFecha = async (fecha, { vendedorNombre = null, zona = 
   }
 
   return { ok: true, count: data.length };
+};
+
+// AC-EDP-3: trae UN pedido del servidor (con su updated_at = version) y lo guarda local.
+// forzar=true descarta la edicion local pendiente y conflicto (opcion "Usar la del servidor").
+// forzar=false no pisa un local sin subir (devuelve el local). Devuelve el pedido local o null.
+export const traerPedidoRemoto = async (remoteId, { forzar = false } = {}) => {
+  if (remoteId === undefined || remoteId === null || remoteId === '') return null;
+  const { data, error } = await supabase.from('pedidos').select('*').eq('id', remoteId).limit(1);
+  if (error) throw error;
+  const r = (data || [])[0];
+  if (!r) return null;
+  const locales = await getPedidos();
+  const local = locales.find(x => x.remoteId === r.id) || null;
+  if (local && !local.synced && !forzar) return local;
+  const base = local ? { ...local, conflictoEdicion: null, baseRemoteUpdatedAt: null } : null;
+  const mapeado = mapPedidoRemoto(r, base);
+  await putPedidoRemoto({ ...mapeado, conflictoEdicion: null, baseRemoteUpdatedAt: null });
+  return mapeado;
+};
+
+// REQ-PEN (AC-PEN-1): baja los pedidos NO facturados de cualquier fecha (pasada o futura) para el
+// bloque "Pendientes". Si hay vendedorNombre trae los suyos (como dueno y como quien los cargo, 2
+// consultas; sin la migracion 024 solo como dueno). Paginado, con tope; no borra nada local.
+const ESTADOS_NO_PENDIENTES = '("facturado","cancelado","eliminado","borrado")';
+export const pullPedidosPendientes = async ({ vendedorNombre = null, zona = null } = {}) => {
+  const PAGE = 500;
+  const MAX_TOTAL = 3000;
+  const traer = async (filtros) => {
+    let data = [];
+    let from = 0;
+    while (true) {
+      let q = supabase.from('pedidos').select('*').not('estado', 'in', ESTADOS_NO_PENDIENTES);
+      for (const [col, val] of filtros) q = q.eq(col, val);
+      const { data: page, error } = await q.order('fecha', { ascending: true }).range(from, from + PAGE - 1);
+      if (error) return { data, error };
+      data = data.concat(page || []);
+      if (!page || page.length < PAGE || data.length >= MAX_TOTAL) break;
+      from += PAGE;
+    }
+    return { data, error: null };
+  };
+  const filtrosDueno = [];
+  if (vendedorNombre) filtrosDueno.push(['vendedor', vendedorNombre]);
+  if (zona) filtrosDueno.push(['zona', zona]);
+  const a = await traer(filtrosDueno);
+  if (a.error) throw a.error;
+  let filas = a.data;
+  if (vendedorNombre) {
+    const b = await traer([['cargado_por', vendedorNombre]]);
+    if (b.error) {
+      if (!esColumnaInexistente(b.error)) throw b.error;
+      avisarFalta024();
+    } else {
+      filas = filas.concat(b.data);
+    }
+  }
+  const locales = await getPedidos();
+  const byRemoteId = new Map(locales.filter(x => x.remoteId).map(x => [x.remoteId, x]));
+  const vistos = new Set();
+  const upserts = [];
+  for (const r of filas) {
+    if (vistos.has(r.id)) continue;
+    vistos.add(r.id);
+    const local = byRemoteId.get(r.id);
+    if (local && !local.synced) continue;
+    upserts.push(mapPedidoRemoto(r, local));
+  }
+  await putPedidosRemotosSinPisarLocales(upserts);
+  return { ok: true, count: vistos.size };
 };
 
 // REQ-COM (AC-COM-3): trae TODOS los pedidos de un rango de fechas (sin filtro
@@ -1312,17 +1514,26 @@ export const syncFaltantes = async () => {
   }
 
   // 2. Bajar remotos que no tenemos localmente
-  const { data: remotos, error } = await supabase
-    .from('faltantes')
-    .select('*')
-    .order('fecha', { ascending: false });
-
-  if (error) throw error;
+  // AC-SEG2-4: lectura paginada (la API corta en 1000 filas). Si una pagina falla se corta con
+  // error y NO se purga nada local: solo se borra lo que se confirmo ausente del remoto completo.
+  const remotos = [];
+  const PAGINA_FALTANTES = 1000;
+  let completo = false;
+  for (let desde = 0; ; desde += PAGINA_FALTANTES) {
+    const { data, error } = await supabase
+      .from('faltantes')
+      .select('*')
+      .order('id', { ascending: true })
+      .range(desde, desde + PAGINA_FALTANTES - 1);
+    if (error) throw error;
+    const filas = data || [];
+    remotos.push(...filas);
+    if (filas.length < PAGINA_FALTANTES) { completo = true; break; }
+  }
 
   // Recargar locales actualizados (ya subimos los nuevos arriba)
   const localesActuales  = await getFaltantes();
   const localesRemoteIds = new Set(localesActuales.map(f => f.remoteId).filter(Boolean));
-  const remotosIds       = new Set(remotos.map(r => r.id));
 
   for (const r of remotos) {
     if (!localesRemoteIds.has(r.id)) {
@@ -1342,10 +1553,8 @@ export const syncFaltantes = async () => {
   }
 
   // 3. Borrar locales que ya no existen en remoto
-  for (const local of localesActuales) {
-    if (local.remoteId && !remotosIds.has(local.remoteId)) {
-      await deleteFaltante(local.id);
-    }
+  for (const id of idsFaltantesABorrar(localesActuales, remotos, { completo })) {
+    await deleteFaltante(id);
   }
 
   return { ok: true };
@@ -1356,6 +1565,7 @@ export const syncFaltantes = async () => {
 // Sin ventana, con una deuda por pedido facturado se pasaria enseguida del
 // limite de 1000 filas de la API y el paso 3 borraria deudas locales validas.
 const DEUDAS_DIAS_VENTANA = 45;
+let avisoMigracion025Deudas = false;
 
 export const syncDeudas = async () => {
   const desdeDate = new Date();
@@ -1369,7 +1579,22 @@ export const syncDeudas = async () => {
   // nunca llegaba a Supabase no avisaba a nadie.
   const locales = await getDeudas();
   let erroresSubida = [];
-  for (const dLocal of locales.filter(d => d.synced === false || !d.remoteId)) {
+  for (const dLocalOrig of locales.filter(d => d.synced === false || !d.remoteId)) {
+    let dLocal = dLocalOrig;
+    // S-T2-03: antes de pisar la fila remota se unen (por id de cobro) los cobros que subio otro
+    // dispositivo; montoPagado se recalcula desde los cobros unidos. Si falla la lectura, se sube igual.
+    if (dLocal.remoteId && Array.isArray(dLocal.cobros) && dLocal.cobros.length > 0) {
+      try {
+        const { data: rem, error: errRem } = await supabase.from('deudas').select('cobros, monto_pagado').eq('id', dLocal.remoteId).maybeSingle();
+        if (!errRem && rem) {
+          const u = unirCobrosDeuda(dLocal, { cobros: rem.cobros, montoPagado: Number(rem.monto_pagado || 0), monto: dLocal.monto });
+          if (u) {
+            const { hayLocalesNuevos: _h, ...campos } = u;
+            dLocal = { ...dLocal, ...campos };
+          }
+        }
+      } catch (e) { /* sin lectura previa: se sube lo local */ }
+    }
     const row = {
       cliente_id:      dLocal.clienteId  ?? null,
       cliente_nombre:  dLocal.clienteNombre,
@@ -1381,6 +1606,8 @@ export const syncDeudas = async () => {
       pagada:          !!dLocal.pagada,
       pagada_at:       dLocal.pagadaAt ? new Date(dLocal.pagadaAt).toISOString() : null,
       pagada_por:      dLocal.pagadaPor  ?? null,
+      // Tanda 2 (migracion 025): medio de pago e historial de cobros (solo si la deuda los conoce).
+      ...deudaMedioToRemote(dLocal),
     };
 
     // La columna "id" es "generated always as identity": Postgres rechaza
@@ -1388,10 +1615,20 @@ export const syncDeudas = async () => {
     // non-DEFAULT value into column id"). Por eso una deuda nueva se INSERTA
     // (sin id, lo genera solo) y una que ya existe se ACTUALIZA por id, en
     // vez de usar upsert con el id incluido.
-    const query = dLocal.remoteId
-      ? supabase.from('deudas').update(row).eq('id', dLocal.remoteId)
-      : supabase.from('deudas').insert(row);
-    const { data, error } = await query.select('id').single();
+    const enviarDeuda = (r) => (dLocal.remoteId
+      ? supabase.from('deudas').update(r).eq('id', dLocal.remoteId)
+      : supabase.from('deudas').insert(r)).select('id').single();
+    let { data, error } = await enviarDeuda(row);
+    // Falta la migracion 025 (medio_pago / referencia_pago / cobros): se reintenta sin ellas y el
+    // detalle del cobro queda en este dispositivo. Aviso unico por sesion.
+    // S-T2-01: solo ante columna inexistente (nunca ante un CHECK u otro error: ahi no se marca como subida).
+    if (error && esColumnaInexistente(error) && nombraColumnaDmp(error)) {
+      if (!avisoMigracion025Deudas) {
+        avisoMigracion025Deudas = true;
+        console.warn('Supabase: faltan las columnas de la migracion 025 en deudas (medio_pago, referencia_pago, cobros). El medio de pago queda en este dispositivo.');
+      }
+      ({ data, error } = await enviarDeuda(sinColumnasDmp(row)));
+    }
 
     if (error) {
       console.error('Error subiendo deuda:', dLocal.clienteNombre, error);
@@ -1460,8 +1697,19 @@ export const syncDeudas = async () => {
       pagada:        !!r.pagada,
       pagadaAt:      r.pagada_at ? Date.parse(r.pagada_at) : null,
       pagadaPor:     r.pagada_por,
+      // Tanda 2 (migracion 025): tolerante a columnas faltantes (conserva lo local).
+      ...deudaMedioFromRemote(r, local),
       synced:        true,
     };
+    // S-T2-03: cambio local sin subir con cobros propios => se unen con los remotos (por id) en vez de pisarlos.
+    if (local && local.synced === false && Array.isArray(local.cobros) && local.cobros.length > 0) {
+      const u = unirCobrosDeuda(local, { cobros: r.cobros, montoPagado: Number(r.monto_pagado || 0), monto: mapeado.monto });
+      if (u) {
+        const { hayLocalesNuevos, ...campos } = u;
+        Object.assign(mapeado, campos);
+        if (hayLocalesNuevos) mapeado.synced = false; // queda pendiente de subir la union
+      }
+    }
     if (!local) await addDeuda(mapeado);
     else await updateDeuda({ ...local, ...mapeado, id: local.id });
   }

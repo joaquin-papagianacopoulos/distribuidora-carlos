@@ -7,6 +7,7 @@ import { texto, nuevoId } from './validacion';
 import { claveMarca, normalizarMarca } from './marcas';
 import { rubroDeRenglon } from './rubros';
 import { normalizarBultoX } from './bultos';
+import { etiquetaEscala } from './precios';
 import { gruposBultoParaBoleta, claveRenglonGrupo, lineaGrupoBulto } from './grupoBulto';
 
 export const MAX_GRUPOS = 50;
@@ -112,7 +113,12 @@ const subtotalItem = (i) => Number(i?.cantidad) * Number(i?.precio);
 
 // REQ-FRB (AC-FRB-2): marca visible cuando el renglón tiene precio de bulto.
 export const SUFIJO_PRECIO_BULTO = ' (x precio de bulto)';
-const nombreConMarca = (i, nombre) => (i?.precioPorBulto === true ? `${nombre}${SUFIJO_PRECIO_BULTO}` : nombre);
+// REQ-ESC (AC-ESC-3): suma " (x5 bultos -8 %)" (ASCII: el PDF no tiene el signo menos real).
+const nombreConMarca = (i, nombre) => {
+  const esc = etiquetaEscala(i, { pdf: true });
+  const conBulto = i?.precioPorBulto === true ? `${nombre}${SUFIJO_PRECIO_BULTO}` : nombre;
+  return esc ? `${conBulto} (${esc})` : conBulto;
+};
 
 // REQ-FRB (AC-FRB-5): un renglón cuya cantidad es múltiplo exacto del bulto
 // (bultoX congelado por REQ-VTA o precioBultoX por REQ-PBU) se imprime en bultos:
@@ -172,6 +178,19 @@ export const filasBoleta = (items, grupos, { modo = 'detalle' } = {}) => {
 // Total a partir de las filas (sin doble conteo): ignora las filas de detalle.
 export const totalFilasBoleta = (filas) =>
   (filas || []).filter(f => f.tipo !== 'detalle').reduce((s, f) => s + (Number(f.subtotal) || 0), 0);
+
+// AC-RTO-3: numera los renglones del remito. Cada fila que no es "detalle" (renglon suelto,
+// grupo REQ-AGR o linea combinable REQ-GBU) lleva `nro` correlativo; el detalle bajo un grupo no.
+// Devuelve { filas, items } sin mutar las filas originales.
+export const numerarFilasBoleta = (filas) => {
+  let n = 0;
+  const out = (Array.isArray(filas) ? filas : []).filter(Boolean).map((f) => {
+    if (f.tipo === 'detalle') return { ...f };
+    n += 1;
+    return { ...f, nro: n };
+  });
+  return { filas: out, items: n };
+};
 
 // ---- Sync (migracion 011) ----
 // La clave `grupos` viaja SOLO si el pedido la conoce (`!== undefined`): un dispositivo

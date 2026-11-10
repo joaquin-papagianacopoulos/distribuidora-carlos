@@ -49,9 +49,10 @@ describe('ProductoForm', () => {
     await render({ onGuardar: jest.fn() });
     const labels = [...container.querySelectorAll('label.input-label')]
       .map(l => l.textContent.replace(/ \*$/, '').replace(/ \([^)]*\)$/, '').replace(/ \*$/, ''));
+    // ADAPTADO: suma 'Escalas por bulto' al final (REQ-ESC)
     expect(labels).toEqual([
       'Código', 'Descripción', 'Rubro', 'Marca', 'Proveedor', 'Costo final', 'Descuento 1', 'Descuento 2',
-      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto',
+      '% Ganancia', 'Precio por unidad', 'Precio por unidad llevando bulto', 'Precio venta 2', 'Bulto x', 'Se vende por', 'Etiqueta del bulto', 'Mostrar en tienda', 'Mínimo venta', 'Stock mínimo', 'Stock', 'Grupo bulto', 'Escalas por bulto',
     ]);
   });
 
@@ -71,11 +72,12 @@ describe('ProductoForm', () => {
   it('AC-PROD-1 recalcula Precio venta 1 al cambiar costo, descuentos y ganancia', async () => {
     await render({ onGuardar: jest.fn() });
     await setValue(campo('costoFinal'), '1000');
-    expect(campo('precio').value).toBe('1000');
+    // AC-PVC-3 (test adaptado): sin ganancia > 0 el precio no se autocompleta con el costo.
+    expect(campo('precio').value).toBe('');
     await setValue(campo('descuento1'), '10');
-    expect(campo('precio').value).toBe('900');
+    expect(campo('precio').value).toBe('');
     await setValue(campo('descuento2'), '5');
-    expect(campo('precio').value).toBe('855');
+    expect(campo('precio').value).toBe('');
     await setValue(campo('ganancia'), '30');
     // 1000 × 0,9 × 0,95 × 1,3 = 1111,5
     expect(campo('precio').value).toBe('1111.5');
@@ -104,8 +106,9 @@ describe('ProductoForm', () => {
     // Botón para volver al calculado
     await click(boton('Usar precio calculado'));
     expect(campo('precio').value).toBe('1800');
+    // AC-PVC-3 (test adaptado): ganancia 0 ya no lleva el precio al costo; queda como estaba.
     await setValue(campo('ganancia'), '0');
-    expect(campo('precio').value).toBe('1200');
+    expect(campo('precio').value).toBe('1800');
   });
 
   it('AC-PROD-1 borrar el precio manual vuelve al modo automático', async () => {

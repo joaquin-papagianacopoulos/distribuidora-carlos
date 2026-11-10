@@ -133,7 +133,8 @@ describe('REQ-BUL Facturación (edición)', () => {
     expect(menos().disabled).toBe(true);
     await click(boton('Guardar cambios'));
     const [pedidoFinal] = guardarPedidoOnlineFirst.mock.calls[0];
-    expect(pedidoFinal.items.find(i => i.productoId === 'p1').cantidad).toBe(1);
+// ADAPTADO (AC-CBU-2 BUG-1): con 0 bultos (5 sueltas) "− Bulto" no hace nada: las sueltas quedan (antes 1).
+    expect(pedidoFinal.items.find(i => i.productoId === 'p1').cantidad).toBe(5);
   });
 
   test('AC-BUL-7 el resumen del armado muestra las cantidades cambiadas por el armador', async () => {
