@@ -27,6 +27,8 @@ export const ESTILO_TABLA_COMPACTA = Object.freeze({
   cellPadding: Object.freeze({ top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 }),
   ...LINEA,
 });
+// AC-RTO-7: renglones (items) del remito: Arial (en jsPDF la fuente equivalente es "helvetica") en negrita.
+export const ESTILO_ITEMS_REMITO = Object.freeze({ font: 'helvetica', fontStyle: 'bold', fontSize: 9, textColor: 0 });
 export const ESTILO_TABLA_ANTERIOR = Object.freeze({ fontSize: 9, cellPadding: 2, ...LINEA });
 
 const PT_A_MM = 25.4 / 72;

@@ -88,19 +88,19 @@ const items1260 = [{ productoId: 1, nombre: 'Saphirus Lavanda', cantidad: 12, pr
 const guardado = () => guardarPedidoOnlineFirst.mock.calls[0][0];
 
 describe('AC-RED-2 Facturación: el redondeo se congela al facturar', () => {
-  it('AC-RED-2 facturar con el ajuste por defecto ($500) congela multiplo, redondeo y total redondeado; total sigue siendo la suma de renglones', async () => {
+  it('REQ-RED2 facturar ya no redondea: congela multiplo 0 y el total a cobrar es la suma de renglones', async () => {
     setApp({ pedidos: [ped({ items: items1260, total: 1260 })] });
     await render();
     await click(boton('Cambiar a facturado'));
-    expect(guardado()).toMatchObject({ estado: 'facturado', total: 1260, redondeoMultiplo: 500, totalRedondeado: 1500, redondeo: 240 });
+    expect(guardado()).toMatchObject({ estado: 'facturado', total: 1260, redondeoMultiplo: 0, totalRedondeado: 1260, redondeo: 0 });
     expect(guardarPedidoOnlineFirst.mock.calls[0][1]).toEqual({ iniciarStock: true });
   });
 
-  it('AC-RED-2 con el ajuste del contexto en $1000 se congela $1000', async () => {
+  it('REQ-RED2 un ajuste viejo en el contexto ($1000) se ignora', async () => {
     setApp({ redondeoTotal: 1000, pedidos: [ped({ items: items1260, total: 1260 })] });
     await render();
     await click(boton('Cambiar a facturado'));
-    expect(guardado()).toMatchObject({ redondeoMultiplo: 1000, totalRedondeado: 1000, redondeo: -260 });
+    expect(guardado()).toMatchObject({ redondeoMultiplo: 0, totalRedondeado: 1260, redondeo: 0 });
   });
 
   it('AC-RED-2 sin redondeo (0) congela 0 y el total a cobrar es el de los renglones', async () => {

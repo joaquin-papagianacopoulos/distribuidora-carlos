@@ -115,7 +115,7 @@ export function lineaGrupoBulto(rengs, { peso, sufijoPrecioBulto = '' } = {}) {
   const precioUnit = precios.size === 1 ? Number(lista[0]?.precio) : null;
   const porBulto = lista.some(i => i.precioPorBulto === true);
   // AC-ESC-3: si todos los renglones tienen la misma escala se muestra (ASCII, va al PDF).
-  const escalas = new Set(lista.map(i => (Number(i.escalaPct) > 0 ? `${i.escalaDesde}|${i.escalaPct}` : '')));
+  const escalas = new Set(lista.map(i => etiquetaEscala(i, { pdf: true }) || ''));
   const etiqueta = escalas.size === 1 ? etiquetaEscala(lista[0], { pdf: true }) : null;
   const marca = (porBulto ? sufijoPrecioBulto : '') + (etiqueta ? ` (${etiqueta})` : '');
   if (bx !== null && Number.isInteger(total) && total >= bx) {

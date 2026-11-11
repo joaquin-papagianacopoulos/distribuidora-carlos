@@ -6,7 +6,7 @@ import SelectorMarca from './SelectorMarca';
 import { ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 import { CAMPOS_PRODUCTO, calcularPrecioVenta, validarProducto } from '../domain/productos';
 import { validarImagen } from '../domain/tiendaPortada';
-import { avisoPrecioBulto, normalizarEscalasBulto, MAX_ESCALAS_BULTO } from '../domain/precios';
+import { avisoPrecioBulto, normalizarEscalasBulto, valorEscalaTexto, MAX_ESCALAS_BULTO } from '../domain/precios';
 import { normalizarBultoX } from '../domain/bultos';
 import { autocompletarPrecio } from '../domain/precioCosto';
 
@@ -14,8 +14,9 @@ const str = (v, def = '') => (v === undefined || v === null ? def : String(v));
 
 // AC-ESC-1: siempre 3 filas en el formulario (las vacias se ignoran al guardar).
 const filasEscalas = (arr) => {
-  const base = normalizarEscalasBulto(arr).map(e => ({ desde: String(e.desde), pct: String(e.pct).replace('.', ',') }));
-  while (base.length < MAX_ESCALAS_BULTO) base.push({ desde: '', pct: '' });
+  // REQ-ESC2: el valor es el precio por unidad ("950"); una escala vieja en % se muestra como "8%".
+  const base = normalizarEscalasBulto(arr).map(e => ({ desde: String(e.desde), valor: valorEscalaTexto(e) }));
+  while (base.length < MAX_ESCALAS_BULTO) base.push({ desde: '', valor: '' });
   return base;
 };
 
@@ -124,19 +125,19 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
         renderCampo={{
           categoria: (props) => <SelectorRubro {...props} rubros={rubros} />,
           marca: (props) => <SelectorMarca {...props} marcas={marcas} />,
-          // AC-ESC-1: 3 filas "Desde (bultos)" + "% desc."; sin Bulto x > 1 quedan deshabilitadas.
+          // AC-ESC-1 / REQ-ESC2: 3 filas "Desde (bultos)" + "Precio c/u"; sin Bulto x > 1 quedan deshabilitadas.
           escalasBulto: ({ id, value, onChange: set, error }) => {
             const filas = Array.isArray(value) ? value : filasEscalas([]);
             const sinBulto = normalizarBultoX(valores.bultoX) === null;
             const cambiar = (i, campo, v) => set(filas.map((f, k) => (k === i ? { ...f, [campo]: v } : f)));
             return (
-              <div id={id} data-testid="escalas-bulto" role="group" aria-label="Descuento por escala de bultos">
+              <div id={id} data-testid="escalas-bulto" role="group" aria-label="Precio por escala de bultos">
                 {filas.map((f, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
                     <input className="input" inputMode="numeric" autoComplete="off" placeholder="Desde (bultos)" aria-label={`Escala ${i + 1} desde (bultos)`}
                       value={f.desde} disabled={sinBulto} aria-invalid={error ? 'true' : 'false'} onChange={e => cambiar(i, 'desde', e.target.value)} />
-                    <input className="input" inputMode="decimal" autoComplete="off" placeholder="% desc." aria-label={`Escala ${i + 1} % desc.`}
-                      value={f.pct} disabled={sinBulto} onChange={e => cambiar(i, 'pct', e.target.value)} />
+                    <input className="input" inputMode="decimal" autoComplete="off" placeholder="Precio c/u" aria-label={`Escala ${i + 1} precio por unidad`}
+                      value={f.valor} disabled={sinBulto} onChange={e => cambiar(i, 'valor', e.target.value)} />
                   </div>
                 ))}
               </div>
@@ -153,7 +154,7 @@ const ProductoForm = ({ inicial = null, existentes = [], proveedores = [], rubro
           escalasBulto: errores.escalasBulto ? undefined
             : (normalizarBultoX(valores.bultoX) === null
               ? 'Cargá primero "Bulto x" mayor que 1 para usar escalas.'
-              : (avisosPrecio.escalasBulto || 'Opcional. Desde cuántos bultos se hace cada % de descuento (de menor a mayor, hasta 3 escalas). Aplica a todas las unidades.')),
+              : (avisosPrecio.escalasBulto || 'Opcional. Desde cuántos bultos vale cada precio por unidad, ya con el descuento hecho (de menor a mayor, hasta 3 escalas). Aplica a todas las unidades.')),
           ventaPor: 'El precio es por unidad. "Bulto" exige Bulto x mayor que 1.',
           precio: errores.precio ? undefined : `Costo neto ${fmt(costoNeto)} · sugerido ${fmt(precioVenta1)}${precioManual ? ' (precio cargado a mano)' : ''}${avisosPrecio.precio ? ' · ' + avisosPrecio.precio : ''}`,
           stock: inicial

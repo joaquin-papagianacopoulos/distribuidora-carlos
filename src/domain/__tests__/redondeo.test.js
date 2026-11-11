@@ -30,10 +30,10 @@ describe('AC-RED-2 redondearTotal', () => {
 });
 
 describe('AC-RED-1 normalizarMultiplo', () => {
-  it('AC-RED-1 default 500 y valores validos', () => {
-    expect(normalizarMultiplo(undefined)).toBe(500);
-    expect(normalizarMultiplo(null)).toBe(500);
-    expect(normalizarMultiplo('x')).toBe(500);
+  it('REQ-RED2 sin dato no se redondea (default 0) y valores validos', () => {
+    expect(normalizarMultiplo(undefined)).toBe(0);
+    expect(normalizarMultiplo(null)).toBe(0);
+    expect(normalizarMultiplo('x')).toBe(0);
     expect(normalizarMultiplo(0)).toBe(0);
     expect(normalizarMultiplo('1000')).toBe(1000);
   });

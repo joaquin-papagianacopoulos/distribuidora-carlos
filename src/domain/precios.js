@@ -22,13 +22,20 @@ const cantidadNum = (v) => {
 };
 
 // ---------------------------------------------------------------------------
-// REQ-ESC: descuento por escala de bultos (hasta 3 escalas "desde N bultos, D %").
+// REQ-ESC: escalas por bultos (hasta 3). REQ-ESC2: cada escala lleva el PRECIO por unidad ya con el
+// descuento ("desde N bultos, $P c/u") => { desde, precio }. Las escalas viejas en % ({ desde, pct })
+// siguen funcionando igual que antes.
 // ---------------------------------------------------------------------------
 export const MAX_ESCALAS_BULTO = 3;
 const MAX_ESCALAS_LEIDAS = 10;
 const MAX_DESDE_ESCALA = 9999;
 
+const MAX_PRECIO_ESCALA = 999999999999;
+
 const esDecimal2 = (n) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-7;
+
+const precioEscalaValido = (p) => typeof p === 'number' && Number.isFinite(p) && p > 0 && p <= MAX_PRECIO_ESCALA && esDecimal2(p);
+const pctEscalaValido = (p) => typeof p === 'number' && Number.isFinite(p) && p > 0 && p < 100 && esDecimal2(p);
 
 // AC-ESC-4: escalas válidas y crecientes; lo inválido o desordenado se ignora de a uno, nunca tira.
 export function normalizarEscalasBulto(raw) {
@@ -41,11 +48,12 @@ export function normalizarEscalasBulto(raw) {
   for (const e of arr.slice(0, MAX_ESCALAS_LEIDAS)) {
     if (!e || typeof e !== 'object') continue;
     const d = e.desde;
-    const p = e.pct;
     if (typeof d !== 'number' || !Number.isInteger(d) || d < 2 || d > MAX_DESDE_ESCALA) continue;
-    if (typeof p !== 'number' || !Number.isFinite(p) || !(p > 0) || !(p < 100) || !esDecimal2(p)) continue;
+    // REQ-ESC2: si trae un precio valido manda el precio; si no, el % (escala vieja).
+    const conPrecio = precioEscalaValido(e.precio);
+    if (!conPrecio && !pctEscalaValido(e.pct)) continue;
     if (out.length > 0 && d <= out[out.length - 1].desde) continue;
-    out.push({ desde: d, pct: Math.round(p * 100) / 100 });
+    out.push(conPrecio ? { desde: d, precio: Math.round(e.precio * 100) / 100 } : { desde: d, pct: Math.round(e.pct * 100) / 100 });
     if (out.length >= MAX_ESCALAS_BULTO) break;
   }
   return out;
@@ -72,6 +80,32 @@ export function aplicarDescuentoEscala(precio, pct) {
   return Number((num + 999999n) / 1000000n);
 }
 
+// REQ-ESC2: precio por unidad que deja una escala sobre `base`: el precio cargado, o (escala vieja) el %.
+export function precioDeEscala(base, esc) {
+  if (!esc || typeof esc !== 'object') return Number(base) || 0;
+  if (precioEscalaValido(Number(esc.precio))) return Math.round(Number(esc.precio) * 100) / 100;
+  return aplicarDescuentoEscala(base, esc.pct);
+}
+
+// Campos que se guardan en el renglon cuando se aplico una escala.
+export function camposEscala(esc) {
+  if (!esc || typeof esc !== 'object') return {};
+  if (esc.precio !== undefined && esc.precio !== null) return { escalaDesde: esc.desde, escalaPrecio: esc.precio };
+  return { escalaDesde: esc.desde, escalaPct: esc.pct };
+}
+
+// Escala aplicada a un renglon ya guardado (o null). Un pedido web hecho por el servidor trae solo
+// escalaDesde: el precio se busca en las escalas congeladas del renglon.
+export function escalaDeRenglon(item) {
+  if (!item || typeof item !== 'object') return null;
+  const d = Number(item.escalaDesde);
+  if (Number(item.escalaPct) > 0) return { desde: d, pct: Number(item.escalaPct) };
+  if (!(d >= 2)) return null;
+  if (precioEscalaValido(Number(item.escalaPrecio))) return { desde: d, precio: Number(item.escalaPrecio) };
+  const e = normalizarEscalasBulto(item.escalasBulto).find(x => x.desde === d && x.precio !== undefined);
+  return e || null;
+}
+
 // Regla REQ-PBU sin escalas (AC-PBU-5).
 function precioBasePBU(p, cantidad) {
   const precio = aPrecio(p.precio);
@@ -89,10 +123,10 @@ export function precioConEscala(producto, cantidad) {
   const base = precioBasePBU(p, cantidad);
   const esc = escalaAlcanzada(p.escalasBulto, p.bultoX, cantidad);
   if (!esc) return base;
-  const con = aplicarDescuentoEscala(base.precio, esc.pct);
+  const con = precioDeEscala(base.precio, esc);
   if (!(con < base.precio)) return base;
   const bx = normalizarBultoX(p.bultoX);
-  return { ...base, precio: con, escala: { desde: esc.desde, pct: esc.pct, bultos: Math.floor(cantidadNum(cantidad) / bx) } };
+  return { ...base, precio: con, escala: { ...esc, bultos: Math.floor(cantidadNum(cantidad) / bx) } };
 }
 
 // AC-PBU-5 + AC-ESC-2: precio por unidad que corresponde a `cantidad` del producto.
@@ -112,7 +146,7 @@ export function precioMinimoRenglon(ref) {
   if (bx !== null) {
     const base = piso;
     for (const e of normalizarEscalasBulto(r.escalasBulto)) {
-      const v = aplicarDescuentoEscala(base, e.pct);
+      const v = precioDeEscala(base, e);
       if (v < piso) piso = v;
     }
   }
@@ -122,10 +156,12 @@ export function precioMinimoRenglon(ref) {
 // Etiqueta "x5 bultos −8 %" (pantalla con signo menos real; PDF con guion ASCII).
 export function etiquetaEscala(item, { pdf = false } = {}) {
   if (!item || typeof item !== 'object') return null;
+  const esc = escalaDeRenglon(item);
   const d = Number(item.escalaDesde);
-  const p = Number(item.escalaPct);
-  if (!(d >= 2) || !(p > 0)) return null;
-  const pct = String(p).replace('.', ',');
+  if (!esc || !(d >= 2)) return null;
+  // REQ-ESC2: con precio directo el precio ya esta en el renglon: alcanza con "x3 bultos".
+  if (esc.precio !== undefined) return `x${d} bultos`;
+  const pct = String(esc.pct).replace('.', ',');
   return `x${d} bultos ${pdf ? '-' : '−'}${pct} %`;
 }
 
@@ -137,8 +173,6 @@ function basePbuRenglon(item) {
   return orig;
 }
 
-const hayEscalaRenglon = (item) => Number(item.escalaPct) > 0;
-
 // AC-PBU-3: ¿el precio del renglón lo puso una persona (precio o descuento)?
 // AC-ESC-2: el precio que sale de la escala congelada no es manual.
 export function esPrecioManual(item) {
@@ -147,7 +181,8 @@ export function esPrecioManual(item) {
   if (Number(item.descuentoPct) > 0) return true;
   const orig = item.precioOriginal;
   if (orig !== undefined && orig !== null && Number(item.precio) !== Number(orig) && item.precioPorBulto !== true) {
-    if (hayEscalaRenglon(item) && Number(item.precio) === aplicarDescuentoEscala(basePbuRenglon(item), item.escalaPct)) return false;
+    const esc = escalaDeRenglon(item);
+    if (esc && Number(item.precio) === precioDeEscala(basePbuRenglon(item), esc)) return false;
     return true;
   }
   return false;
@@ -158,8 +193,11 @@ export function esPrecioManual(item) {
 export function precioBaseRenglon(item) {
   if (!item || typeof item !== 'object') return 0;
   const base = basePbuRenglon(item);
-  if (hayEscalaRenglon(item)) return aplicarDescuentoEscala(base, item.escalaPct);
-  return base;
+  const esc = escalaDeRenglon(item);
+  if (!esc) return base;
+  if (esc.precio === undefined) return aplicarDescuentoEscala(base, esc.pct);
+  // Precio directo: nunca por encima de la base (la escala solo se aplica si baja el precio).
+  return Math.min(base, precioDeEscala(base, esc));
 }
 
 // AC-PBU-3 + AC-ESC-2: re-precia un renglón al cambiar la cantidad con los precios
@@ -173,12 +211,12 @@ export function precioAplicadoRenglon(item, cantidad) {
   if (!hayPb && escalas.length === 0) return item;
   if (item.precioOriginal === undefined || item.precioOriginal === null) return item;
   const r = precioConEscala({ precio: item.precioOriginal, precioBulto: item.precioBultoOriginal, bultoX: item.precioBultoX, escalasBulto: escalas }, cantidad);
-  const desde = r.escala ? r.escala.desde : undefined;
-  const pct = r.escala ? r.escala.pct : undefined;
+  const campos = camposEscala(r.escala);
   const mismoPb = !hayPb || r.porBulto === (item.precioPorBulto === true);
-  if (r.precio === Number(item.precio) && mismoPb && item.escalaDesde === desde && item.escalaPct === pct) return item;
-  const { escalaDesde: _d, escalaPct: _p, ...resto } = item;
-  return { ...resto, precio: r.precio, ...(hayPb ? { precioPorBulto: r.porBulto } : {}), ...(r.escala ? { escalaDesde: desde, escalaPct: pct } : {}) };
+  if (r.precio === Number(item.precio) && mismoPb && item.escalaDesde === campos.escalaDesde
+    && item.escalaPct === campos.escalaPct && item.escalaPrecio === campos.escalaPrecio) return item;
+  const { escalaDesde: _d, escalaPct: _p, escalaPrecio: _e, ...resto } = item;
+  return { ...resto, precio: r.precio, ...(hayPb ? { precioPorBulto: r.porBulto } : {}), ...campos };
 }
 
 // REQ-FRB (AC-FRB-1): renglones que no congelaron el precio de bulto (pedidos web
@@ -419,46 +457,97 @@ const numTipeado = (v) => {
 
 const vacioTipeado = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
-// filas: [{desde, pct}] con texto o número. Devuelve { valor, errores, avisos }.
-export function validarEscalasBulto(filas, bultoX) {
+// Precio tipeado: "950", "$ 950", "950,50", "1.250" o "1.250,50" (el punto de miles va de a 3 digitos).
+const precioTipeado = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  let s = v.trim().replace(/^\$\s*/, '').replace(/\s/g, '');
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '');
+  s = s.replace(',', '.');
+  if (s === '' || !/^\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
+const esPorcentajeTipeado = (v) => typeof v === 'string' && /%\s*$/.test(v);
+
+// Valor crudo de una fila: `valor` (texto: "950" = precio, "8%" = descuento viejo), `precio` o `pct`.
+const valorDeFila = (f) => {
+  if (!vacioTipeado(f.valor)) return { tipo: esPorcentajeTipeado(f.valor) ? 'pct' : 'precio', crudo: f.valor };
+  if (!vacioTipeado(f.precio)) return { tipo: 'precio', crudo: f.precio };
+  if (!vacioTipeado(f.pct)) return { tipo: 'pct', crudo: f.pct };
+  return null;
+};
+
+// filas: [{desde, valor}] (formulario / Excel), [{desde, precio}] o [{desde, pct}] con texto o número.
+// precioBase (opcional): precio por unidad llevando bulto, para avisar si la escala no baja el precio.
+// Devuelve { valor, errores, avisos }.
+export function validarEscalasBulto(filas, bultoX, precioBase = null) {
   const errores = [];
   const avisos = [];
   const lista = Array.isArray(filas) ? filas : [];
   const valor = [];
-  const usadas = lista.filter(f => f && typeof f === 'object' && !(vacioTipeado(f.desde) && vacioTipeado(f.pct)));
+  const usadas = lista.filter(f => f && typeof f === 'object' && !(vacioTipeado(f.desde) && valorDeFila(f) === null));
   if (usadas.length === 0) return { valor, errores, avisos };
   if (normalizarBultoX(bultoX) === null) errores.push('Las escalas necesitan Bulto x mayor a 1');
   if (usadas.length > MAX_ESCALAS_BULTO) errores.push(`Hasta ${MAX_ESCALAS_BULTO} escalas por producto`);
   let ultimoDesde = 0;
   let ultimoPct = 0;
+  let ultimoPrecio = 0;
+  const base = Number(precioBase) > 0 ? Number(precioBase) : null;
   usadas.slice(0, MAX_ESCALAS_BULTO).forEach((f, i) => {
     const n = i + 1;
-    if (vacioTipeado(f.desde) || vacioTipeado(f.pct)) { errores.push(`Escala ${n}: completá "Desde (bultos)" y "% desc."`); return; }
+    const v = valorDeFila(f);
+    if (vacioTipeado(f.desde) || v === null) {
+      errores.push(`Escala ${n}: completá "Desde (bultos)" y ${f.pct !== undefined && f.valor === undefined ? '"% desc."' : '"Precio c/u"'}`);
+      return;
+    }
     const d = numTipeado(f.desde);
-    const p = numTipeado(f.pct);
     if (d === null || !Number.isInteger(d) || d < 2 || d > MAX_DESDE_ESCALA) { errores.push(`Escala ${n}: "Desde (bultos)" debe ser un entero entre 2 y ${MAX_DESDE_ESCALA}`); return; }
-    if (p === null || !(p > 0) || !(p < 100) || !esDecimal2(p)) { errores.push(`Escala ${n}: el % de descuento debe estar entre 0 y 100 (hasta 2 decimales)`); return; }
+    if (v.tipo === 'pct') {
+      const p = numTipeado(v.crudo);
+      if (p === null || !(p > 0) || !(p < 100) || !esDecimal2(p)) { errores.push(`Escala ${n}: el % de descuento debe estar entre 0 y 100 (hasta 2 decimales)`); return; }
+      if (d <= ultimoDesde) { errores.push(`Escala ${n}: "Desde (bultos)" tiene que ser mayor que el de la escala anterior`); return; }
+      if (ultimoPct > 0 && p <= ultimoPct) avisos.push(`Escala ${n}: el descuento no es mayor que el de la escala anterior`);
+      ultimoDesde = d;
+      ultimoPct = p;
+      valor.push({ desde: d, pct: Math.round(p * 100) / 100 });
+      return;
+    }
+    // REQ-ESC2: precio por unidad ya con el descuento.
+    const p = precioTipeado(v.crudo);
+    if (p === null || !precioEscalaValido(p)) { errores.push(`Escala ${n}: el precio debe ser un número mayor a 0 (hasta 2 decimales)`); return; }
     if (d <= ultimoDesde) { errores.push(`Escala ${n}: "Desde (bultos)" tiene que ser mayor que el de la escala anterior`); return; }
-    if (ultimoPct > 0 && p <= ultimoPct) avisos.push(`Escala ${n}: el descuento no es mayor que el de la escala anterior`);
+    if (ultimoPrecio > 0 && p >= ultimoPrecio) avisos.push(`Escala ${n}: el precio no es menor que el de la escala anterior`);
+    else if (base !== null && p >= base) avisos.push(`Escala ${n}: el precio no es menor que el precio del producto (no se va a aplicar)`);
+    else if (base !== null && p < base / 2) avisos.push(`Escala ${n}: el precio es menos de la mitad del precio del producto, revisalo`);
     ultimoDesde = d;
-    ultimoPct = p;
-    valor.push({ desde: d, pct: Math.round(p * 100) / 100 });
+    ultimoPrecio = p;
+    valor.push({ desde: d, precio: Math.round(p * 100) / 100 });
   });
   return { valor: errores.length ? [] : valor, errores, avisos };
 }
 
 const pctTexto = (p) => String(p).replace('.', ',');
 
-// [{desde:5,pct:8}] -> "5=8; 10=12"
-export function escalasATexto(arr) {
-  return normalizarEscalasBulto(arr).map(e => `${e.desde}=${pctTexto(e.pct)}`).join('; ');
+// Texto del valor de una escala: precio "950" / "950,5"; % viejo "8%".
+export function valorEscalaTexto(e) {
+  if (!e || typeof e !== 'object') return '';
+  if (e.precio !== undefined && e.precio !== null) return pctTexto(e.precio);
+  return e.pct !== undefined && e.pct !== null ? `${pctTexto(e.pct)}%` : '';
 }
 
-// "5=8; 10=7,5" -> filas [{desde:'5',pct:'8'}] (sin validar; usar validarEscalasBulto).
+// [{desde:3,precio:950},{desde:10,precio:900}] -> "3=950; 10=900" (escala vieja en %: "5=8%")
+export function escalasATexto(arr) {
+  return normalizarEscalasBulto(arr).map(e => `${e.desde}=${valorEscalaTexto(e)}`).join('; ');
+}
+
+// "3=950; 10=900" -> filas [{desde:'3',valor:'950'}] (sin validar; usar validarEscalasBulto).
+// REQ-ESC2: el valor es el PRECIO por unidad; solo si termina en "%" es un descuento (formato viejo).
 export function parsearEscalasTexto(txt) {
   if (typeof txt !== 'string') return [];
   return txt.split(/[;|]/).map(s => s.trim()).filter(Boolean).map(parte => {
     const m = parte.split(/[=:]/);
-    return { desde: (m[0] ?? '').trim(), pct: (m.slice(1).join(':') ?? '').trim() };
+    return { desde: (m[0] ?? '').trim(), valor: (m.slice(1).join(':') ?? '').trim() };
   });
 }

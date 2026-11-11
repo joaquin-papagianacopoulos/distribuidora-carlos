@@ -21,7 +21,6 @@ import { soloProveedoresActivos } from '../domain/proveedores';
 import { tienePin, estaActivo } from '../domain/vendedores';
 import { syncStock } from '../services/stockService';
 import { syncComisiones } from '../services/comisionesService';
-import { bajarAjustes, leerRedondeoLocal } from '../services/ajustesService';
 import { setUsuarioSesion, datosPersistibles, marcarSesionValidada, sesionValidada, limpiarSesion } from '../services/sesion';
 import {
   syncPedidosPendientes,
@@ -71,8 +70,6 @@ export const AppProvider = ({ children }) => {
   const [lastSync, setLastSync] = useState(null);
   const [syncError, setSyncError] = useState(null);
   const [syncNote, setSyncNote] = useState(null);
-  // REQ-RED (AC-RED-1): redondeo del total (0 / 500 / 1000), sincronizado desde la nube; cache local.
-  const [redondeoTotal, setRedondeoTotal] = useState(() => leerRedondeoLocal());
   const isSyncing = useRef(false);
   const lastMaestrosSyncRef = useRef(0);
   const lastFaltantesSyncRef = useRef(0);
@@ -288,9 +285,6 @@ export const AppProvider = ({ children }) => {
 
         lastFaltantesSyncRef.current = Date.now();
       }
-
-      // Ajustes (REQ-RED): no bloqueante; sin conexion o sin migracion 025 queda el cache.
-      bajarAjustes().then(r => { if (r?.ok) setRedondeoTotal(r.redondeoTotal); }).catch(() => {});
 
       // Comisiones (REQ-COM): solo admin. Reintenta cierres/anulaciones que
       // quedaron sin respuesta y baja los cierres de otros dispositivos.
@@ -579,8 +573,6 @@ export const AppProvider = ({ children }) => {
       lastSync,
       syncError,
       syncNote,
-      redondeoTotal,
-      setRedondeoTotal,
       zonaActiva,
       setZona,
       syncNow,

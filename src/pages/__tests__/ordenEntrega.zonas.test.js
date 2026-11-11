@@ -207,7 +207,7 @@ describe('AC-HRU-1 hoja de ruta desde Orden de entrega', () => {
     expect(boton('Hoja de ruta').disabled).toBe(true);
   });
 
-  it('AC-HRU-1 genera la hoja con orden, cliente, importe redondeado, saldo anterior y total a cobrar', async () => {
+  it('AC-HRU-1 genera la hoja con orden, cliente, importe, saldo anterior y total a cobrar', async () => {
     setApp({ deudas: [DEUDA_ANA] });
     getPedidos.mockResolvedValue([P(10, 3, 'Cami'), P(11, 1, 'Ana'), P(12, 4, 'Dani')]);
     generarHojaRutaFile.mockResolvedValue(new File(['x'], 'h.pdf'));
@@ -218,10 +218,10 @@ describe('AC-HRU-1 hoja de ruta desde Orden de entrega', () => {
     const [resultado, opciones] = generarHojaRutaFile.mock.calls[0];
     expect(opciones).toEqual({ fechas: [FECHA], zonas: [] });
     expect(resultado.filas.map(f => [f.clienteNombre, f.orden])).toEqual([['Ana', 1], ['Cami', 2], ['Dani', 1]]);
-    // multiplo vigente por defecto = $500: 1200 pendiente => vista previa 1000 (mitad hacia arriba solo desde 1250)
-    expect(resultado.filas[0]).toMatchObject({ importe: 1000, saldoAnterior: 800, totalACobrar: 1800 });
-    expect(resultado.filas[1]).toMatchObject({ saldoAnterior: 0, totalACobrar: 1000 });
-    expect(resultado.totales).toMatchObject({ pedidos: 3, importe: 3000, saldoAnterior: 800, totalACobrar: 3800 });
+    // REQ-RED2: sin redondeo, el importe es la suma de renglones (1200).
+    expect(resultado.filas[0]).toMatchObject({ importe: 1200, saldoAnterior: 800, totalACobrar: 2000 });
+    expect(resultado.filas[1]).toMatchObject({ saldoAnterior: 0, totalACobrar: 1200 });
+    expect(resultado.totales).toMatchObject({ pedidos: 3, importe: 3600, saldoAnterior: 800, totalACobrar: 4400 });
     expect(generarFacturaFile).not.toHaveBeenCalled();
     expect(shareFiles).toHaveBeenCalled();
   });
@@ -235,7 +235,7 @@ describe('AC-HRU-1 hoja de ruta desde Orden de entrega', () => {
     expect(window.alert).toHaveBeenCalledWith(expect.stringMatching(/No hay pedidos/));
   });
 
-  it('AC-RTO-5 el remito recibe el saldo anterior del cliente y el redondeo de vista previa; el saldo se cuenta una sola vez', async () => {
+  it('AC-RTO-5 el remito recibe el saldo anterior del cliente (sin vista previa de redondeo, REQ-RED2); el saldo se cuenta una sola vez', async () => {
     setApp({ deudas: [DEUDA_ANA] });
     getPedidos.mockResolvedValue([P(11, 1, 'Ana'), P(13, 1, 'Ana')]);
     await render();
@@ -243,6 +243,6 @@ describe('AC-HRU-1 hoja de ruta desde Orden de entrega', () => {
     await click(boton('Imprimir pedidos para entregar'));
     const saldos = generarFacturaFile.mock.calls.map(c => c[3]);
     expect(saldos).toEqual([800, 0]);
-    expect(generarFacturaFile.mock.calls[0][5]).toEqual({ redondeoVistaPrevia: 500 });
+    expect(generarFacturaFile.mock.calls[0][5]).toBeUndefined();
   });
 });

@@ -1,5 +1,8 @@
 // src/domain/redondeo.js — REQ-RED (AC-RED-1, AC-RED-2).
 // Redondeo del total a cobrar de un pedido al multiplo mas cercano ($500 / $1000 / sin redondeo).
+// REQ-RED2 (2026-11-10): la app YA NO redondea: Facturacion congela siempre multiplo 0 y no hay ajuste en
+// Configuracion ni renglon "Redondeo" en el remito. Este modulo queda para los pedidos facturados antes
+// (con multiplo congelado conservan lo que se les cobro) y para el sync de las columnas de la migracion 025.
 // Funciones puras: sin React, sin IndexedDB, sin Supabase.
 //
 // Modelo (aclaracion de la Tanda 2): `pedido.total` sigue siendo la suma de renglones (las comisiones
@@ -8,7 +11,7 @@
 // este cambio (sin la clave) nunca se redondean.
 
 export const MULTIPLOS_REDONDEO = Object.freeze([0, 500, 1000]);
-export const REDONDEO_DEFAULT = 500;
+export const REDONDEO_DEFAULT = 0;
 
 const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
@@ -18,7 +21,7 @@ const multiploValido = (v) => {
   return MULTIPLOS_REDONDEO.includes(n) ? n : null;
 };
 
-// 0 / 500 / 1000. Sin dato (undefined/null) o invalido => 500 (default del negocio).
+// 0 / 500 / 1000. Sin dato (undefined/null) o invalido => 0 (sin redondeo, REQ-RED2).
 export const normalizarMultiplo = (v) => {
   const m = multiploValido(v);
   return m === null ? REDONDEO_DEFAULT : m;

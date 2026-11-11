@@ -3,7 +3,7 @@
 import { texto } from './validacion';
 import { cambiosDeCantidad } from './armado';
 import { permisoValido, ROLES } from './permisos';
-import { precioConEscala, precioMinimoRenglon, normalizarEscalasBulto, aplicarDescuentoEscala } from './precios';
+import { precioConEscala, precioMinimoRenglon, normalizarEscalasBulto, precioDeEscala, camposEscala, escalaDeRenglon } from './precios';
 import { normalizarBultoX } from './bultos';
 
 export const MAX_IDS_MODIFICADO = 500;
@@ -59,14 +59,14 @@ const congelarPrecios = (itemsNuevos, itemsOriginales, productosById) => {
     const prod = productosById instanceof Map && k !== null ? productosById.get(k) : null;
     const { fijo, ref } = refPrecio(it, o, prod);
     // REQ-ESC: escalaDesde/escalaPct del cliente nunca se usan: se recalculan abajo.
-    const { precioManual: _pm, descuentoPct: _dp, escalaDesde: _ed, escalaPct: _ep, escalasBulto: _eb, ...base } = it;
+    const { precioManual: _pm, descuentoPct: _dp, escalaDesde: _ed, escalaPct: _ep, escalaPrecio: _epr, escalasBulto: _eb, ...base } = it;
     const limpio = { ...base, precioOriginal: ref.precioOriginal };
     if (Number(ref.precioBultoOriginal) > 0) { limpio.precioBultoOriginal = ref.precioBultoOriginal; limpio.precioBultoX = ref.precioBultoX; }
     if (ref.escalasBulto.length > 0) { limpio.escalasBulto = ref.escalasBulto; limpio.precioBultoX = ref.precioBultoX; }
     if (fijo !== undefined) {
       return {
         ...limpio, precio: fijo, precioManual: o.precioManual, descuentoPct: o.descuentoPct, precioPorBulto: o.precioPorBulto,
-        ...(Number(o.escalaPct) > 0 ? { escalaDesde: o.escalaDesde, escalaPct: o.escalaPct } : {}),
+        ...camposEscala(escalaDeRenglon(o)),
       };
     }
     const cant = Number(it.cantidad) || 0;
@@ -85,13 +85,13 @@ const congelarPrecios = (itemsNuevos, itemsOriginales, productosById) => {
         const bx = normalizarBultoX(ref.precioBultoX);
         const baseBulto = conBulto && bx !== null ? Math.min(ref.precioOriginal, ref.precioBultoOriginal) : ref.precioOriginal;
         for (const e of ref.escalasBulto) {
-          if (aplicarDescuentoEscala(baseBulto, e.pct) === Math.round(pedido * 100) / 100) escala = { desde: e.desde, pct: e.pct };
+          if (precioDeEscala(baseBulto, e) === Math.round(pedido * 100) / 100) escala = e;
         }
       }
     }
     const out = { ...limpio, precio };
     if (conBulto) out.precioPorBulto = aplicado.porBulto;
-    if (escala) { out.escalaDesde = escala.desde; out.escalaPct = escala.pct; }
+    if (escala) Object.assign(out, camposEscala(escala));
     return out;
   });
 };

@@ -4,8 +4,8 @@ import { isPedidoVisible, normalizePedidoFecha } from './pedidos';
 import { filasPdfCierre } from '../domain/comisiones';
 import { filasBoleta, numerarFilasBoleta } from '../domain/gruposFactura';
 import { totalesBoleta } from '../domain/precios';
-import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA } from '../domain/boletaLayout';
-import { desgloseTotalRemito } from '../domain/redondeo';
+import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA, ESTILO_ITEMS_REMITO } from '../domain/boletaLayout';
+import { totalACobrar } from '../domain/redondeo';
 
 const alpha = (a, b) =>
   String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' });
@@ -232,7 +232,6 @@ export const generarFaltantesDiaFile = async (faltantesDelDia, fecha, modo = 'pr
 // opciones (todas opcionales, retrocompatible):
 //   modoGrupos: 'detalle' | 'solo_grupos' => como se imprimen los grupos (REQ-AGR, AC-AGR-3).
 //   saldoAFavor: saldo a favor del cliente (REQ-REN).
-//   redondeoVistaPrevia: multiplo (0/500/1000) para mostrar el redondeo de un pedido todavia pendiente (REQ-RED).
 //   tipoFactura: se ignora en el impreso (el remito nunca dice FACTURA A/B).
 const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null, opciones = {}) => {
   const { jsPDF } = await import('jspdf');
@@ -301,11 +300,9 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
 
   // REQ-FRB: el precio de bulto no se muestra como descuento (base = precioBaseRenglon).
   const { total: totalRenglones, totalSinDescuento: totalSinDesc, descuento: descuentoTotal, descuentoPct } = totalesBoleta(sortedItems);
-  // REQ-RED: subtotal (renglones), ajuste de redondeo y total a cobrar de ESTE pedido.
-  const { subtotal, redondeo, total } = desgloseTotalRemito(
-    { ...pedido, total: totalRenglones },
-    { multiploVistaPrevia: opciones?.redondeoVistaPrevia },
-  );
+  // REQ-RED2: el remito ya no muestra "Subtotal" ni "Redondeo": solo el TOTAL. Los pedidos nuevos no se
+  // redondean; uno facturado antes con redondeo congelado conserva el total que ya se le cobro.
+  const total = totalACobrar({ ...pedido, total: totalRenglones });
 
   doc.autoTable({
     startY: 38,
@@ -317,6 +314,8 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     // AC-RTO-4: estilo compacto (mas renglones por hoja), con bordes marcados para impresoras.
     styles: ESTILO_TABLA_COMPACTA,
     headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold' },
+    // AC-RTO-7: renglones en Arial (helvetica en jsPDF) negrita, negro y un punto mas grandes: se leen mejor.
+    bodyStyles: ESTILO_ITEMS_REMITO,
     alternateRowStyles: { fillColor: [232, 232, 232] },
     tableLineColor: [60, 60, 60],
     tableLineWidth: 0.45,
@@ -332,20 +331,19 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
       if (data.section !== 'body') return;
       const tipo = filas[data.row.index]?.tipo;
       if (tipo === 'grupo') { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [210, 210, 210]; }
-      else if (tipo === 'detalle') { data.cell.styles.fontStyle = 'italic'; data.cell.styles.textColor = [70, 70, 70]; data.cell.styles.fillColor = [255, 255, 255]; }
+      else if (tipo === 'detalle') { data.cell.styles.fontStyle = 'bolditalic'; data.cell.styles.textColor = [40, 40, 40]; data.cell.styles.fillColor = [255, 255, 255]; }
     },
   });
 
   const finalY = doc.lastAutoTable.finalY + 6;
   const hayDescuento = descuentoTotal > 0.001;
-  const hayRedondeo = Math.abs(redondeo) > 0.001;
   const hayDeuda = deudaPendiente > 0.001;
   // REQ-REN (AC-REN-3): saldo a favor del cliente (ya neteado con la deuda por cuentaParaBoleta).
   // Va en el mismo lugar que el saldo anterior (nunca aparecen los dos).
   const saldoAFavor = !hayDeuda && Number(opciones?.saldoAFavor) > 0.001 ? Number(opciones.saldoAFavor) : 0;
   const obsLineas = pedido.observaciones ? doc.splitTextToSize(`Obs: ${pedido.observaciones}`, 175).slice(0, 3) : [];
   const pie = layoutPieBoleta({
-    finalY, pageH, hayDescuento, hayRedondeo, hayDeuda: hayDeuda || saldoAFavor > 0, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1,
+    finalY, pageH, hayDescuento, hayDeuda: hayDeuda || saldoAFavor > 0, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1,
   });
   // Si el pie no entra en la hoja, va a una hoja nueva.
   if (pie.nuevaPagina) doc.addPage();
@@ -362,15 +360,6 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     doc.setFontSize(9);
     doc.text('Total sin descuento:', 150, pie.sinDescuentoY);
     doc.text(pesos(totalSinDesc), 195, pie.sinDescuentoY, { align: 'right' });
-  }
-  // AC-RTO-2 / REQ-RED: Subtotal / Redondeo / TOTAL (solo TOTAL si no hay ajuste).
-  if (hayRedondeo) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Subtotal:', 150, pie.subtotalY);
-    doc.text(pesos(subtotal), 195, pie.subtotalY, { align: 'right' });
-    doc.text('Redondeo:', 150, pie.redondeoY);
-    doc.text(`${redondeo > 0 ? '+' : '-'}${pesos(Math.abs(redondeo))}`, 195, pie.redondeoY, { align: 'right' });
   }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);

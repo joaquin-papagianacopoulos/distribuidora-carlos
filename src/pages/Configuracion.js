@@ -10,7 +10,6 @@ import {
 import ClienteForm from '../components/ClienteForm';
 import LinksTienda from '../components/LinksTienda';
 import ConfigTienda from '../components/ConfigTienda';
-import ConfigRedondeo from '../components/ConfigRedondeo';
 import { subirImagenTienda } from '../services/tiendaConfigService';
 import ProductoForm from '../components/ProductoForm';
 import ProveedorForm from '../components/ProveedorForm';
@@ -998,7 +997,6 @@ const Configuracion = () => {
       )}
 
       {/* REQ-POR (AC-POR-2..5): Configuración → Tienda */}
-      {tab === 'tienda' && <ConfigRedondeo online={!!online} />}
       {tab === 'tienda' && <ConfigTienda productos={productos} stockDe={id => stockDe(stockMap, id)} online={!!online} />}
 
       {/* REQ-WEB (AC-WEB-7): links de tienda por vendedor */}

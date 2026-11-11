@@ -718,3 +718,18 @@ Causa en `diagnostico-precio-costo.md`: con precio vacío y sin % de ganancia se
 - **AC-ESC-4** Función pura `precioConEscala(producto, cantidad)` integrada en `precioAplicado`, con tests (sin escalas, borde exacto, redondeo, escalas desordenadas o inválidas se ignoran).
 
 
+---
+
+## Lote 2026-11-10 — Tanda 4 (remito sin redondeo, ítems en negrita, escalas con precio)
+
+## REQ-RED2 — Sin redondeo del total (reemplaza REQ-RED)
+- **AC-RED2-1** La app ya no redondea el total: al facturar se congela múltiplo 0 (total a cobrar = suma de renglones). Se saca la tarjeta "Redondeo del total" de Configuración y la vista previa de redondeo en Orden de entrega / hoja de ruta.
+- **AC-RED2-2** El remito no imprime "Subtotal" ni "Redondeo": solo "TOTAL". Un pedido facturado antes con redondeo congelado conserva el total que ya se le cobró (no se toca su deuda); si se revierte a pendiente y se vuelve a facturar queda sin redondeo.
+
+## REQ-RTO (agregado)
+- **AC-RTO-7** Los renglones (ítems) del remito van en Arial (en jsPDF, `helvetica`) **negrita**, negro, 9 pt.
+
+## REQ-ESC2 — Escalas de bultos con precio directo (modifica REQ-ESC)
+- **AC-ESC2-1** Cada escala es "desde N bultos → $P por unidad" (`{ desde, precio }`): el precio ya viene con el descuento y se cobra tal cual (sin % ni redondeo para arriba), a todas las unidades, solo si es menor al precio que correspondía. Las escalas viejas en % (`{ desde, pct }`) siguen funcionando (AC-ESC-2). El renglón guarda `escalaDesde` + `escalaPrecio`.
+- **AC-ESC2-2** Formulario: "Desde (bultos)" + "Precio c/u". Plantilla Excel, columna "Escalas por bulto": `bultos=precio` separadas por `;` (ej. `3=950; 10=900`); solo si el valor termina en `%` se toma como descuento (formato viejo). Aviso (no bloquea) si el precio no baja o es menos de la mitad del precio del producto.
+- **AC-ESC2-3** Migración `027_escalas_precio.sql`: `escalas_bulto_normalizar` y `tienda_precio_con_escala` aceptan `precio` (espejo de `precios.js`). Sin la 027 el servidor descarta las escalas con precio.

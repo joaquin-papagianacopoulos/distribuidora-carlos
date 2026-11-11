@@ -10,7 +10,6 @@ import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
 import { borrarPedidoOnlineFirst, guardarPedidoOnlineFirst, marcarEntregadoOnlineFirst } from '../services/pedidoRepository';
 import { getOrdenEntrega, withOrdenEntrega } from '../utils/ordenEntrega';
 import { alFacturar, alRevertirPendiente, recalcularRedondeoCongelado, totalACobrar } from '../domain/redondeo';
-import { leerRedondeoLocal } from '../services/ajustesService';
 import { registrarDeudaFacturado, quitarDeudaDePedido, actualizarMontoDeudaDePedido } from '../services/deudaRepository';
 import { borrarFaltantesDeProducto } from '../services/faltanteRepository';
 import { previsualizarStockPedido } from '../services/stockService';
@@ -283,7 +282,7 @@ const FacturacionItemRow = ({
 };
 
 const Facturacion = () => {
-  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres, stockMap, redondeoTotal } = useApp();
+  const { pedidos, clientes, productos, vendedores, deudas, faltantes, vendedorActual, zonaActiva, setZona, recargar, syncNow, syncPedidosFecha, syncPedidosCliente, online, comisionesCierres, stockMap } = useApp();
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const isAdmin = permisoNorm === 1;
   const puedeBulto = puedeUsarBulto(permisoNorm, 'facturacion'); // AC-BUL-8 (defensa en profundidad)
@@ -933,8 +932,8 @@ const Facturacion = () => {
       // a deudas") una vez que el pedido ya quedo con el monto definitivo.
       // Tampoco asigna mas un numero de entrega aca: ese numero ahora sale de
       // "Orden de entrega", calculado al imprimir (ver src/pages/OrdenEntrega.js).
-      // AC-RED-2: el redondeo se congela al facturar (ajuste vigente; idempotente si ya estaba congelado).
-      const facturado = alFacturar({ ...alRevertirPendiente(p), estado: 'facturado' }, redondeoTotal ?? leerRedondeoLocal());
+      // REQ-RED2: ya no se redondea el total; al facturar queda congelado "sin redondeo" (multiplo 0).
+      const facturado = alFacturar({ ...alRevertirPendiente(p), estado: 'facturado' }, 0);
       await guardarPedidoOnlineFirst(facturado, { iniciarStock: true });
       // Si el pedido conservo una deuda con cobros (se revirtio y se refactura con otro multiplo), la deuda
       // acompana el nuevo total a cobrar sin tocar lo ya cobrado.

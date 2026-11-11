@@ -6,7 +6,7 @@ import { toInt } from './validacion';
 import { MAX_CANTIDAD } from './stock';
 import { rubroDeProducto } from './rubros';
 import { cantidadInicialConMinimo } from './minimos';
-import { precioAplicado, normalizarEscalasBulto } from './precios';
+import { precioAplicado, normalizarEscalasBulto, camposEscala } from './precios';
 import { normalizarGrupoBulto } from './grupoBulto';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
@@ -84,7 +84,7 @@ export function renglonNuevo(producto, extra = {}) {
     ...(conBulto ? { precioBultoOriginal: Number(p.precioBulto), precioPorBulto: aplicado.porBulto } : {}),
     ...(congela ? { precioBultoX: normalizarBultoX(p.bultoX) } : {}),
     ...(escalas.length > 0 ? { escalasBulto: escalas } : {}),
-    ...(aplicado.escala ? { escalaDesde: aplicado.escala.desde, escalaPct: aplicado.escala.pct } : {}),
+    ...camposEscala(aplicado.escala),
     cantidad,
     ...(rubro ? { rubro } : {}),
     ...(grupoBulto ? { grupoBulto } : {}),

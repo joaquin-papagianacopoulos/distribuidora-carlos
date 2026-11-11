@@ -170,10 +170,66 @@ describe('AC-ESC-1 validarEscalasBulto y texto', () => {
     expect(r.errores).toEqual([]);
     expect(r.avisos).toHaveLength(1);
   });
-  it('AC-ESC-1 texto 5=8; 10=12 ida y vuelta', () => {
+  it('AC-ESC-1 texto de escalas viejas en % ida y vuelta (con "%")', () => {
     const t = escalasATexto([{ desde: 5, pct: 8 }, { desde: 10, pct: 7.5 }]);
-    expect(t).toBe('5=8; 10=7,5');
+    expect(t).toBe('5=8%; 10=7,5%');
     expect(validarEscalasBulto(parsearEscalasTexto(t), 10).valor).toEqual([{ desde: 5, pct: 8 }, { desde: 10, pct: 7.5 }]);
-    expect(parsearEscalasTexto('5:8|10:12')).toEqual([{ desde: '5', pct: '8' }, { desde: '10', pct: '12' }]);
+    expect(parsearEscalasTexto('5:8|10:12')).toEqual([{ desde: '5', valor: '8' }, { desde: '10', valor: '12' }]);
+  });
+  it('AC-ESC2-2 texto 3=950; 10=900,5 ida y vuelta (precio directo)', () => {
+    const t = escalasATexto([{ desde: 3, precio: 950 }, { desde: 10, precio: 900.5 }]);
+    expect(t).toBe('3=950; 10=900,5');
+    expect(validarEscalasBulto(parsearEscalasTexto(t), 10).valor).toEqual([{ desde: 3, precio: 950 }, { desde: 10, precio: 900.5 }]);
+  });
+});
+
+describe('REQ-ESC2 escalas con precio directo', () => {
+  const prod = { precio: 1000, precioBulto: 0, bultoX: 10, escalasBulto: [{ desde: 3, precio: 950 }, { desde: 10, precio: 899.5 }] };
+
+  it('AC-ESC2-1 normalizarEscalasBulto acepta precio y descarta precios invalidos', () => {
+    expect(normalizarEscalasBulto([{ desde: 3, precio: 950 }, { desde: 10, precio: 899.5 }])).toEqual([{ desde: 3, precio: 950 }, { desde: 10, precio: 899.5 }]);
+    expect(normalizarEscalasBulto([{ desde: 3, precio: 0 }, { desde: 4, precio: -5 }, { desde: 5, precio: '950' }, { desde: 6, precio: 1.234 }, { desde: 7, precio: NaN }])).toEqual([]);
+    // precio valido manda sobre el %; precio invalido cae al % si lo hay.
+    expect(normalizarEscalasBulto([{ desde: 3, precio: 950, pct: 8 }])).toEqual([{ desde: 3, precio: 950 }]);
+    expect(normalizarEscalasBulto([{ desde: 3, precio: 0, pct: 8 }])).toEqual([{ desde: 3, pct: 8 }]);
+  });
+
+  it('AC-ESC2-1 con 3 bultos o mas cobra el precio cargado, sin redondear; antes, el precio normal', () => {
+    expect(precioConEscala(prod, 29)).toEqual({ precio: 1000, porBulto: false });
+    expect(precioConEscala(prod, 30)).toEqual({ precio: 950, porBulto: false, escala: { desde: 3, precio: 950, bultos: 3 } });
+    expect(precioConEscala(prod, 100).precio).toBe(899.5);
+  });
+
+  it('AC-ESC2-1 un precio de escala que no baja el precio no se aplica', () => {
+    expect(precioConEscala({ ...prod, precioBulto: 900, escalasBulto: [{ desde: 3, precio: 950 }] }, 30)).toEqual({ precio: 900, porBulto: true });
+  });
+
+  it('AC-ESC2-1 el renglon guarda escalaDesde/escalaPrecio, no es manual y se re-precia al cambiar la cantidad', () => {
+    const item = { productoId: 1, cantidad: 10, precio: 1000, precioOriginal: 1000, precioBultoX: 10, escalasBulto: prod.escalasBulto };
+    const con = precioAplicadoRenglon({ ...item, cantidad: 30 }, 30);
+    expect(con).toMatchObject({ precio: 950, escalaDesde: 3, escalaPrecio: 950 });
+    expect(con.escalaPct).toBeUndefined();
+    expect(esPrecioManual(con)).toBe(false);
+    expect(precioBaseRenglon(con)).toBe(950);
+    expect(etiquetaEscala(con)).toBe('x3 bultos');
+    const sin = precioAplicadoRenglon({ ...con, cantidad: 10 }, 10);
+    expect(sin.precio).toBe(1000);
+    expect(sin.escalaDesde).toBeUndefined();
+    expect(sin.escalaPrecio).toBeUndefined();
+  });
+
+  it('AC-ESC2-1 pedido web (solo escalaDesde, escalaPct null): el precio sale de las escalas congeladas', () => {
+    const web = { productoId: 1, cantidad: 30, precio: 950, precioOriginal: 1000, precioBultoX: 10, escalasBulto: prod.escalasBulto, escalaDesde: 3, escalaPct: null };
+    expect(esPrecioManual(web)).toBe(false);
+    expect(etiquetaEscala(web)).toBe('x3 bultos');
+  });
+
+  it('AC-ESC2-2 validarEscalasBulto: precio invalido es error; precio que no baja o sospechosamente bajo es aviso', () => {
+    expect(validarEscalasBulto([{ desde: '3', valor: 'abc' }], 10).errores).toHaveLength(1);
+    expect(validarEscalasBulto([{ desde: '3', valor: '0' }], 10).errores).toHaveLength(1);
+    expect(validarEscalasBulto([{ desde: '3', valor: '950' }, { desde: '10', valor: '960' }], 10).avisos).toHaveLength(1);
+    expect(validarEscalasBulto([{ desde: '3', valor: '1100' }], 10, 1000).avisos[0]).toMatch(/no se va a aplicar/);
+    expect(validarEscalasBulto([{ desde: '3', valor: '8' }], 10, 1000).avisos[0]).toMatch(/menos de la mitad/);
+    expect(validarEscalasBulto([{ desde: '3', valor: '950' }], 10, 1000)).toEqual({ valor: [{ desde: 3, precio: 950 }], errores: [], avisos: [] });
   });
 });

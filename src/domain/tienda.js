@@ -211,13 +211,15 @@ export function textoPrecioBulto(prod) {
   return `Llevando el ${normalizarBultoNombre(prod.bultoNombre).toLowerCase()}: ${formatearPesos(deCentavos(pb))} c/u`;
 }
 
-// AC-ESC-3: "Llevando 5 displays: 8 % menos" (una frase por escala, la tienda no la aplica sola al mostrar).
+// AC-ESC-3 / REQ-ESC2: "Llevando 5 displays: $950 c/u" (una frase por escala; las viejas en %: "8 % menos").
 export function textoEscalasTienda(prod) {
   if (!prod || normalizarBultoX(prod.bultoX) === null) return null;
   const esc = normalizarEscalasBulto(prod.escalasBulto);
   if (esc.length === 0) return null;
   const nombre = normalizarBultoNombre(prod.bultoNombre).toLowerCase();
-  return esc.map(e => `Llevando ${e.desde} ${nombre}s: ${String(e.pct).replace('.', ',')} % menos`).join(' · ');
+  return esc.map(e => (e.precio !== undefined
+    ? `Llevando ${e.desde} ${nombre}s: ${formatearPesos(e.precio)} c/u`
+    : `Llevando ${e.desde} ${nombre}s: ${String(e.pct).replace('.', ',')} % menos`)).join(' · ');
 }
 
 // Precio de un bulto completo con la misma regla que cobra el servidor (AC-PBU-4):

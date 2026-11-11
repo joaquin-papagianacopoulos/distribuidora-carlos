@@ -12,7 +12,6 @@ import { updateCliente, getPedidos } from '../db';
 import { syncClientes } from '../sync/syncService';
 import { generarFacturaFile, generarHojaRutaFile } from '../utils/pdfGen';
 import { filasHojaRuta } from '../domain/cobranza';
-import { leerRedondeoLocal } from '../services/ajustesService';
 import { listarZonas, clientesDeZona, moverEnZona, calcularOrdenPorZona } from '../domain/zonas';
 import { shareFiles, canShareFiles } from '../utils/share';
 import { mergePdfFilesToSingleFile } from '../utils/pdfMerge';
@@ -92,7 +91,7 @@ export const EntregasDelDia = ({ pedidos, permiso, recargar, cierres = [] }) => 
 };
 
 const OrdenEntrega = () => {
-  const { clientes, deudas, recargar, syncPedidosFecha, pedidos, vendedorActual, comisionesCierres, redondeoTotal } = useApp();
+  const { clientes, deudas, recargar, syncPedidosFecha, pedidos, vendedorActual, comisionesCierres } = useApp();
 
   // Sube los clientes recien guardados ya mismo y avisa si no llegaron a Supabase
   // (syncClientes puede saltear en silencio un error de permisos de escritura).
@@ -181,11 +180,10 @@ const OrdenEntrega = () => {
       // Numeracion sin huecos dentro de cada zona, segun quien tiene pedido ese dia.
       grupos.push(...calcularOrdenPorZona(pedidosDelDia, clientes || [], { zonas: zonasImprimir }));
     }
-    // REQ-RED: los pedidos pendientes muestran el redondeo vigente (vista previa, no se guarda).
-    const multiploVistaPrevia = redondeoTotal ?? leerRedondeoLocal();
     // REQ-RTO/HRU: el saldo anterior de cada cliente se cuenta una sola vez y sin las deudas de los pedidos impresos.
-    const hoja = filasHojaRuta(grupos, { deudas, multiploVistaPrevia });
-    return { grupos, hoja, multiploVistaPrevia };
+    // REQ-RED2: ya no hay redondeo del total (ni vista previa).
+    const hoja = filasHojaRuta(grupos, { deudas });
+    return { grupos, hoja };
   };
 
   const entregarArchivo = async (file, title) => {
@@ -208,7 +206,7 @@ const OrdenEntrega = () => {
     if (fechasImprimir.length === 0) return;
     setImprimiendo(true);
     try {
-      const { grupos, hoja, multiploVistaPrevia } = await armarReparto();
+      const { grupos, hoja } = await armarReparto();
       const files = [];
       let i = 0;
       for (const grupo of grupos) {
@@ -216,7 +214,7 @@ const OrdenEntrega = () => {
           const cliente = (clientes || []).find(c => c.id === pedido.clienteId);
           const saldoAnterior = hoja.filas[i]?.saldoAnterior ?? 0;
           i += 1;
-          files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, saldoAnterior, n, { redondeoVistaPrevia: multiploVistaPrevia }));
+          files.push(await generarFacturaFile(pedido, cliente, { nombre: pedido.vendedorNombre }, saldoAnterior, n));
         }
       }
 

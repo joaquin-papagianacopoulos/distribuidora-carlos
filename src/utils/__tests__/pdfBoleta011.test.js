@@ -146,22 +146,26 @@ describe('AC-RTO-5 saldo anterior y total a cobrar', () => {
   });
 });
 
-describe('AC-RED-2 Subtotal / Redondeo / TOTAL en el remito', () => {
-  it('AC-RED-2 pedido facturado con redondeo congelado: Subtotal, Redondeo y TOTAL redondeado', async () => {
+describe('REQ-RED2 el remito no dice Redondeo ni Subtotal', () => {
+  it('REQ-RED2 pedido viejo con redondeo congelado: solo TOTAL (lo que ya se cobro), sin Subtotal ni Redondeo', async () => {
     await generarFacturaFile(pedido({ redondeoMultiplo: 1000 }), {}, {}, 0, null);
-    expect(buscar(/^Subtotal:$/)).toHaveLength(1);
-    expect(buscar(/^Redondeo:$/)).toHaveLength(1);
-    expect(vistos().filter(x => x.x === 195).map(x => x.t)).toEqual(expect.arrayContaining(['$1.500', '+$500', '$2.000']));
+    expect(buscar(/^Subtotal:|^Redondeo:/)).toHaveLength(0);
+    expect(buscar(/^TOTAL:$/)).toHaveLength(1);
+    expect(vistos().filter(x => x.x === 195).map(x => x.t)).toEqual(['$2.000']);
   });
   it('AC-RED-2 sin ajuste solo se muestra TOTAL', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
     expect(buscar(/^Subtotal:|^Redondeo:/)).toHaveLength(0);
     expect(buscar(/^TOTAL:$/)).toHaveLength(1);
   });
-  it('AC-RED-2 pendiente: vista previa con redondeoVistaPrevia; con saldo, Total a cobrar suma el total redondeado', async () => {
+  it('REQ-RED2 pendiente: la opcion vieja redondeoVistaPrevia se ignora; Total a cobrar = renglones + saldo', async () => {
     await generarFacturaFile(pedido({ estado: 'pendiente' }), {}, {}, 1000, null, { redondeoVistaPrevia: 1000 });
-    expect(buscar(/^Redondeo:$/)).toHaveLength(1);
-    expect(buscar(/^Total a cobrar: \$3\.000$/)).toHaveLength(1);
+    expect(buscar(/^Redondeo:$/)).toHaveLength(0);
+    expect(buscar(/^Total a cobrar: \$2\.500$/)).toHaveLength(1);
+  });
+  it('AC-RTO-7 los renglones van en helvetica (Arial) negrita', async () => {
+    await generarFacturaFile(pedido(), {}, {}, 0, null);
+    expect(mockReg.tablas[0].bodyStyles).toMatchObject({ font: 'helvetica', fontStyle: 'bold' });
   });
 });
 

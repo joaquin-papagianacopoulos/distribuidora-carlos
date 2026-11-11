@@ -47,7 +47,7 @@ const INFO_PRODUCTO = {
   ventaPor: { obligatorio: 'No', formato: 'Unidad, Bulto o Ambos. "Bulto" exige "Bulto x" mayor que 1. Vacío = Ambos si Bulto x es mayor que 1, si no Unidad', ejemplo: 'Bulto' },
   bultoNombre: { obligatorio: 'No (vacío = Bulto)', formato: 'Bulto, Display, Caja o Pack', ejemplo: 'Display' },
   grupoBulto: { obligatorio: 'No', formato: 'Texto, hasta 40 caracteres. Productos con el mismo grupo (sin importar mayúsculas ni tildes) y el mismo "Bulto x" se combinan para llegar al bulto: ej. Prime Rojo, Prime Azul y Prime Violeta con "Prime". En la factura salen en una sola línea. Vacío = se conserva; "-" = se saca del grupo', ejemplo: 'Prime' },
-  escalasBulto: { obligatorio: 'No', formato: 'Hasta 3 escalas de descuento por cantidad de bultos, con el formato "bultos=%" separadas por ";". Ej: 5=8; 10=12 (desde 5 bultos 8 % menos, desde 10 bultos 12 % menos). Los bultos van de menor a mayor (enteros desde 2) y el % entre 0 y 100 (acepta coma decimal). Necesita "Bulto x" mayor que 1. Vacío = se conserva; "-" = se borran las escalas', ejemplo: '5=8; 10=12' },
+  escalasBulto: { obligatorio: 'No', formato: 'Hasta 3 escalas de precio por cantidad de bultos, con el formato "bultos=precio" separadas por ";". El precio es POR UNIDAD y ya con el descuento hecho (sin $ ni %). Ej: 3=950; 10=900 (desde 3 bultos cada unidad sale $950, desde 10 bultos $900). Los bultos van de menor a mayor (enteros desde 2). Decimales con coma (950,50). Necesita "Bulto x" mayor que 1. Vacío = se conserva; "-" = se borran las escalas', ejemplo: '3=950; 10=900' },
   visibleTienda: { obligatorio: 'No (vacío = Sí)', formato: 'Sí o No. Si se muestra en la tienda online', ejemplo: 'Sí' },
   minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
   stockMinimo: { obligatorio: 'No (vacío = usa Mínimo venta)', formato: 'Entero ≥ 0. Punto de reposición: con stock igual o menor se avisa. Vacío o "-" = se usa Mínimo venta; en productos existentes se conserva', ejemplo: '10' },
@@ -330,7 +330,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   if (tiene('bultoNombre')) form.bultoNombre = celda(valores.bultoNombre);
   // AC-GBU-1: "-" saca el producto del grupo; vacío conserva el del existente.
   if (tiene('grupoBulto')) form.grupoBulto = celdaSinDato(valores.grupoBulto) ? '' : textoSeguro(valores.grupoBulto, 40);
-  // AC-ESC-1: "5=8; 10=12". "-" borra; vacío conserva; el texto pasa por textoSeguro (anti formula).
+  // AC-ESC-1 / REQ-ESC2: "3=950; 10=900" (precio por unidad). "-" borra; vacío conserva; el texto pasa por textoSeguro (anti formula).
   if (Object.prototype.hasOwnProperty.call(valores, 'escalasBulto') && !vacia(valores.escalasBulto)) {
     form.escalasBulto = celdaSinDato(valores.escalasBulto) ? [] : parsearEscalasTexto(textoSeguro(valores.escalasBulto, 120));
   }

@@ -36,7 +36,7 @@ export const CAMPOS_PRODUCTO = [
   // AC-GBU-1: productos con el mismo grupo (ej. "Prime") se combinan para llegar al bulto.
   // Va al final para no correr las columnas de las plantillas Excel ya armadas.
   { key: 'grupoBulto', label: 'Grupo bulto' },
-  // AC-ESC-1: hasta 3 escalas "desde N bultos, D % de descuento". Tambien al final.
+  // AC-ESC-1 / REQ-ESC2: hasta 3 escalas "desde N bultos, $P por unidad". Tambien al final.
   { key: 'escalasBulto', label: 'Escalas por bulto', tipo: 'escalas' },
 ];
 
@@ -147,7 +147,9 @@ export const validarProducto = (form = {}, { existentes = [], proveedores = [], 
   // AC-GBU-1: vacío = no se combina con otros productos.
   p.grupoBulto = normalizarGrupoBulto(form.grupoBulto);
   // AC-ESC-1: escalas opcionales (estrictas: si hay error, no se guarda ninguna).
-  const esc = validarEscalasBulto(form.escalasBulto, p.bultoX);
+  // REQ-ESC2: la escala es un precio por unidad; se avisa si no baja el precio que ya se cobra llevando bulto.
+  const baseEscala = p.precioBulto > 0 && p.precio > 0 ? Math.min(p.precio, p.precioBulto) : p.precio;
+  const esc = validarEscalasBulto(form.escalasBulto, p.bultoX, baseEscala);
   if (esc.errores.length) errores.escalasBulto = esc.errores[0];
   if (esc.avisos.length) avisos.escalasBulto = esc.avisos[0];
   p.escalasBulto = esc.valor;
