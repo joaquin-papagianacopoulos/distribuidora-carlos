@@ -47,7 +47,7 @@ const INFO_PRODUCTO = {
   ventaPor: { obligatorio: 'No', formato: 'Unidad, Bulto o Ambos. "Bulto" exige "Bulto x" mayor que 1. Vacío = Ambos si Bulto x es mayor que 1, si no Unidad', ejemplo: 'Bulto' },
   bultoNombre: { obligatorio: 'No (vacío = Bulto)', formato: 'Bulto, Display, Caja o Pack', ejemplo: 'Display' },
   grupoBulto: { obligatorio: 'No', formato: 'Texto, hasta 40 caracteres. Productos con el mismo grupo (sin importar mayúsculas ni tildes) y el mismo "Bulto x" se combinan para llegar al bulto: ej. Prime Rojo, Prime Azul y Prime Violeta con "Prime". En la factura salen en una sola línea. Vacío = se conserva; "-" = se saca del grupo', ejemplo: 'Prime' },
-  escalasBulto: { obligatorio: 'No', formato: 'Hasta 3 escalas de precio por cantidad de bultos, con el formato "bultos=precio" separadas por ";". El precio es POR UNIDAD y ya con el descuento hecho (sin $ ni %). Ej: 3=950; 10=900 (desde 3 bultos cada unidad sale $950, desde 10 bultos $900). Los bultos van de menor a mayor (enteros desde 2). Decimales con coma (950,50). Necesita "Bulto x" mayor que 1. Vacío = se conserva; "-" = se borran las escalas', ejemplo: '3=950; 10=900' },
+  escalasBulto: { obligatorio: 'No', formato: 'Hasta 3 escalas de precio por cantidad de bultos, con el formato "bultos=precio" separadas por ";". El precio es POR UNIDAD y ya con el descuento hecho (sin $ ni %). Ej: 3=950; 10=900 (desde 3 bultos cada unidad sale $950, desde 10 bultos $900). Los bultos van de menor a mayor (enteros desde 2). Decimales con coma (950,50). Necesita "Bulto x" mayor que 1. Vacío = se conserva; "-" = se borran las escalas. Si la escala está mal escrita la fila se importa igual, sin la escala, y se avisa en el resumen', ejemplo: '3=950; 10=900' },
   visibleTienda: { obligatorio: 'No (vacío = Sí)', formato: 'Sí o No. Si se muestra en la tienda online', ejemplo: 'Sí' },
   minimoVenta: { obligatorio: 'No (vacío = 1)', formato: 'Entero ≥ 1. Vacío, "-" o 0 = 1 (sin mínimo); en productos existentes se conserva', ejemplo: '1' },
   stockMinimo: { obligatorio: 'No (vacío = usa Mínimo venta)', formato: 'Entero ≥ 0. Punto de reposición: con stock igual o menor se avisa. Vacío o "-" = se usa Mínimo venta; en productos existentes se conserva', ejemplo: '10' },
@@ -366,7 +366,17 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
   const stockIgnorado = !!existente && tiene('stock');
   if (!existente && tiene('stock')) form.stock = celda(valores.stock);
 
-  const r = validarProducto(form, { existentes, proveedores: proveedoresValidos, editId: existente?.id ?? null, rubros: Array.isArray(rubros) ? rubros : null, marcas: Array.isArray(marcas) ? marcas : null });
+  const opcionesValidar = { existentes, proveedores: proveedoresValidos, editId: existente?.id ?? null, rubros: Array.isArray(rubros) ? rubros : null, marcas: Array.isArray(marcas) ? marcas : null };
+  let r = validarProducto(form, opcionesValidar);
+  // AC-ESC2-4: una escala inválida no rechaza la fila (el precio y el resto se importan igual): se
+  // descarta solo la escala, se conservan las que ya tenía el producto (si siguen siendo válidas) y se avisa.
+  let avisoEscalas = null;
+  if (r.errores.escalasBulto) {
+    avisoEscalas = `Escalas por bulto no importadas (${r.errores.escalasBulto})`;
+    const previas = Array.isArray(existente?.escalasBulto) ? existente.escalasBulto : [];
+    r = validarProducto({ ...form, escalasBulto: previas }, opcionesValidar);
+    if (r.errores.escalasBulto) r = validarProducto({ ...form, escalasBulto: [] }, opcionesValidar);
+  }
   const err = { ...r.errores };
   // Codigo obligatorio solo en altas de la plantilla nueva: los archivos viejos
   // y los upserts por nombre lo aceptan vacio (AC-PROD-5 / AC-PLA-3).
@@ -381,7 +391,7 @@ export const validarFilaProducto = (valores = {}, { existente = null, existentes
     ok: errores.length === 0,
     errores,
     valor: { producto: { ...r.producto, unidad }, stock: existente ? null : r.stock },
-    avisos: Object.values(r.avisos || {}).filter(Boolean),
+    avisos: [...Object.values(r.avisos || {}).filter(Boolean), ...(avisoEscalas ? [avisoEscalas] : [])],
     stockIgnorado,
   };
 };
