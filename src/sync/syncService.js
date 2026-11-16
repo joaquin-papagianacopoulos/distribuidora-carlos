@@ -20,6 +20,7 @@ import { vendedorToRemote, vendedorFromRemote, sinColumnas024, nombraColumna024 
 import { redondeoToRemote, redondeoFromRemote, sinColumnas025, nombraColumna025 } from '../domain/redondeo';
 import { deudaMedioToRemote, deudaMedioFromRemote, sinColumnasDmp, nombraColumnaDmp, unirCobrosDeuda } from '../domain/cobranza';
 import { modificadoToRemote, modificadoFromRemote } from '../domain/edicionPedido';
+import { observacionesToRemote, observacionesFromRemote, sinColumnas028, nombraColumna028 } from '../domain/observaciones';
 import { armarLotesProductosRpc, interpretarGuardarProductos, argsAdminProductos } from '../domain/productosRpc';
 import { vendedorDesdeRemoto, COLUMNAS_VENDEDOR_REMOTO, COLUMNAS_VENDEDOR_SIN_ACTIVO, COLUMNAS_VENDEDOR_LEGACY } from '../domain/vendedores';
 
@@ -166,6 +167,8 @@ const mapPedidoRemoto = (r, local = null) => {
     modificadoTrasArmado: modificadoFromRemote(r, local),
     // Tanda 2 (migracion 025): redondeo del total (tolerante a columnas faltantes).
     ...redondeoFromRemote(r, local),
+    // REQ-OBS (migracion 028): nota del pedido (tolerante a la columna faltante).
+    ...observacionesFromRemote(r, local),
     // AC-EDP-3: version del servidor (updated_at tal cual vino) sobre la que se edita.
     remoteUpdatedAt: r.updated_at ?? local?.remoteUpdatedAt ?? null,
     borrado: ['cancelado', 'eliminado', 'borrado'].includes(String(estado).toLowerCase()),
@@ -206,6 +209,8 @@ const pedidoToRemoteRow = (pedido) => {
     ...modificadoToRemote(p),
     // Tanda 2 (migracion 025): solo viajan si el pedido las conoce.
     ...redondeoToRemote(p),
+    // REQ-OBS (migracion 028): nota del pedido, solo si el pedido la conoce.
+    ...observacionesToRemote(p),
     // AC-SEG2-3: id de idempotencia del alta.
     ...clientUuidToRemote(p),
     updated_at:     new Date().toISOString(),
@@ -249,6 +254,13 @@ const avisarFalta025 = () => {
   console.warn('Supabase: faltan las columnas de la migracion 025 (redondeo). Correr supabase/migrations/025_remito_redondeo_medio_pago.sql. El redondeo queda en este dispositivo.');
 };
 
+let avisoMigracion028 = false;
+const avisarFalta028 = () => {
+  if (avisoMigracion028) return;
+  avisoMigracion028 = true;
+  console.warn('Supabase: falta la columna "observaciones" en pedidos. Correr supabase/migrations/028_pedidos_observaciones.sql. Las notas quedan en este dispositivo.');
+};
+
 // Reintenta un update/insert de pedidos SIN las columnas de entregado si
 // Supabase todavia no las tiene. Devuelve { data, error, sinEntrega }.
 export const conFallbackEntrega = async (ejecutar, rowOrRows) => {
@@ -258,6 +270,7 @@ export const conFallbackEntrega = async (ejecutar, rowOrRows) => {
   // Columnas de migraciones posteriores a la 003 (025 redondeo, 024 vendedor/modificado, 011 grupos): cada
   // reintento saca solo las columnas del error y se prueba de nuevo (una fila puede carecer de varias).
   const pasos = [
+    { nombra: nombraColumna028, sin: sinColumnas028, aviso: avisarFalta028 },
     { nombra: nombraColumna025, sin: sinColumnas025, aviso: avisarFalta025 },
     { nombra: nombraColumna024, sin: sinColumnas024, aviso: avisarFalta024 },
     { nombra: nombraColumna011, sin: sinColumnas011, aviso: avisarFalta011 },
@@ -1115,6 +1128,49 @@ export const pullPedidosPendientes = async ({ vendedorNombre = null, zona = null
   }
   await putPedidosRemotosSinPisarLocales(upserts);
   return { ok: true, count: vistos.size };
+};
+
+// REQ-REP (AC-REP-1): baja los pedidos que todavia NO fueron entregados (de cualquier fecha >= desde)
+// para la lista unica de reparto. Si hay vendedorNombre trae solo los suyos. Paginado, con tope; no
+// borra nada local ni pisa ediciones sin subir. Sin la columna "entregado" (migracion 003) trae
+// todos los del rango y el filtro lo hace la pantalla.
+const ESTADOS_OCULTOS_REMOTO = '("cancelado","eliminado","borrado")';
+export const pullPedidosSinEntregar = async ({ desde = null, vendedorNombre = null, zona = null } = {}) => {
+  const PAGE = 500;
+  const MAX_TOTAL = 3000;
+  const traer = async (conEntregado) => {
+    let data = [];
+    let from = 0;
+    while (true) {
+      let q = supabase.from('pedidos').select('*').not('estado', 'in', ESTADOS_OCULTOS_REMOTO);
+      if (conEntregado) q = q.or('entregado.is.null,entregado.eq.false');
+      if (desde) q = q.gte('fecha', desde);
+      if (vendedorNombre) q = q.eq('vendedor', vendedorNombre);
+      if (zona) q = q.eq('zona', zona);
+      const { data: page, error } = await q.order('fecha', { ascending: true }).range(from, from + PAGE - 1);
+      if (error) return { data, error };
+      data = data.concat(page || []);
+      if (!page || page.length < PAGE || data.length >= MAX_TOTAL) break;
+      from += PAGE;
+    }
+    return { data, error: null };
+  };
+  let r = await traer(true);
+  if (r.error && esColumnaInexistente(r.error)) {
+    avisarFalta003();
+    r = await traer(false);
+  }
+  if (r.error) throw r.error;
+  const locales = await getPedidos();
+  const byRemoteId = new Map(locales.filter(x => x.remoteId).map(x => [x.remoteId, x]));
+  const upserts = [];
+  for (const fila of r.data) {
+    const local = byRemoteId.get(fila.id);
+    if (local && !local.synced) continue;
+    upserts.push(mapPedidoRemoto(fila, local));
+  }
+  await putPedidosRemotosSinPisarLocales(upserts);
+  return { ok: true, count: r.data.length };
 };
 
 // REQ-COM (AC-COM-3): trae TODOS los pedidos de un rango de fechas (sin filtro

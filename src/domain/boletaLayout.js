@@ -21,7 +21,9 @@ export const encabezadoTipoFactura = (tipo) => {
 };
 
 // AC-RTO-4: estilo compacto de las tablas (mas renglones por hoja) y el anterior, de referencia.
-const LINEA = { lineColor: [80, 80, 80], lineWidth: 0.35 };
+// AC-RTO-8: lineas de los recuadros en gris suave y finas (antes gris oscuro 0.35).
+export const COLOR_LINEA_TABLA = Object.freeze([175, 175, 175]);
+const LINEA = { lineColor: [...COLOR_LINEA_TABLA], lineWidth: 0.2 };
 export const ESTILO_TABLA_COMPACTA = Object.freeze({
   fontSize: 8,
   cellPadding: Object.freeze({ top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 }),
@@ -71,7 +73,7 @@ export const layoutPieBoleta = ({
     const totalCobrarY = hayDeuda ? sig() : null;
     const ultimo = Math.max(totalesY, descuentoY ?? 0, totalCobrarY ?? 0);
     const obsY = hayObs ? ultimo + 8 : null;
-    const fin = obsY !== null ? obsY + 4 * (Math.max(1, num(lineasObs, 1)) - 1) : ultimo;
+    const fin = obsY !== null ? obsY + 4.2 * (Math.max(1, num(lineasObs, 1)) - 1) : ultimo;
     return { itemsY, sinDescuentoY, subtotalY, redondeoY, totalesY, descuentoY, saldoAnteriorY, totalCobrarY, obsY, fin };
   };
 

@@ -136,9 +136,13 @@ describe('Stock — listado (AC-STK-7)', () => {
 });
 
 describe('Ingreso de mercadería (REQ-ING)', () => {
+  // ADAPTADO (REQ-INA2, Lote 2026-11-16): la factura del proveedor es solo el tipo (A, B o en negro),
+  // obligatorio; los tests arrancan con "Factura A" elegida.
   const irAIngreso = async () => {
     await renderStock();
     await click(boton('Ingreso de mercadería'));
+    const tipo = container.querySelector('#ing-tipo');
+    if (tipo) await setValue(tipo, 'A');
   };
   const buscar = (txt) => setValue(container.querySelector('#ing-buscar'), txt);
   const sugeridos = () => [...container.querySelectorAll('[data-testid="sugerido"]')];
@@ -168,8 +172,8 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
     expect(sugeridos()[0].textContent).toContain('Stock 4');
     await click(sugeridos()[0]);
     const ths = [...container.querySelectorAll('thead th')].map(t => t.textContent).filter(Boolean);
-    // MOD (RUN 20261015-1541, REQ-INA): se suman Costo unit. y Factura A/B al final del renglón.
-    expect(ths).toEqual(['Código', 'Descripción', 'Stock actual', 'Ingreso', 'Stock total', 'Costo unit.', 'Factura']);
+    // MOD (REQ-INA2): ya no hay columna Factura por renglón (el tipo se elige arriba, para todo el ingreso).
+    expect(ths).toEqual(['Código', 'Descripción', 'Stock actual', 'Ingreso', 'Stock total', 'Costo unit.']);
     expect(renglones()).toHaveLength(1);
     expect(celdas(renglones()[0]).slice(0, 5)).toEqual(['A1', 'Alfajor Jorgito', '4', '', '4']);
     await setValue(container.querySelector('input[aria-label="Ingreso Alfajor Jorgito"]'), '20');
@@ -216,7 +220,6 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
       ok: true, errores: {}, ingreso: { facturaProveedor: 'A-0001-123' }, movimientos: [{}, {}],
     });
     await irAIngreso();
-    await setValue(container.querySelector('#ing-factura'), 'A-0001-123');
     await setValue(container.querySelector('#ing-proveedor'), 'prov-1');
     await buscar('a1');
     await click(sugeridos()[0]);
@@ -226,13 +229,22 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
     await setValue(container.querySelector('input[aria-label="Ingreso Coca Cola 500ml"]'), '12');
     await click(boton('Confirmar ingreso'));
     expect(registrarIngreso).toHaveBeenCalledWith(
-      { facturaProveedor: 'A-0001-123', proveedorId: 'prov-1', items: [{ productoId: '1', ingreso: '20' }, { productoId: '2', ingreso: '12' }] },
+      {
+        // REQ-INA2: sin número de factura; la referencia se arma sola con el tipo y la fecha/hora.
+        facturaProveedor: expect.stringMatching(/^A · \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/),
+        proveedorId: 'prov-1',
+        items: [{ productoId: '1', ingreso: '20' }, { productoId: '2', ingreso: '12' }],
+        costos: {
+          tipoCabecera: 'A', facturaA: '', facturaB: '', actualizarCosto: true,
+          items: [{ productoId: '1', costoUnitario: '', tipoFactura: '' }, { productoId: '2', costoUnitario: '', tipoFactura: '' }],
+        },
+      },
       { productos: PRODUCTOS, usuario: 'Admin' },
     );
     expect(container.querySelector('[role="status"]').textContent).toContain('Ingreso registrado: 2 producto(s), factura A-0001-123');
     expect(mockApp.recargar).toHaveBeenCalled();
     expect(renglones()).toHaveLength(0);
-    expect(container.querySelector('#ing-factura').value).toBe('');
+    expect(container.querySelector('#ing-tipo').value).toBe('');
   });
 
   it('AC-ING-4 muestra los errores devueltos por registrarIngreso (cabecera y renglón) y no limpia', async () => {
@@ -241,7 +253,6 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
       errores: { facturaProveedor: 'Esa factura de ese proveedor ya fue ingresada', 'item:1': 'Ingreso inválido para "Alfajor Jorgito" (entero > 0)' },
     });
     await irAIngreso();
-    await setValue(container.querySelector('#ing-factura'), 'F1');
     await buscar('a1');
     await click(sugeridos()[0]);
     await click(boton('Confirmar ingreso'));
@@ -252,7 +263,7 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
     ]));
     expect(mockApp.recargar).not.toHaveBeenCalled();
     expect(renglones()).toHaveLength(1);
-    expect(container.querySelector('#ing-factura').value).toBe('F1');
+    expect(container.querySelector('#ing-tipo').value).toBe('A');
   });
 
   // Antes BUG B5 (errores por índice que "saltaban" de renglón). Corregido en
@@ -298,6 +309,17 @@ describe('Ingreso de mercadería (REQ-ING)', () => {
     await click(boton('Confirmar ingreso'));
     expect(container.textContent).toContain('ConstraintError: Key already exists');
     expect(boton('Confirmar ingreso').disabled).toBe(false);
+  });
+
+  it('AC-INA2-1 sin elegir el tipo de factura no se registra y avisa en el campo; no hay campos de número de factura', async () => {
+    await irAIngreso();
+    await setValue(container.querySelector('#ing-tipo'), '');
+    await click(boton('Confirmar ingreso'));
+    expect(registrarIngreso).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Elegí si la factura es A, B o en negro');
+    expect(container.querySelector('#ing-factura')).toBeNull();
+    expect(container.querySelector('#ing-fa')).toBeNull();
+    expect(container.querySelector('#ing-fb')).toBeNull();
   });
 
   it('AC-ING-1 IngresoMercaderia se puede montar suelto (export nombrado)', async () => {

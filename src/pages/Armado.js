@@ -20,7 +20,8 @@ import {
 } from '../utils/pedidos';
 import { cambiarCasillero } from '../domain/casilleros';
 import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, sumarCantidades, mensajeCantidadesInvalidas, productoParaBulto } from '../domain/bultos';
-import { cambiosDeCantidad, fusionarCambiosArmado } from '../domain/armado';
+import { cambiosDeCantidad, fusionarCambiosArmado, pedidosParaArmado } from '../domain/armado';
+import { notaDePedido } from '../domain/observaciones';
 import BultoControl from '../components/BultoControl';
 import { avisoSinStock, stockParaAviso, etiquetaSinStock } from '../domain/stock';
 import { precioAplicadoRenglon, etiquetaEscala } from '../domain/precios';
@@ -189,7 +190,7 @@ const ItemArmadoCard = ({ item, producto, puedeBulto = false, avisoStock = null,
 };
 
 const Armado = () => {
-  const { pedidos, clientes, productos, faltantes, deudas, vendedorActual, recargar, syncPedidosFecha, stockMap } = useApp();
+  const { pedidos, clientes, productos, faltantes, deudas, vendedorActual, recargar, syncPedidosFecha, traerPedidosPendientes, stockMap } = useApp();
   const productosById = useMemo(() => new Map((productos || []).map(p => [String(p.id), p])), [productos]);
   const permisoNorm = Number(vendedorActual?.permiso || 2);
   const puedeBulto = puedeUsarBulto(permisoNorm, 'armado'); // AC-BUL-8
@@ -221,34 +222,15 @@ const Armado = () => {
     syncPedidosFecha(filtroFecha);
   }, [filtroFecha, syncPedidosFecha]);
 
-  const filtrados = useMemo(() => {
-    // Igual que en Pedidos/Facturacion: deduplicar por remoteId/id ante posibles duplicados visuales.
-    const dedup = new Map();
-    for (const p of (pedidos || [])) {
-      if (!isPedidoVisible(p)) continue;
-      if (normalizePedidoFecha(p.fecha) !== filtroFecha) continue;
-      const k = p.remoteId ? `r:${p.remoteId}` : `l:${p.id}`;
-      const prev = dedup.get(k);
-      if (!prev) dedup.set(k, p);
-      else {
-        const a = Number(prev.updatedAt || prev.createdAt || 0);
-        const b = Number(p.updatedAt || p.createdAt || 0);
-        if (b >= a) dedup.set(k, p);
-      }
-    }
+  // AC-SAR-1: baja los pedidos no facturados de cualquier fecha (los atrasados sin armar).
+  useEffect(() => {
+    if (typeof traerPedidosPendientes === 'function') traerPedidosPendientes();
+  }, [traerPedidosPendientes]);
 
-    return [...dedup.values()].filter(p => {
-      if (filtroArmado === 'sin_armar') return !isPedidoArmado(p);
-      if (filtroArmado === 'armados') return isPedidoArmado(p);
-      if (filtroArmado === 'reparto') return isPedidoAReparto(p);
-      return true;
-    }).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
-  }, [pedidos, filtroFecha, filtroArmado]);
+  // AC-SAR-1: "Sin armar" junta los de la fecha con todo lo atrasado que sigue pendiente.
+  const filtrados = useMemo(() => pedidosParaArmado(pedidos, filtroFecha, filtroArmado), [pedidos, filtroFecha, filtroArmado]);
 
-  const totalSinArmar = (pedidos || [])
-    .filter(isPedidoVisible)
-    .filter(p => normalizePedidoFecha(p.fecha) === filtroFecha)
-    .filter(p => !isPedidoArmado(p)).length;
+  const totalSinArmar = useMemo(() => pedidosParaArmado(pedidos, filtroFecha, 'sin_armar').length, [pedidos, filtroFecha]);
 
   const totalAReparto = (pedidos || [])
     .filter(isPedidoVisible)
@@ -754,6 +736,13 @@ const Armado = () => {
           </div>
         </div>
 
+        {/* REQ-OBS (AC-OBS-2): la nota del pedido, bien visible para el armador. */}
+        {notaDePedido(armando) && (
+          <div className="card" data-testid="nota-pedido" style={{ borderColor: 'var(--warning)', background: 'rgba(255,193,7,0.10)', fontSize: 14, whiteSpace: 'pre-wrap' }}>
+            <b>{'\u{1F4DD}'} Nota:</b> {notaDePedido(armando)}
+          </div>
+        )}
+
         {armando.modificadoTrasArmado && (
           <div className="card" data-testid="banner-modificado" role="status" style={{ borderColor: 'var(--warning)', background: 'rgba(255,193,7,0.10)' }}>
             <div style={{ fontWeight: 700, color: 'var(--warning)' }}>{'✎'} Modificado</div>
@@ -988,7 +977,7 @@ const Armado = () => {
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ fontSize: 18 }}>{totalSinArmar}</div>
-          <div className="stat-label">Sin armar (dia)</div>
+          <div className="stat-label">Sin armar (hasta la fecha)</div>
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ fontSize: 18, color: 'var(--accent)' }}>{totalAReparto}</div>
@@ -1044,6 +1033,12 @@ const Armado = () => {
                   )}
                 </div>
               </div>
+
+              {notaDePedido(p) && (
+                <div data-testid="nota-pedido-lista" style={{ fontSize: 13, marginBottom: 8, padding: '6px 8px', borderRadius: 8, background: 'rgba(255,193,7,0.12)', whiteSpace: 'pre-wrap' }}>
+                  <b>{'\u{1F4DD}'} Nota:</b> {notaDePedido(p)}
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button

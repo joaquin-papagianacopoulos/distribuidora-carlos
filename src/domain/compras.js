@@ -19,6 +19,18 @@ export const normalizarTipoAB = (v) => {
 // Código interno 'N'. Las notas de crédito (rendición) siguen siendo solo A/B (normalizarTipoAB).
 export const TIPOS_COMPRA = Object.freeze(['A', 'B', 'N']);
 export const ETIQUETA_TIPO_COMPRA = Object.freeze({ A: 'Factura A', B: 'Factura B', N: 'En negro' });
+// AC-INA2-1: el ingreso ya no pide número de factura, solo si es A, B o en negro. La referencia interna
+// del ingreso (única por proveedor, AC-ING-4) se arma sola con el tipo y la fecha/hora de carga:
+// "A · 16/11/2026 14:35:07". Tipo inválido => '' (el formulario lo rechaza antes).
+export const referenciaIngreso = (tipo, now = new Date()) => {
+  const t = typeof tipo === 'string' ? tipo.trim().toUpperCase() : '';
+  if (!['A', 'B', 'N'].includes(t)) return '';
+  const d = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+  const dos = (n) => String(n).padStart(2, '0');
+  const cuando = `${dos(d.getDate())}/${dos(d.getMonth() + 1)}/${d.getFullYear()} ${dos(d.getHours())}:${dos(d.getMinutes())}:${dos(d.getSeconds())}`;
+  return `${t === 'N' ? 'En negro' : t} · ${cuando}`;
+};
+
 export const normalizarTipoCompra = (v) => {
   const s = String(v ?? '').trim().toUpperCase().replace(/^FACTURA\s+/, '');
   if (s === 'N' || s === 'NEGRO' || s === 'EN NEGRO') return 'N';

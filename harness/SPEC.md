@@ -734,3 +734,53 @@ Causa en `diagnostico-precio-costo.md`: con precio vacío y sin % de ganancia se
 - **AC-ESC2-2** Formulario: "Desde (bultos)" + "Precio c/u". Plantilla Excel, columna "Escalas por bulto": `bultos=precio` separadas por `;` (ej. `3=950; 10=900`); solo si el valor termina en `%` se toma como descuento (formato viejo). Aviso (no bloquea) si el precio no baja o es menos de la mitad del precio del producto.
 - **AC-ESC2-3** Migración `027_escalas_precio.sql`: `escalas_bulto_normalizar` y `tienda_precio_con_escala` aceptan `precio` (espejo de `precios.js`). Sin la 027 el servidor descarta las escalas con precio.
 - **AC-ESC2-4** Importación Excel: una escala inválida (formato, "Bulto x" = 1, desde < 2, etc.) **no rechaza la fila**: el resto de los datos se importa, se conservan las escalas válidas que ya tenía el producto (o ninguna) y el resumen avisa "Escalas por bulto no importadas (motivo)". Así un error en la escala no deja el producto con el precio viejo.
+
+---
+
+## Lote 2026-11-16 — Reparto elegible, notas, remito y factura de proveedor (pedido harness/pedidos/2026-11-16_LOTE-REPARTO-NOTAS.md)
+
+## REQ-REP — Reparto: una sola lista de pedidos pendientes de entrega (modifica AC-ZON-2)
+- **AC-REP-1** Orden de entrega muestra **una única lista** con todos los pedidos que todavía no fueron entregados, **de cualquier fecha** (no por día): sin borrados, sin pedidos web sin aceptar y sin los ya marcados "Entregado". Se bajan del servidor al abrir la pantalla (`pullPedidosSinEntregar`). Filtros: "Pedidos desde" (default 30 días atrás), buscador de cliente y zonas. Función pura `pedidosPendientesEntrega` con tests.
+- **AC-REP-2** Cada pedido tiene un tilde; "Imprimir remitos del reparto" y "Hoja de ruta" salen **solo con los pedidos tildados** (y a la vista). La numeración por zona sin huecos (AC-ZON-2) se calcula sobre los elegidos. Sin pedidos elegidos los botones quedan deshabilitados. Ya no se imprime "por fecha en que se cargaron los pedidos".
+- **AC-REP-3** Desde la misma lista, quien puede marcar entregas (admin y armador) marca "Entregado" un pedido facturado y sale de la lista. La tarjeta "Entregas" por día se conserva.
+
+## REQ-SAR — Armado: "Sin armar" muestra todo lo que falta armar hasta la fecha
+- **AC-SAR-1** En Armado, el filtro "Sin armar" (y su contador) muestra los pedidos sin armar de la fecha elegida **más todos los sin armar de fechas anteriores** que siguen pendientes (ni facturados ni entregados), del más viejo al más nuevo. Los demás filtros siguen siendo del día. Al abrir se bajan los pedidos pendientes de cualquier fecha. Función pura `pedidosParaArmado` con tests.
+
+## REQ-OBS — Las notas del pedido se ven en todos los dispositivos (bug)
+Causa: `observaciones` nunca se subía a Supabase; la nota quedaba solo en el dispositivo que cargó el pedido y el que armaba o imprimía el remito no la veía.
+- **AC-OBS-1** `pedidos.observaciones` (migración `028_pedidos_observaciones.sql`, text hasta 500) viaja en el push y el pull de pedidos. Tolerante a la columna faltante (reintento sin ella y aviso por consola); `null` en el servidor conserva la nota local.
+- **AC-OBS-2** La nota se muestra destacada en Armado (lista y pantalla de armado) y en Facturación (lista y edición), además de la lista de pedidos.
+- **AC-OBS-3** En el remito la nota va al pie como **"NOTA: …"** en negrita 10 pt (hasta 4 líneas). Un pedido web usa la observación que dejó el cliente.
+
+## REQ-RTO (agregado 2026-11-16)
+- **AC-RTO-8** Las líneas de los recuadros de las tablas de los PDF van en gris suave y finas (`COLOR_LINEA_TABLA`), en lugar del gris oscuro.
+- **AC-RTO-9** El remito muestra **siempre el precio por unidad**: columnas "Precio Unit." y "Precio Bulto". Un renglón en bultos lleva los dos (unidad y bulto entero); en unidades, solo el unitario. Los totales no cambian.
+
+## REQ-ESC2 (agregado 2026-11-16)
+- **AC-ESC2-5** (bug: "no baja el precio de 3 bultos") En Nuevo pedido, los renglones de un **borrador** (pedido todavía sin guardar) se ponen al día con el producto actual: si después de agregar el producto se le cargó una escala, un precio llevando bulto o un precio nuevo, el renglón lo toma (`renglonAlDia`). Tocar el campo de precio y salir sin cambiarlo ya no marca el renglón como "precio manual" (antes dejaba de aplicar bulto y escalas). Los pedidos ya guardados conservan sus precios congelados.
+
+## REQ-CBU (agregado 2026-11-16)
+- **AC-CBU-4** En Nuevo pedido el precio **por unidad** llevando bulto está siempre a la vista: al lado del botón "Bulto xN $Y" de la lista ("$X c/u") y en el renglón cuando hay escala aplicada ("Precio bulto $X c/u").
+
+## REQ-STV — Stock real visible al levantar pedidos
+- **AC-STV-1** En Nuevo pedido (lista de productos y renglones) se muestra el stock real: "Stock: 36 u. (3 bultos)". Solo informa, nunca bloquea (REQ-SST sigue igual). Sin dato de stock no se muestra nada. Función pura `textoStockDisponible` con tests.
+
+## REQ-INA2 — Factura de proveedor solo como tipo (modifica AC-ING-1, AC-ING-4 y AC-INA-1)
+- **AC-INA2-1** En Ingreso de mercadería, "Factura proveedor" es un selector obligatorio **Factura A / Factura B / En negro**, sin número. Se sacan "N.º factura A" y "N.º factura B" y la columna "Factura" de cada renglón (las A y las B se cargan en ingresos separados; todo el ingreso es del tipo elegido arriba). La referencia interna del ingreso se arma sola con el tipo y la fecha/hora (`referenciaIngreso`), por lo que la regla "misma factura del mismo proveedor" ya no frena una carga. Ingresos viejos se siguen viendo igual.
+
+### Pendiente de confirmar con el dueño (no bloquea)
+- "Letra Arial Black": jsPDF solo trae Helvetica (Arial) normal/negrita; Arial Black exige embeber un archivo de fuente. Falta definir dónde va (remito / toda la app) y qué fuente se puede embeber.
+- "Que Carlos y Paola puedan editar cantidades": falta saber en qué pantalla y qué rol tienen hoy.
+
+## REQ-RUT — Orden de entrega: tablero interactivo con "Mi ruta" armada a mano (reemplaza la pantalla por zona/día; modifica AC-ZON-1, AC-ZON-2 y REQ-REP)
+
+> Pedido del dueño 2026-11-16: la pantalla "Orden" no debe entregar por día ni por zona fija; el cliente quiere entregar "según quiera él, ese día y en ese momento": elegir los pedidos pendientes (con cliente y dirección) y ordenarlos como quiera. Tiene que ser muy interactivo, fácil de entender y verse bien en celular y compu.
+
+- **AC-RUT-1** Orden de entrega es un tablero de dos paneles. **Pendientes de entrega**: todos los pedidos sin entregar de cualquier fecha (`pedidosPendientesEntrega`), con cliente, **dirección**, fecha, vendedor, estado, nota del pedido y total a cobrar; buscador por cliente o dirección, filtro por zona y "Pedidos desde". Resumen arriba: pendientes, pedidos en la ruta y total de la ruta. Tres pasos a la vista ("Elegí / Ordená / Imprimí").
+- **AC-RUT-2** **Mi ruta de hoy**: tocar un pedido (o "+ Ruta") lo agrega al final de la ruta y sale de Pendientes; "Agregar todos los que se ven" respeta los filtros. El orden de la ruta es el orden de entrega y se cambia **arrastrando** (compu), con **▲ ▼**, o **escribiendo el puesto**; "Invertir orden", "Ordenar por zona" (atajo con el puesto fijo de cada cliente en su zona, REQ-ZON) y "Vaciar ruta" (con confirmación; los pedidos no se borran). Funciones puras en `src/domain/ruta.js`.
+- **AC-RUT-3** La ruta se guarda en el dispositivo (por usuario) y se recupera al volver a la pantalla. Un pedido entregado o borrado sale solo de la ruta; "Entregado" desde la ruta (admin y armador, pedido facturado) lo marca y lo saca (misma regla que AC-COM-1). La tarjeta "Entregas" por día se conserva.
+- **AC-RUT-4** "Ordenar por zona" agrupa la ruta por zona del cliente y respeta su puesto dentro de la zona; sin zona al final. Ya no hay pantalla para editar el puesto fijo de cada cliente (el dato `ordenZona` se conserva).
+- **AC-RUT-5** "Imprimir remitos" y "Hoja de ruta" salen **solo con los pedidos de la ruta y en ese orden**: los remitos se numeran 1..n según la ruta (no por zona ni por fecha), el saldo anterior de cada cliente se cuenta una sola vez, y la hoja de ruta (`ruta: true`) lleva la dirección del cliente, sin separadores de zona y con la fecha de salida. Cada pedido tiene un enlace "Mapa" (Google Maps con la dirección) para abrir en el celular.
+- **AC-RUT-6** Funciones puras con tests: normalizar, agregar, quitar, mover, subir/bajar, puesto, invertir, ordenar por zona, grupo numerado, enlace de mapa y (de)serialización de la ruta guardada.
+- **AC-RUT-7** Diseño responsive: en celular un solo panel a la vez con pestañas "Pendientes / Mi ruta" y los botones de imprimir fijos abajo; desde 900 px los dos paneles lado a lado, cada uno con su propio scroll. Botones y flechas de al menos 40 px de alto para tocar con el dedo.

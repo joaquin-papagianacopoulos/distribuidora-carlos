@@ -280,6 +280,22 @@ export const ingresoFromRemote = (r) => ({
   items: Array.isArray(r.items) ? r.items : [], pendingSync: false,
 });
 
+// AC-STV-1: texto del stock real para mostrar mientras se levanta el pedido: "Stock: 36 u. (3 bultos)".
+// null si el stock no se conoce (todavía no se sincronizó). Solo informa: nunca bloquea.
+export const textoStockDisponible = (disponible, bultoX = null) => {
+  if (disponible === null || disponible === undefined || disponible === '') return null;
+  const n = Number(disponible);
+  if (!Number.isFinite(n)) return null;
+  const bx = Number(bultoX);
+  let extra = '';
+  if (Number.isInteger(bx) && bx > 1 && Number.isInteger(n) && n >= bx) {
+    const bultos = Math.floor(n / bx);
+    const sueltas = n - bultos * bx;
+    extra = ` (${bultos} ${bultos === 1 ? 'bulto' : 'bultos'}${sueltas > 0 ? ` + ${sueltas} u.` : ''})`;
+  }
+  return `Stock: ${n} u.${extra}`;
+};
+
 // AC-SST2-1: etiqueta de un producto con stock 0 o negativo. Solo informa: nunca oculta ni bloquea.
 export const etiquetaSinStock = (disponible) => {
   const n = typeof disponible === 'number' ? disponible : Number(disponible);

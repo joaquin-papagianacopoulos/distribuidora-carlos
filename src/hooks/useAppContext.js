@@ -36,6 +36,7 @@ import {
   pullPedidosWebRecientes,
   pullPedidosByRango,
   pullPedidosPendientes,
+  pullPedidosSinEntregar,
 } from '../sync/syncService';
 
 const AppContext = createContext(null);
@@ -441,6 +442,21 @@ export const AppProvider = ({ children }) => {
     await recargar();
   }, [recargar, vendedorActual]);
 
+  // REQ-REP (AC-REP-1): baja los pedidos sin entregar de cualquier fecha (>= desde) para la lista de reparto.
+  const traerPedidosSinEntregar = useCallback(async (desde = null) => {
+    if (!navigator.onLine) return;
+    const permisoActual = Number(vendedorActual?.permiso || 2);
+    const verTodo = permisoActual === 1 || permisoActual === 3;
+    const vendedorNombre = verTodo ? null : (vendedorActual?.nombre || null);
+    const zona = verTodo ? null : (vendedorActual?.zona || null);
+    try {
+      await pullPedidosSinEntregar({ desde, vendedorNombre, zona });
+    } catch (e) {
+      console.warn('traerPedidosSinEntregar error:', e?.message || e);
+    }
+    await recargar();
+  }, [recargar, vendedorActual]);
+
   // Stock: productos + ledger de movimientos al dia (se usa al abrir la pantalla Stock y al
   // volver a verla). No depende del resto del sync: si otro paso falla, este igual corre.
   const syncStockAhora = useCallback(async () => {
@@ -578,6 +594,7 @@ export const AppProvider = ({ children }) => {
       syncNow,
       syncPedidosFecha,
       traerPedidosPendientes,
+      traerPedidosSinEntregar,
       syncPedidosRango,
       syncStockAhora,
       syncPedidosCliente,

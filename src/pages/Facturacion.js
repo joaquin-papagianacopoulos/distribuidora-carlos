@@ -1,6 +1,7 @@
 // src/pages/Facturacion.js
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useApp } from '../hooks/useAppContext';
+import { notaDePedido } from '../domain/observaciones';
 import { getTodayStr, formatFecha, fuzzySearch, searchProductos } from '../utils/fuzzy';
 import { registrarFaltantes } from '../db';
 import { preciosPorGrupoBulto } from '../domain/grupoBulto';
@@ -1019,6 +1020,11 @@ const Facturacion = () => {
         </div>
 
         <ArmadoResumen pedido={pedidoEditando} ocultarRemovidos />
+        {notaDePedido(pedidoEditando) && (
+          <div className="card" data-testid="nota-pedido" style={{ borderColor: 'var(--warning)', background: 'rgba(255,193,7,0.10)', fontSize: 14, whiteSpace: 'pre-wrap' }}>
+            <b>{'\u{1F4DD}'} Nota:</b> {notaDePedido(pedidoEditando)}
+          </div>
+        )}
 
         <div className="card">
           <label className="input-label">Nombre del cliente</label>
@@ -1400,6 +1406,12 @@ const Facturacion = () => {
 
             {/* Sin descripcion en listado: el detalle se ve entrando al pedido (Editar). */}
             <ArmadoResumen pedido={p} compact />
+            {/* REQ-OBS (AC-OBS-2): nota del pedido a la vista. */}
+            {notaDePedido(p) && (
+              <div data-testid="nota-pedido-lista" style={{ fontSize: 13, marginBottom: 8, padding: '6px 8px', borderRadius: 8, background: 'rgba(255,193,7,0.12)', whiteSpace: 'pre-wrap' }}>
+                <b>{'\u{1F4DD}'} Nota:</b> {notaDePedido(p)}
+              </div>
+            )}
 
             {isAdmin && (
               <TipoFacturaSelector

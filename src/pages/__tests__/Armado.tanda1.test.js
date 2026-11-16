@@ -205,3 +205,34 @@ describe('AC-EDP-3 Armado: chequeo de version', () => {
     expect(boton('Guardar cambios')).toBeUndefined(); // volvió a la lista
   });
 });
+
+// Lote 2026-11-16: REQ-OBS (nota del pedido a la vista) y REQ-SAR (sin armar hasta la fecha).
+describe('AC-OBS-2 / AC-SAR-1 Armado: nota del pedido y pedidos atrasados sin armar', () => {
+  test('AC-OBS-2 la nota del pedido se ve en la lista y en la pantalla de armado', async () => {
+    setApp([pedido(12, { observaciones: 'Entregar a la tarde, puerta trasera' })], ARMADOR);
+    await render();
+    expect(q('nota-pedido-lista').textContent).toContain('Entregar a la tarde, puerta trasera');
+    await click(boton('Armar pedido'));
+    expect(q('nota-pedido').textContent).toContain('Entregar a la tarde, puerta trasera');
+  });
+
+  test('AC-OBS-2 un pedido sin nota no muestra el recuadro', async () => {
+    setApp([pedido(12)], ARMADOR);
+    await abrirArmado();
+    expect(q('nota-pedido')).toBeNull();
+  });
+
+  test('AC-SAR-1 "Sin armar" suma los pedidos atrasados sin armar y pide los pendientes al servidor', async () => {
+    const traer = jest.fn();
+    const viejo = pedido(6, { id: 4, fecha: '2026-01-05', clienteNombre: 'Almacen Viejo' });
+    const viejoArmado = pedido(6, { id: 5, fecha: '2026-01-06', clienteNombre: 'Ya Armado', armado: true });
+    setApp([pedido(12), viejo, viejoArmado], ARMADOR, {}, { traerPedidosPendientes: traer });
+    await render();
+    expect(traer).toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Almacen Viejo'); // "Todos" es solo la fecha elegida
+    await click(boton('Sin armar'));
+    expect(container.textContent).toContain('Almacen Viejo');
+    expect(container.textContent).toContain('Kiosco Pepe');
+    expect(container.textContent).not.toContain('Ya Armado');
+  });
+});

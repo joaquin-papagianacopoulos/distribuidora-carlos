@@ -9,12 +9,12 @@ import { filtrarActivos } from '../domain/vendedores';
 import { datosVendedorAlCrear } from '../domain/vendedorPedido';
 import { puedeEditarPedido, puedeAsignarVendedor } from '../domain/permisos';
 import { normalizePedidoFecha } from '../utils/pedidos';
-import { avisoSinStock, stockParaAviso, etiquetaSinStock } from '../domain/stock';
+import { avisoSinStock, stockParaAviso, etiquetaSinStock, textoStockDisponible } from '../domain/stock';
 import { preciosPorGrupoBulto, progresoGrupoBulto } from '../domain/grupoBulto';
 import { precioAplicadoRenglon, esPrecioManual, precioBaseRenglon, etiquetaEscala } from '../domain/precios';
 import { validarMinimosItems, mensajeMinimo, cantidadConPasoMinimo, ajustarAMultiploMinimo, validarMultiplosMinimoItems, mensajeMultiploMinimo } from '../domain/minimos';
 import { cambiarCasillero, botonesProductoLista, agregarBultoDesdeLista, precioVigenteRenglon } from '../domain/casilleros';
-import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
+import { sumarBultoRenglon, restarBulto, puedeUsarBulto, CANTIDAD_MINIMA_RENGLON, MARCA_CANTIDAD_POR_DEFECTO, renglonNuevo, renglonAlDia, quitarMarcasRenglon, quitarMarcasRenglones, cantidadTipeada, validarCantidadesItems, mensajeCantidadesInvalidas } from '../domain/bultos';
 import BultoControl from '../components/BultoControl';
 import { pasoCantidad, avisoMultiplo, validarMultiplosItems, congelarBultosItems, congelarBultosRenglon, textoRenglonBultos, precioBulto, ventaPorEfectivo, normalizarBultoNombre } from '../domain/unidadVenta';
 
@@ -48,7 +48,7 @@ const hasDraftContent = (draft) =>
 const conCantidad = (i, cantidad) => precioAplicadoRenglon(quitarMarcasRenglon({ ...i, cantidad }), cantidad);
 
 // Componente separado con estado local para los inputs — evita borrar el item al vaciar el campo
-const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStock = null, progresoGrupo = null, errorMinimo = null, errorMultiplo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
+const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStock = null, textoStock = null, progresoGrupo = null, errorMinimo = null, errorMultiplo = null, canEditPrecio, onCambiarCantidad, onSetCantidad, onSetPrecio, onSetDescuentoPct, onEliminar, onBulto }) => {
   const [cantidadText, setCantidadText] = useState(String(item.cantidad));
   const [precioText, setPrecioText] = useState(String(item.precio));
   const [avisoAjuste, setAvisoAjuste] = useState(null); // AC-MUL-1: "Se ajustó a N (de a m)"
@@ -99,7 +99,8 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStoc
     const val = e.target.value;
     setPrecioText(val);
     const n = parseFloat(val.replace(',', '.'));
-    if (!isNaN(n) && n >= 0) onSetPrecio(item.productoId, n);
+    // AC-ESC2-5: solo es "precio manual" si de verdad cambió (si no, el renglón dejaba de re-preciarse).
+    if (!isNaN(n) && n >= 0 && n !== Number(item.precio)) onSetPrecio(item.productoId, n);
   };
 
   const handlePrecioBlur = () => {
@@ -108,7 +109,9 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStoc
       setPrecioText(String(item.precio));
     } else {
       setPrecioText(String(n));
-      onSetPrecio(item.productoId, n);
+      // AC-ESC2-5: tocar el precio y salir sin cambiarlo NO lo marca como manual
+      // (antes sí: el renglón ya no tomaba el precio de bulto ni la escala).
+      if (n !== Number(item.precio)) onSetPrecio(item.productoId, n);
     }
   };
 
@@ -149,6 +152,9 @@ const ItemRow = ({ item, producto, puedeBulto = false, avisos = [], etiquetaStoc
             <div data-testid="sin-stock-por-recibir" style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>
               {etiquetaStock}
             </div>
+          )}
+          {textoStock && (
+            <div data-testid="stock-renglon" style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{textoStock}</div>
           )}
           {errorMinimo && (
             <div data-testid="error-minimo" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
@@ -387,6 +393,16 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
       localStorage.removeItem(draftKey);
     }
   }, [modoEdicion, draftKey, fecha, clienteQ, clienteId, clienteNombre, direccion, productoQ, items, observaciones]);
+
+  // AC-ESC2-5: los renglones de un borrador (pedido nuevo sin guardar) se ponen al día con el producto:
+  // si después de agregarlo se le cambió el precio o se le cargó una escala, el renglón la toma.
+  useEffect(() => {
+    if (modoEdicion) return;
+    setItems(prev => {
+      const next = prev.map(i => renglonAlDia(i, productosById.get(String(i.productoId))));
+      return next.some((x, k) => x !== prev[k]) ? next : prev;
+    });
+  }, [modoEdicion, productosById, setItems]);
 
   const clienteSugg = clienteQ.length >= 1 ? fuzzySearch(clienteQ, clientes, 'nombre', 5) : [];
   const productoLimit = productoQ.trim().length < 2 ? 40 : 120;
@@ -707,6 +723,12 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
                   <div>
                     <div>{p.nombre}</div>
                     <div className="suggestion-sub">{p.codigo || ''}</div>
+                    {/* AC-STV-1: stock real a la vista mientras se levanta el pedido. */}
+                    {textoStockDisponible(stockParaAviso(stockMap, p.id), p.bultoX) && (
+                      <div data-testid="sugerencia-stock" className="suggestion-sub" style={{ fontWeight: 600, color: stockParaAviso(stockMap, p.id) > 0 ? 'var(--text2)' : 'var(--danger)' }}>
+                        {textoStockDisponible(stockParaAviso(stockMap, p.id), p.bultoX)}
+                      </div>
+                    )}
                     {etiquetaSinStock(stockParaAviso(stockMap, p.id)) && (
                       <div data-testid="sugerencia-sin-stock" className="suggestion-sub" style={{ color: 'var(--warning)' }}>
                         {etiquetaSinStock(stockParaAviso(stockMap, p.id))}
@@ -724,6 +746,8 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
                           <button type="button" className="btn-icon" data-testid="lista-bulto"
                             style={{ width: 'auto', padding: '0 10px', height: 28, fontSize: 12 }}
                             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); agregarBultoLista(p); }}>{b.bulto.texto}</button>
+                          {/* AC-CBU-4: siempre a la vista el precio por unidad llevando el bulto. */}
+                          <span data-testid="lista-bulto-unidad" style={{ fontSize: 12, color: 'var(--text3)', alignSelf: 'center' }}>{b.bulto.textoUnidad}</span>
                         </div>
                       ) : null;
                     })()}
@@ -756,6 +780,7 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
                 onBulto={aplicarBulto}
                 avisos={[avisoSinStock(item.cantidad, stockParaAviso(stockMap, item.productoId))].filter(Boolean)}
                 etiquetaStock={etiquetaSinStock(stockParaAviso(stockMap, item.productoId))}
+                textoStock={textoStockDisponible(stockParaAviso(stockMap, item.productoId), productosById.get(String(item.productoId))?.bultoX)}
                 errorMultiplo={erroresMultiplo.has(String(item.productoId)) ? mensajeMultiploMinimo(erroresMultiplo.get(String(item.productoId))) : null}
                 progresoGrupo={progresoGrupoBulto(item, items)}
                 errorMinimo={erroresMinimo.has(String(item.productoId)) ? mensajeMinimo(erroresMinimo.get(String(item.productoId))) : null}

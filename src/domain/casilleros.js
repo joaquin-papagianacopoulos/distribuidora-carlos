@@ -47,7 +47,8 @@ export function botonesProductoLista(producto) {
   if (bx === null) return { unidad, bulto: null };
   const porUnidad = Number(p.precioBulto) > 0 ? Number(p.precioBulto) : (Number(p.precio) || 0);
   const precio = redondear(porUnidad * bx);
-  return { unidad, bulto: { texto: `Bulto x${bx} ${pesos(precio)}`, precio, bultoX: bx } };
+  // AC-CBU-4: además del precio del bulto entero, el precio por unidad llevando el bulto.
+  return { unidad, bulto: { texto: `Bulto x${bx} ${pesos(precio)}`, precio, bultoX: bx, porUnidad: redondear(porUnidad), textoUnidad: `${pesos(redondear(porUnidad))} c/u` } };
 }
 
 // AC-CBU-1: tocar "Bulto" agrega 1 bulto (renglón nuevo = 1 bulto, sin marca de cantidad por defecto).
@@ -69,7 +70,9 @@ export function agregarBultoDesdeLista(items, producto) {
 // AC-CBU-3: precio que se está aplicando en el renglón.
 export function precioVigenteRenglon(item) {
   const precio = Number(item && item.precio) || 0;
-  return item && item.precioPorBulto === true
+  // AC-CBU-4: con escala de bultos también se muestra el precio por unidad que se está cobrando.
+  const conEscala = !!item && Number(item.escalaDesde) >= 2;
+  return item && (item.precioPorBulto === true || conEscala)
     ? { tipo: 'bulto', precio, texto: `Precio bulto ${pesos(precio)} c/u` }
     : { tipo: 'unidad', precio, texto: `Precio unidad ${pesos(precio)}` };
 }

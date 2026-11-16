@@ -4,7 +4,8 @@ import { isPedidoVisible, normalizePedidoFecha } from './pedidos';
 import { filasPdfCierre } from '../domain/comisiones';
 import { filasBoleta, numerarFilasBoleta } from '../domain/gruposFactura';
 import { totalesBoleta } from '../domain/precios';
-import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA, ESTILO_ITEMS_REMITO } from '../domain/boletaLayout';
+import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA, ESTILO_ITEMS_REMITO, COLOR_LINEA_TABLA } from '../domain/boletaLayout';
+import { notaDePedido } from '../domain/observaciones';
 import { totalACobrar } from '../domain/redondeo';
 
 const alpha = (a, b) =>
@@ -296,7 +297,8 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const { filas, items: cantItems } = numerarFilasBoleta(
     filasBoleta(pedido.items || [], pedido.grupos, { modo: opciones?.modoGrupos === 'solo_grupos' ? 'solo_grupos' : 'detalle' }),
   );
-  const rows = filas.map(f => [f.nro ?? '', f.nombre, f.cantidadTexto, f.precioTexto, `$${Number(f.subtotal).toLocaleString('es-AR')}`]);
+  // AC-RTO-9: el precio por unidad sale SIEMPRE; si el renglon va en bultos, ademas el precio del bulto.
+  const rows = filas.map(f => [f.nro ?? '', f.nombre, f.cantidadTexto, f.precioUnitTexto ?? f.precioTexto ?? '', f.precioBultoTexto ?? '', `$${Number(f.subtotal).toLocaleString('es-AR')}`]);
 
   // REQ-FRB: el precio de bulto no se muestra como descuento (base = precioBaseRenglon).
   const { total: totalRenglones, totalSinDescuento: totalSinDesc, descuento: descuentoTotal, descuentoPct } = totalesBoleta(sortedItems);
@@ -308,7 +310,7 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     startY: 38,
     // El pie (totales, saldo y obs) lo ubica layoutPieBoleta; la tabla solo deja un margen chico.
     margin: { left: 14, right: 14, bottom: 14 },
-    head: [['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Subtotal']],
+    head: [['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Precio Bulto', 'Subtotal']],
     body: rows,
     theme: 'grid',
     // AC-RTO-4: estilo compacto (mas renglones por hoja), con bordes marcados para impresoras.
@@ -317,15 +319,17 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     // AC-RTO-7: renglones en Arial (helvetica en jsPDF) negrita, negro y un punto mas grandes: se leen mejor.
     bodyStyles: ESTILO_ITEMS_REMITO,
     alternateRowStyles: { fillColor: [232, 232, 232] },
-    tableLineColor: [60, 60, 60],
-    tableLineWidth: 0.45,
+    // AC-RTO-8: recuadros en gris suave.
+    tableLineColor: [...COLOR_LINEA_TABLA],
+    tableLineWidth: 0.25,
     columnStyles: {
       // A4 ancho 210mm, con margenes 14/14 => 182mm max para que no se pase del borde.
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 80 },
-      2: { cellWidth: 28, halign: 'center' },
-      3: { cellWidth: 32, halign: 'right' },
-      4: { cellWidth: 32, halign: 'right' },
+      0: { cellWidth: 9, halign: 'center' },
+      1: { cellWidth: 72 },
+      2: { cellWidth: 24, halign: 'center' },
+      3: { cellWidth: 25, halign: 'right' },
+      4: { cellWidth: 26, halign: 'right' },
+      5: { cellWidth: 26, halign: 'right' },
     },
     didParseCell: (data) => {
       if (data.section !== 'body') return;
@@ -341,7 +345,11 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   // REQ-REN (AC-REN-3): saldo a favor del cliente (ya neteado con la deuda por cuentaParaBoleta).
   // Va en el mismo lugar que el saldo anterior (nunca aparecen los dos).
   const saldoAFavor = !hayDeuda && Number(opciones?.saldoAFavor) > 0.001 ? Number(opciones.saldoAFavor) : 0;
-  const obsLineas = pedido.observaciones ? doc.splitTextToSize(`Obs: ${pedido.observaciones}`, 175).slice(0, 3) : [];
+  // REQ-OBS (AC-OBS-3): la nota del pedido va al pie, en negrita y hasta 4 lineas (tambien la de un pedido web).
+  const nota = notaDePedido(pedido);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  const obsLineas = nota ? doc.splitTextToSize(`NOTA: ${nota}`, 180).slice(0, 4) : [];
   const pie = layoutPieBoleta({
     finalY, pageH, hayDescuento, hayDeuda: hayDeuda || saldoAFavor > 0, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1,
   });
@@ -388,8 +396,9 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   }
 
   if (obsLineas.length) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
     doc.text(obsLineas, 14, pie.obsY);
   }
 
@@ -746,7 +755,9 @@ export const generarRendicionDiaFile = async (resumen, { fecha } = {}) => {
 // { filas: [{ zona, orden, clienteNombre, direccion, importe, saldoAnterior, totalACobrar }], totales }.
 // Las columnas Efectivo / Transferencia / Transf. a proveedor / Observaciones salen vacias para anotar
 // a mano (es el troquel de cobro que ya no va en el remito). Apaisada, agrupada por zona, totales al final.
-export const generarHojaRutaFile = async (resultado, { fechas = [], zonas = [] } = {}) => {
+// REQ-RUT: con `ruta: true` es la ruta armada a mano (un solo orden 1..n): sin separadores de zona
+// y con el titulo de la fecha de salida en lugar de "pedidos del ...".
+export const generarHojaRutaFile = async (resultado, { fechas = [], zonas = [], ruta = false } = {}) => {
   const doc = await nuevoDocConTabla({ orientation: 'landscape' });
   const filas = Array.isArray(resultado?.filas) ? resultado.filas : [];
   const t = resultado?.totales || { pedidos: filas.length, importe: 0, saldoAnterior: 0, totalACobrar: 0 };
@@ -758,17 +769,22 @@ export const generarHojaRutaFile = async (resultado, { fechas = [], zonas = [] }
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(`Hoja de ruta${periodo ? ` - pedidos del ${periodo}` : ''}`, 10, 12);
+  doc.text(`Hoja de ruta${periodo ? (ruta ? ` - ${periodo}` : ` - pedidos del ${periodo}`) : ''}`, 10, 12);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Pedidos: ${t.pedidos}${(zonas || []).length ? ` · Zonas: ${zonas.length}` : ' · Todas las zonas'}`, 10, 18);
+  doc.text(
+    ruta
+      ? `Pedidos: ${t.pedidos} · En el orden de entrega elegido`
+      : `Pedidos: ${t.pedidos}${(zonas || []).length ? ` · Zonas: ${zonas.length}` : ' · Todas las zonas'}`,
+    10, 18,
+  );
 
   // Una fila "Zona: X" cada vez que cambia la zona.
   const body = [];
   let zonaActual = null;
   for (const f of filas) {
     const z = f.zona || 'Sin zona';
-    if (z !== zonaActual) {
+    if (!ruta && z !== zonaActual) {
       zonaActual = z;
       body.push([{ content: `Zona: ${z}`, colSpan: 10, styles: { fontStyle: 'bold', fillColor: [210, 210, 210] } }]);
     }

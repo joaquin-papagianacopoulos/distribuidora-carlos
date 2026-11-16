@@ -130,9 +130,10 @@ export const columnasRenglonBoleta = (i, nombre) => {
   const c = Number(i?.cantidad);
   if (bx !== null && Number.isInteger(c) && c >= bx && c % bx === 0) {
     const precioDelBulto = Math.round(Number(i?.precio) * bx * 100) / 100;
-    return { nombre: nombreConMarca(i, `${nombre} (bulto x${bx})`), cantidadTexto: String(c / bx), precioTexto: peso(precioDelBulto), enBultos: true };
+    // AC-RTO-9: ademas del precio del bulto, siempre el precio por unidad (precioUnitTexto).
+    return { nombre: nombreConMarca(i, `${nombre} (bulto x${bx})`), cantidadTexto: String(c / bx), precioTexto: peso(precioDelBulto), precioUnitTexto: peso(i?.precio), precioBultoTexto: peso(precioDelBulto), enBultos: true };
   }
-  return { nombre: nombreConMarca(i, nombre), cantidadTexto: String(i?.cantidad), precioTexto: peso(i?.precio) };
+  return { nombre: nombreConMarca(i, nombre), cantidadTexto: String(i?.cantidad), precioTexto: peso(i?.precio), precioUnitTexto: peso(i?.precio), precioBultoTexto: '' };
 };
 
 // Filas de la tabla de la boleta. El total del pedido es la suma de los items:
@@ -167,7 +168,7 @@ export const filasBoleta = (items, grupos, { modo = 'detalle' } = {}) => {
     }));
     top.push({
       orden: g.nombre,
-      fila: { tipo: 'grupo', nombre: g.nombre, cantidadTexto: textoBultosGrupo(rengs), precioTexto: '', subtotal: rengs.reduce((s, i) => s + subtotalItem(i), 0) },
+      fila: { tipo: 'grupo', nombre: g.nombre, cantidadTexto: textoBultosGrupo(rengs), precioTexto: '', precioUnitTexto: '', precioBultoTexto: '', subtotal: rengs.reduce((s, i) => s + subtotalItem(i), 0) },
       detalle,
     });
   }

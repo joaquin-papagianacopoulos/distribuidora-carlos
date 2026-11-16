@@ -96,7 +96,7 @@ describe('AC-RTO-2 direccion y vendedor destacado', () => {
 describe('AC-RTO-3 renglones numerados e Items', () => {
   it('AC-RTO-3 la tabla lleva columna N° y "Ítems: N" al pie', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
-    expect(mockReg.tablas[0].head[0]).toEqual(['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Subtotal']);
+    expect(mockReg.tablas[0].head[0]).toEqual(['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Precio Bulto', 'Subtotal']);
     expect(mockReg.tablas[0].body.map(r => r[0])).toEqual([1, 2]);
     expect(buscar(/^Ítems: 2$/)).toHaveLength(1);
   });
@@ -182,7 +182,7 @@ describe('AC-RTO-6 sin troquel ni pie de pagina', () => {
     const total = buscar(/^TOTAL:$/)[0];
     const saldo = buscar(/^Saldo anterior/)[0];
     const cobrar = buscar(/^Total a cobrar/)[0];
-    const obs = buscar(/^Obs:/)[0];
+    const obs = buscar(/^NOTA:/)[0];
     expect(saldo.pagina).toBe(total.pagina);
     expect(saldo.y).toBeGreaterThan(total.y);
     expect(cobrar.y).toBeGreaterThan(saldo.y);
@@ -198,7 +198,7 @@ describe('AC-RTO-6 sin troquel ni pie de pagina', () => {
       await generarFacturaFile(pedido({ items, observaciones: 'nota' }), {}, {}, 100, null);
       const total = buscar(/^TOTAL:$/)[0];
       const items1 = buscar(/^Ítems:/)[0];
-      const obs = buscar(/^Obs:/)[0];
+      const obs = buscar(/^NOTA:/)[0];
       expect(total.pagina).toBe(items1.pagina);
       expect(obs.pagina).toBe(total.pagina);
       expect(obs.y).toBeLessThan(297 - 12);

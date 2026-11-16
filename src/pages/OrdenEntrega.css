@@ -1,0 +1,136 @@
+/* src/pages/OrdenEntrega.css — tablero de entrega (REQ-RUT). Celular primero; dos paneles desde 900 px. */
+.oe { max-width: 1240px; margin: 0 auto; }
+
+/* Pasos 1-2-3 */
+.oe-pasos { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 14px; }
+.oe-paso {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text2);
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 12px 5px 5px;
+}
+.oe-paso i {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  font-style: normal; font-weight: 700; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+
+/* Resumen */
+.oe-resumen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.oe-stat {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.oe-stat b { font-size: 20px; line-height: 1.1; overflow-wrap: anywhere; }
+.oe-stat span { font-size: 11px; color: var(--text3); }
+.oe-stat-ruta { border-color: var(--accent); }
+.oe-stat-ruta b { color: var(--accent); }
+
+/* Pestañas del celular */
+.oe-tabs { display: flex; gap: 8px; margin-bottom: 12px; position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 6px 0; }
+.oe-tab {
+  flex: 1; min-height: 44px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--text2);
+  font-size: 14px; font-weight: 600;
+}
+.oe-tab.activa { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Tablero */
+.oe-tablero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+.oe-oculto-movil { display: none; }
+.oe-panel {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 14px;
+  padding: 12px; min-width: 0; display: flex; flex-direction: column;
+}
+.oe-panel-ruta { border-color: var(--accent); background: var(--bg2); }
+.oe-panel-cab { margin-bottom: 10px; }
+.oe-titulo { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+.oe-ayuda { font-size: 12px; color: var(--text3); line-height: 1.4; }
+.oe-filtros { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 8px; }
+.oe-desde { font-size: 11px; color: var(--text3); display: flex; flex-direction: column; gap: 4px; }
+.oe-agregar-todos { width: 100%; }
+
+.oe-lista { min-height: 0; }
+.oe-vacio { text-align: center; color: var(--text3); font-size: 14px; line-height: 1.5; padding: 28px 12px; }
+.oe-vacio-icono { font-size: 40px; opacity: .5; margin-bottom: 6px; }
+
+/* Tarjetas */
+.oe-card {
+  display: flex; gap: 10px; align-items: stretch;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 8px; transition: border-color .15s, box-shadow .15s, opacity .15s;
+}
+.oe-panel-ruta .oe-card { background: var(--bg); }
+.oe-pend:hover { border-color: var(--accent); }
+.oe-cuerpo { flex: 1; min-width: 0; cursor: pointer; }
+.oe-cuerpo-ruta { cursor: default; }
+.oe-nombre { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+.oe-dir { font-size: 13px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
+.oe-meta { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.oe-nota { font-size: 12px; margin-top: 4px; padding: 3px 6px; border-radius: 6px; background: rgba(243, 156, 18, .14); overflow-wrap: anywhere; }
+.oe-lado { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; flex: none; }
+.oe-monto { font-weight: 700; color: var(--success); font-size: 15px; white-space: nowrap; }
+.oe-btn-agregar { min-height: 40px; min-width: 76px; width: auto; }
+
+/* Paradas de la ruta */
+.oe-parada { flex-direction: column; cursor: grab; }
+.oe-parada-fila { display: flex; gap: 10px; align-items: center; }
+.oe-num {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.oe-arrastrando { opacity: .35; }
+.oe-sobre { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.oe-controles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.oe-asa { color: var(--text3); font-size: 18px; letter-spacing: -3px; cursor: grab; user-select: none; display: none; }
+.oe-flecha, .oe-quitar {
+  width: 44px; height: 40px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-size: 14px;
+}
+.oe-flecha:disabled { opacity: .35; cursor: default; }
+.oe-quitar { margin-left: auto; color: var(--danger); border-color: var(--danger); }
+.oe-puesto { width: 64px; height: 40px; text-align: center; padding: 0 6px; }
+.oe-link { font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; padding: 8px 4px; }
+.oe-entregado { width: auto; min-height: 40px; }
+
+/* Acciones de la ruta (pegadas abajo en el celular) */
+.oe-acciones {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 0 2px;
+  border-top: 1px solid var(--border); background: var(--bg2);
+  position: sticky; bottom: 0;
+}
+.oe-acciones-sec { display: flex; gap: 8px; flex-wrap: wrap; }
+.oe-acciones-sec .btn { flex: 1; min-width: 110px; }
+
+/* Aviso */
+.oe-aviso {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 50;
+  background: #0f172a; color: #fff; font-size: 13px; padding: 10px 16px; border-radius: 999px;
+  max-width: calc(100vw - 32px); text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .25);
+}
+
+/* Compu y tablet horizontal: los dos paneles lado a lado, cada uno con su propio scroll */
+@media (min-width: 900px) {
+  .oe-tabs { display: none; }
+  .oe-oculto-movil { display: flex; }
+  .oe-tablero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .oe-panel {
+    position: sticky; top: 0;
+    max-height: calc(100vh - var(--header-h, 56px) - var(--nav-h, 60px) - 24px);
+    max-height: calc(100dvh - var(--header-h, 56px) - var(--nav-h, 60px) - 24px);
+  }
+  .oe-lista { overflow-y: auto; flex: 1; padding-right: 2px; }
+  .oe-filtros { grid-template-columns: 2fr 1.2fr 1fr; align-items: end; }
+  .oe-asa { display: inline; }
+  .oe-acciones { position: static; }
+  .oe-stat b { font-size: 24px; }
+}
+
+@media (max-width: 380px) {
+  .oe-resumen { gap: 6px; }
+  .oe-stat { padding: 8px; }
+  .oe-stat b { font-size: 17px; }
+  .oe-flecha, .oe-quitar { width: 40px; }
+}

@@ -6,7 +6,7 @@ import { toInt } from './validacion';
 import { MAX_CANTIDAD } from './stock';
 import { rubroDeProducto } from './rubros';
 import { cantidadInicialConMinimo } from './minimos';
-import { precioAplicado, normalizarEscalasBulto, camposEscala } from './precios';
+import { precioAplicado, normalizarEscalasBulto, camposEscala, esPrecioManual, precioAplicadoRenglon } from './precios';
 import { normalizarGrupoBulto } from './grupoBulto';
 
 // Piso que usan las pantallas para "− Bulto": el renglón no se borra solo (AC-BUL-3).
@@ -91,6 +91,44 @@ export function renglonNuevo(producto, extra = {}) {
     ...extra,
     [MARCA_CANTIDAD_POR_DEFECTO]: true,
   };
+}
+
+// AC-ESC2-5: renglón de un BORRADOR (pedido todavía no guardado) al día con el producto actual.
+// Si desde que se agregó cambió el precio, el precio llevando bulto, el bulto, las escalas o el grupo
+// del producto, se vuelven a congelar y se re-precia con la cantidad del renglón. Así un producto que
+// ya estaba en el borrador cuando se le cargó la escala igual la toma. Precio manual => no se toca.
+// Sin cambios devuelve el mismo objeto. Los pedidos ya guardados NO pasan por acá (precios congelados).
+export function renglonAlDia(item, producto) {
+  if (!item || typeof item !== 'object' || !producto || typeof producto !== 'object') return item;
+  if (esPrecioManual(item)) return item;
+  const bx = normalizarBultoX(producto.bultoX);
+  const conBulto = Number(producto.precioBulto) > 0 && bx !== null;
+  const escalas = bx !== null ? normalizarEscalasBulto(producto.escalasBulto) : [];
+  const congela = conBulto || escalas.length > 0;
+  const grupoBulto = normalizarGrupoBulto(producto.grupoBulto);
+  const esperado = {
+    precioOriginal: producto.precio,
+    precioBultoOriginal: conBulto ? Number(producto.precioBulto) : undefined,
+    precioBultoX: congela ? bx : undefined,
+    escalasBulto: escalas.length > 0 ? escalas : undefined,
+    grupoBulto: grupoBulto || undefined,
+  };
+  const igual = Object.keys(esperado).every(k => JSON.stringify(item[k] ?? null) === JSON.stringify(esperado[k] ?? null));
+  if (igual) return item;
+  const {
+    precioOriginal: _po, precioBultoOriginal: _pb, precioPorBulto: _pp, precioBultoX: _px, escalasBulto: _es,
+    escalaDesde: _ed, escalaPct: _ep, escalaPrecio: _er, grupoBulto: _gb, ...resto
+  } = item;
+  const base = {
+    ...resto,
+    precio: producto.precio,
+    precioOriginal: producto.precio,
+    ...(conBulto ? { precioBultoOriginal: Number(producto.precioBulto), precioPorBulto: false } : {}),
+    ...(congela ? { precioBultoX: bx } : {}),
+    ...(escalas.length > 0 ? { escalasBulto: escalas } : {}),
+    ...(grupoBulto ? { grupoBulto } : {}),
+  };
+  return precioAplicadoRenglon(base, base.cantidad);
 }
 
 // AC-BUL-9: "+ Bulto" sobre un renglón. Si la cantidad sigue siendo la unidad

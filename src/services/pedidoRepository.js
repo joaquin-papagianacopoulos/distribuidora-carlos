@@ -21,6 +21,7 @@ import { redondeoToRemote, sinColumnas025, nombraColumna025 } from '../domain/re
 import { modificadoToRemote, aplicarEdicion, confirmarModificacion } from '../domain/edicionPedido';
 import { puedeEditarPedido, puedeAsignarVendedor } from '../domain/permisos';
 import { traerPedidoRemoto } from '../sync/syncService';
+import { observacionesToRemote, sinColumnas028, nombraColumna028 } from '../domain/observaciones';
 
 const toRemoteRow = (pedido) => {
   const p = normalizePedidoOrdenEntrega(pedido);
@@ -54,6 +55,8 @@ const toRemoteRow = (pedido) => {
     ...modificadoToRemote(p),
     // Tanda 2 (migracion 025): redondeo del total (solo si el pedido lo conoce).
     ...redondeoToRemote(p),
+    // REQ-OBS (migracion 028): nota del pedido (solo si el pedido la conoce).
+    ...observacionesToRemote(p),
     // AC-SEG2-3: id de idempotencia del alta (solo viaja si el pedido lo tiene).
     ...clientUuidToRemote(p),
     updated_at: new Date().toISOString(),
@@ -157,6 +160,12 @@ const guardarPedidoInterno = async (pedido, { versionBase = null } = {}) => {
 
     let { data, error } = await enviar(row);
     let filaEnvio = row;
+    // REQ-OBS: falta la migracion 028 (observaciones): reintento sin esa columna.
+    if (error && esColumnaInexistente(error) && nombraColumna028(error)) {
+      console.warn('Falta aplicar la migracion 028 (pedidos.observaciones): la nota queda solo en este dispositivo.');
+      filaEnvio = sinColumnas028(filaEnvio);
+      ({ data, error } = await enviar(filaEnvio));
+    }
     // Tanda 2: falta la migracion 025 (redondeo): reintento sin esas columnas (se repite despues por si faltan varias).
     const sin025 = async () => {
       if (error && esColumnaInexistente(error) && nombraColumna025(error)) {

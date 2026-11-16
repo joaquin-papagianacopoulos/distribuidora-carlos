@@ -171,19 +171,25 @@ describe('AC-INA-1 / AC-INA-2 ingreso con costo y Factura A/B', () => {
     await click(container.querySelector('[data-testid="sugerido"]'));
   };
 
-  it('AC-INA-1 sin tocar costos ni A/B el ingreso se registra como siempre (sin form.costos)', async () => {
+  // ADAPTADO (REQ-INA2, Lote 2026-11-16): la factura es solo el tipo (obligatorio), sin número ni tipo por renglón.
+  it('AC-INA2-1 solo con el tipo de factura (sin costos) manda el tipo en form.costos y una referencia sin número', async () => {
     registrarIngreso.mockResolvedValueOnce({ ok: true, errores: {}, ingreso: { facturaProveedor: 'F1' }, movimientos: [{}], costos: null });
     await irAIngreso();
-    await setValue(container.querySelector('#ing-factura'), 'F1');
+    await setValue(container.querySelector('#ing-tipo'), 'A');
     await setValue(container.querySelector('#ing-proveedor'), 'prov-1');
     await agregarProducto('det');
     await setValue(porLabel('Ingreso Detergente Limón'), '10');
     await click(boton('Confirmar ingreso'));
-    expect(registrarIngreso.mock.calls[0][0]).toEqual({ facturaProveedor: 'F1', proveedorId: 'prov-1', items: [{ productoId: '1', ingreso: '10' }] });
+    expect(registrarIngreso.mock.calls[0][0]).toEqual({
+      facturaProveedor: expect.stringMatching(/^A · \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/),
+      proveedorId: 'prov-1',
+      items: [{ productoId: '1', ingreso: '10' }],
+      costos: { tipoCabecera: 'A', facturaA: '', facturaB: '', actualizarCosto: true, items: [{ productoId: '1', costoUnitario: '', tipoFactura: '' }] },
+    });
     expect(container.querySelector('[data-testid="comprobante-ingreso"]')).toBeNull();
   });
 
-  it('AC-INA-1 con costo y A/B manda form.costos con cabecera, números de factura y renglones', async () => {
+  it('AC-INA-1 con costo manda form.costos con el tipo de la cabecera y los renglones (sin números de factura)', async () => {
     registrarIngreso.mockResolvedValueOnce({
       ok: true, errores: {}, movimientos: [{}, {}],
       ingreso: { id: 'i1', facturaProveedor: 'F2', items: [{ productoId: '1', ingreso: 10 }, { productoId: '2', ingreso: 5 }] },
@@ -192,30 +198,26 @@ describe('AC-INA-1 / AC-INA-2 ingreso con costo y Factura A/B', () => {
       productosActualizados: ['1'],
     });
     await irAIngreso();
-    await setValue(container.querySelector('#ing-factura'), 'F2');
     await setValue(container.querySelector('#ing-proveedor'), 'prov-1');
     await setValue(container.querySelector('#ing-tipo'), 'A');
-    await setValue(container.querySelector('#ing-fa'), '0001-55');
-    await setValue(container.querySelector('#ing-fb'), '0002-66');
     await agregarProducto('det');
     await agregarProducto('jabon');
     await setValue(porLabel('Ingreso Detergente Limón'), '10');
     await setValue(porLabel('Ingreso Jabón en polvo'), '5');
     await setValue(porLabel('Costo unitario Detergente Limón'), '10');
     await setValue(porLabel('Costo unitario Jabón en polvo'), '4');
-    await setValue(porLabel('Factura Jabón en polvo'), 'B');
-    // AC-INA-2: subtotales en vivo por A y por B
+    // AC-INA-2: subtotales en vivo (todo el ingreso es del tipo elegido arriba)
     const previo = container.querySelector('[data-testid="subtotales-previo"]').textContent;
-    expect(previo).toContain('Factura A: 10 u. · $100,00');
-    expect(previo).toContain('Factura B: 5 u. · $20,00');
+    expect(previo).toContain('Factura A: 15 u. · $120,00');
+    expect(previo).toContain('Factura B: 0 u. · $0,00');
     expect(previo).toContain('Total: 15 u. · $120,00');
     await click(boton('Confirmar ingreso'));
     expect(registrarIngreso.mock.calls[0][0]).toEqual({
-      facturaProveedor: 'F2', proveedorId: 'prov-1',
+      facturaProveedor: expect.stringMatching(/^A · \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/), proveedorId: 'prov-1',
       items: [{ productoId: '1', ingreso: '10' }, { productoId: '2', ingreso: '5' }],
       costos: {
-        tipoCabecera: 'A', facturaA: '0001-55', facturaB: '0002-66', actualizarCosto: true,
-        items: [{ productoId: '1', costoUnitario: '10', tipoFactura: '' }, { productoId: '2', costoUnitario: '4', tipoFactura: 'B' }],
+        tipoCabecera: 'A', facturaA: '', facturaB: '', actualizarCosto: true,
+        items: [{ productoId: '1', costoUnitario: '10', tipoFactura: '' }, { productoId: '2', costoUnitario: '4', tipoFactura: '' }],
       },
     });
     // AC-INA-2: el comprobante muestra los subtotales y se puede bajar en PDF
@@ -231,6 +233,7 @@ describe('AC-INA-1 / AC-INA-2 ingreso con costo y Factura A/B', () => {
   it('AC-INA-4 el tilde de actualizar costo aparece con costo cargado y se puede sacar', async () => {
     registrarIngreso.mockResolvedValueOnce({ ok: true, errores: {}, ingreso: { facturaProveedor: 'F3' }, movimientos: [{}], costos: null });
     await irAIngreso();
+    await setValue(container.querySelector('#ing-tipo'), 'A');
     await agregarProducto('det');
     expect(container.textContent).not.toContain('Actualizar el costo final');
     await setValue(porLabel('Costo unitario Detergente Limón'), '9,5');
@@ -243,12 +246,12 @@ describe('AC-INA-1 / AC-INA-2 ingreso con costo y Factura A/B', () => {
   it('AC-INA-1 los errores de costo vuelven por renglón (item:<id>) y no limpian el formulario', async () => {
     registrarIngreso.mockResolvedValueOnce({ ok: false, errores: { 'item:1': 'Costo inválido para "Detergente Limón"' } });
     await irAIngreso();
-    await setValue(container.querySelector('#ing-factura'), 'F4');
+    await setValue(container.querySelector('#ing-tipo'), 'B');
     await agregarProducto('det');
     await setValue(porLabel('Costo unitario Detergente Limón'), '-3');
     await click(boton('Confirmar ingreso'));
     expect(container.querySelector('[data-testid="renglon-ingreso"]').textContent).toContain('Costo inválido');
-    expect(container.querySelector('#ing-factura').value).toBe('F4');
+    expect(container.querySelector('#ing-tipo').value).toBe('B');
   });
 
   it('AC-CPR-4 precarga desde un pedido recibido: proveedor y renglones listos; al confirmar vincula el pedido', async () => {
@@ -259,7 +262,7 @@ describe('AC-INA-1 / AC-INA-2 ingreso con costo y Factura A/B', () => {
     expect(container.querySelector('[data-testid="aviso-precarga"]')).not.toBeNull();
     expect(container.querySelector('#ing-proveedor').value).toBe('prov-1');
     expect(porLabel('Ingreso Detergente Limón').value).toBe('24');
-    await setValue(container.querySelector('#ing-factura'), 'F9');
+    await setValue(container.querySelector('#ing-tipo'), 'A');
     await click(boton('Confirmar ingreso'));
     expect(registrarIngreso.mock.calls[0][0]).toMatchObject({ proveedorId: 'prov-1', items: [{ productoId: '1', ingreso: '24' }] });
     expect(vincularPedidoConIngreso).toHaveBeenCalledWith('ped-9', 'ing-7');
@@ -336,29 +339,27 @@ describe('AC-NEG-1 / AC-NEG-2 ingreso en negro', () => {
     await click(container.querySelector('[data-testid="sugerido"]'));
   };
 
-  it('AC-NEG-1 AC-NEG-2 la cabecera y el renglón ofrecen "En negro", el subtotal lo separa y se manda como tipo N', async () => {
+  it('AC-NEG-1 AC-NEG-2 la cabecera ofrece "En negro", el subtotal lo separa y se manda como tipo N (sin tipo por renglón, REQ-INA2)', async () => {
     registrarIngreso.mockResolvedValueOnce({ ok: true, errores: {}, ingreso: { facturaProveedor: 'S/F' }, movimientos: [{}, {}], costos: null });
     await irAIngreso();
     const opcionesCab = [...container.querySelector('#ing-tipo').options].map(o => [o.value, o.textContent]);
     expect(opcionesCab).toEqual(expect.arrayContaining([['A', 'Factura A'], ['B', 'Factura B'], ['N', 'En negro']]));
-    await setValue(container.querySelector('#ing-factura'), 'S/F');
     await setValue(container.querySelector('#ing-proveedor'), 'prov-1');
     await setValue(container.querySelector('#ing-tipo'), 'N');
     await agregarProducto('det');
     await agregarProducto('jabon');
-    expect([...porLabel('Factura Jabón en polvo').options].map(o => o.textContent)).toEqual(['Cabecera (En negro)', 'A', 'B', 'En negro']);
+    expect(porLabel('Factura Jabón en polvo')).toBeNull();
     await setValue(porLabel('Ingreso Detergente Limón'), '10');
     await setValue(porLabel('Ingreso Jabón en polvo'), '5');
     await setValue(porLabel('Costo unitario Detergente Limón'), '10');
     await setValue(porLabel('Costo unitario Jabón en polvo'), '4');
-    await setValue(porLabel('Factura Jabón en polvo'), 'A');
     const previo = container.querySelector('[data-testid="subtotales-previo"]').textContent;
-    expect(previo).toContain('En negro: 10 u. · $100,00');
-    expect(previo).toContain('Factura A: 5 u. · $20,00');
+    expect(previo).toContain('En negro: 15 u. · $120,00');
+    expect(previo).toContain('Factura A: 0 u. · $0,00');
     await click(boton('Confirmar ingreso'));
     expect(registrarIngreso.mock.calls[0][0].costos).toMatchObject({
       tipoCabecera: 'N',
-      items: [{ productoId: '1', costoUnitario: '10', tipoFactura: '' }, { productoId: '2', costoUnitario: '4', tipoFactura: 'A' }],
+      items: [{ productoId: '1', costoUnitario: '10', tipoFactura: '' }, { productoId: '2', costoUnitario: '4', tipoFactura: '' }],
     });
   });
 });

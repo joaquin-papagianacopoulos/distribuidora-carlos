@@ -1,5 +1,6 @@
 // src/domain/armado.js — registro puro de lo que cambió el armador (REQ-BUL / AC-BUL-7).
 // Sin React ni IndexedDB.
+import { isPedidoVisible, isPedidoArmado, isPedidoAReparto, normalizePedidoFecha } from '../utils/pedidos';
 
 const cantidadValida = (v) => {
   if (typeof v !== 'number' && typeof v !== 'string') return null;
@@ -129,4 +130,42 @@ export function fusionarCambiosArmado(previos = [], nuevos = [], { productosVige
 // Valida, deduplica y aplica los mismos topes que fusionarCambiosArmado.
 export function acotarCambiosArmado(cambios, opciones = {}) {
   return fusionarCambiosArmado(cambios, [], opciones);
+}
+
+// ---------------------------------------------------------------------------
+// REQ-SAR (Lote 2026-11-16): lista de pedidos de la pantalla Armado.
+// ---------------------------------------------------------------------------
+const facturado = (p) => String(p?.estado || '').toLowerCase() === 'facturado';
+
+// AC-SAR-1: pedidos visibles de Armado para la fecha y el filtro elegidos, sin duplicados
+// (por remoteId o id; gana el mas nuevo) y ordenados por fecha y hora de carga.
+//   'sin_armar' => los sin armar de ESA fecha + todos los sin armar de fechas ANTERIORES que
+//                  siguen pendientes (ni facturados ni entregados): "todo lo que falta armar hasta la fecha".
+//   'todos' | 'armados' | 'reparto' => solo los de esa fecha, como siempre.
+export function pedidosParaArmado(pedidos, fecha, filtro = 'todos') {
+  const dia = normalizePedidoFecha(fecha);
+  const dedup = new Map();
+  for (const p of Array.isArray(pedidos) ? pedidos : []) {
+    if (!p || typeof p !== 'object' || !isPedidoVisible(p)) continue;
+    const f = normalizePedidoFecha(p.fecha);
+    const delDia = f === dia;
+    if (filtro === 'sin_armar') {
+      if (isPedidoArmado(p)) continue;
+      const atrasado = !!f && !!dia && f < dia && !facturado(p) && p.entregado !== true;
+      if (!delDia && !atrasado) continue;
+    } else {
+      if (!delDia) continue;
+      if (filtro === 'armados' && !isPedidoArmado(p)) continue;
+      if (filtro === 'reparto' && !isPedidoAReparto(p)) continue;
+    }
+    const k = p.remoteId ? `r:${p.remoteId}` : `l:${p.id}`;
+    const prev = dedup.get(k);
+    if (!prev || Number(p.updatedAt || p.createdAt || 0) >= Number(prev.updatedAt || prev.createdAt || 0)) dedup.set(k, p);
+  }
+  return [...dedup.values()].sort((a, b) => {
+    const fa = normalizePedidoFecha(a.fecha) || '';
+    const fb = normalizePedidoFecha(b.fecha) || '';
+    if (fa !== fb) return fa < fb ? -1 : 1;
+    return Number(a.createdAt || 0) - Number(b.createdAt || 0);
+  });
 }

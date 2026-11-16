@@ -122,10 +122,14 @@ export function lineaGrupoBulto(rengs, { peso, sufijoPrecioBulto = '' } = {}) {
     const bultos = Math.floor(total / bx);
     const sueltas = total - bultos * bx;
     const base = { nombre: `${nombre} (bulto x${bx})${marca}`, subtotal, enBultos: true, ...(porBulto ? { porBulto: true } : {}) };
+    // AC-RTO-9: precio por unidad siempre (precioUnitTexto) y, aparte, el del bulto entero.
+    const unitTexto = precioUnit !== null ? fmt(precioUnit) : '';
+    const bultoTexto = precioUnit !== null ? fmt(Math.round(precioUnit * bx * 100) / 100) : '';
     if (sueltas === 0) {
-      return { ...base, cantidadTexto: String(bultos), precioTexto: precioUnit !== null ? fmt(Math.round(precioUnit * bx * 100) / 100) : '' };
+      return { ...base, cantidadTexto: String(bultos), precioTexto: bultoTexto, precioUnitTexto: unitTexto, precioBultoTexto: bultoTexto };
     }
-    return { ...base, cantidadTexto: `${bultos} ${bultos === 1 ? 'bulto' : 'bultos'} + ${sueltas} u.`, precioTexto: precioUnit !== null ? `${fmt(precioUnit)} c/u` : '' };
+    return { ...base, cantidadTexto: `${bultos} ${bultos === 1 ? 'bulto' : 'bultos'} + ${sueltas} u.`, precioTexto: precioUnit !== null ? `${fmt(precioUnit)} c/u` : '', precioUnitTexto: unitTexto, precioBultoTexto: bultoTexto };
   }
-  return { nombre: `${nombre}${marca}`, cantidadTexto: String(total), precioTexto: precioUnit !== null ? fmt(precioUnit) : '', subtotal, ...(porBulto ? { porBulto: true } : {}) };
+  const unitTexto = precioUnit !== null ? fmt(precioUnit) : '';
+  return { nombre: `${nombre}${marca}`, cantidadTexto: String(total), precioTexto: unitTexto, precioUnitTexto: unitTexto, precioBultoTexto: '', subtotal, ...(porBulto ? { porBulto: true } : {}) };
 }

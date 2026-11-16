@@ -1,10 +1,13 @@
 // src/pages/stock/IngresoMercaderia.js — REQ-ING (AC-ING-1..6) y REQ-INA (AC-INA-1, 2, 4). Solo admin.
-// Cada renglon suma Costo unitario (opcional) y Factura A/B. Los costos NO viajan dentro del ingreso:
+// REQ-INA2 (Lote 2026-11-16): la factura del proveedor se carga SOLO como tipo (A, B o en negro), sin
+// numero, y vale para todo el ingreso (las A y las B se cargan en ingresos separados): ya no hay
+// "N.o de factura A / B" ni columna Factura por renglon.
+// Cada renglon suma Costo unitario (opcional). Los costos NO viajan dentro del ingreso:
 // quedan aparte (ingresosCostos) y suben con PIN desde Proveedores. El stock sale solo de los movimientos.
 import React, { useMemo, useState } from 'react';
 import { registrarIngreso } from '../../services/stockService';
 import { stockDe } from '../../domain/stock';
-import { subtotalesIngreso, ETIQUETA_TIPO_COMPRA } from '../../domain/compras';
+import { subtotalesIngreso, referenciaIngreso } from '../../domain/compras';
 import { formatearCentavos } from '../../domain/cuentaProveedores';
 import { toInt, toNum } from '../../domain/validacion';
 import { normalize } from '../../utils/fuzzy';
@@ -24,14 +27,11 @@ const TextoSubtotales = ({ s, testid }) => (
 );
 
 const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo, precarga = null, onConfirmado }) => {
-  const [factura, setFactura] = useState('');
   const [proveedorId, setProveedorId] = useState(() => (precarga?.proveedorId ? String(precarga.proveedorId) : ''));
   const [busqueda, setBusqueda] = useState('');
   // [{ productoId, ingreso }] — viene precargado al recibir un pedido al proveedor (AC-CPR-4).
   const [renglones, setRenglones] = useState(() => (precarga?.items || []).map(i => ({ productoId: String(i.productoId), ingreso: String(i.ingreso) })));
   const [tipoCabecera, setTipoCabecera] = useState('');
-  const [facturaA, setFacturaA] = useState('');
-  const [facturaB, setFacturaB] = useState('');
   const [actualizarCosto, setActualizarCosto] = useState(true);
   const [costos, setCostos] = useState({}); // { [productoId]: { costo, tipo } }
   const [errores, setErrores] = useState({});
@@ -61,8 +61,7 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
     setErrores(prev => { const n = { ...prev }; delete n[`item:${pid}`]; return n; });
   };
 
-  const hayCostos = !!(tipoCabecera || facturaA.trim() || facturaB.trim()
-    || renglones.some(r => String(costos[r.productoId]?.costo ?? '').trim() !== '' || costos[r.productoId]?.tipo));
+  const hayCostos = !!(tipoCabecera || renglones.some(r => String(costos[r.productoId]?.costo ?? '').trim() !== ''));
   const hayCostoCargado = renglones.some(r => String(costos[r.productoId]?.costo ?? '').trim() !== '');
 
   // AC-INA-2: subtotales en vivo mientras se carga.
@@ -75,22 +74,25 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
         renglones: renglones.map(r => ({
           productoId: r.productoId,
           costoUnitario: toNum(costos[r.productoId]?.costo),
-          tipoFactura: costos[r.productoId]?.tipo || tipoCabecera || null,
+          tipoFactura: tipoCabecera || null,
         })),
       },
     );
   }, [hayCostos, renglones, costos, tipoCabecera]);
 
   const confirmar = async () => {
+    // AC-INA2-1: el tipo de factura es obligatorio y es lo unico que se carga de la factura.
+    const referencia = referenciaIngreso(tipoCabecera);
+    if (!referencia) { setErrores({ facturaProveedor: 'Elegí si la factura es A, B o en negro' }); return; }
     setGuardando(true);
     setOk(null);
     setComprobante(null);
     try {
-      const form = { facturaProveedor: factura, proveedorId, items: renglones };
+      const form = { facturaProveedor: referencia, proveedorId, items: renglones };
       if (hayCostos) {
         form.costos = {
-          tipoCabecera, facturaA, facturaB, actualizarCosto,
-          items: renglones.map(r => ({ productoId: r.productoId, costoUnitario: costos[r.productoId]?.costo ?? '', tipoFactura: costos[r.productoId]?.tipo ?? '' })),
+          tipoCabecera, facturaA: '', facturaB: '', actualizarCosto,
+          items: renglones.map(r => ({ productoId: r.productoId, costoUnitario: costos[r.productoId]?.costo ?? '', tipoFactura: '' })),
         };
       }
       const r = await registrarIngreso(form, { productos, usuario });
@@ -98,8 +100,8 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
       setErrores({});
       setOk(`Ingreso registrado: ${r.movimientos.length} producto(s), factura ${r.ingreso.facturaProveedor}.`);
       if (r.costos) setComprobante({ ingreso: r.ingreso, subtotales: subtotalesIngreso(r.ingreso, r.costos), actualizados: (r.productosActualizados || []).length });
-      setFactura(''); setProveedorId(''); setRenglones([]); setCostos({});
-      setTipoCabecera(''); setFacturaA(''); setFacturaB('');
+      setProveedorId(''); setRenglones([]); setCostos({});
+      setTipoCabecera('');
       if (onConfirmado) await onConfirmado(r, precarga);
       await onListo?.();
     } catch (e) {
@@ -120,13 +122,20 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
     <div className="card" data-testid="ingreso-form">
       {precarga?.pedidoProveedorId && (
         <div role="note" style={{ fontSize: 13, marginBottom: 10, color: 'var(--text3)' }} data-testid="aviso-precarga">
-          Ingreso precargado desde el pedido al proveedor. Completá la factura y las cantidades reales, y confirmá.
+          Ingreso precargado desde el pedido al proveedor. Elegí el tipo de factura, completá las cantidades reales y confirmá.
         </div>
       )}
       <div className="input-group">
-        <label className="input-label" htmlFor="ing-factura">Factura proveedor *</label>
-        <input id="ing-factura" className="input" value={factura} onChange={e => setFactura(e.target.value)} placeholder="Ej: A-0001-00012345" />
+        <label className="input-label" htmlFor="ing-tipo">Factura proveedor *</label>
+        <select id="ing-tipo" className="input" value={tipoCabecera} onChange={e => setTipoCabecera(e.target.value)}>
+          <option value="">— Elegir —</option>
+          <option value="A">Factura A</option>
+          <option value="B">Factura B</option>
+          <option value="N">En negro</option>
+        </select>
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Solo el tipo, sin número. Las A y las B se cargan en ingresos separados.</div>
         {err('facturaProveedor')}
+        {err('tipoCabecera')}
       </div>
       <div className="input-group">
         <label className="input-label" htmlFor="ing-proveedor">Proveedor *</label>
@@ -136,27 +145,6 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
         </select>
         {err('proveedorId')}
       </div>
-      <div className="input-group">
-        <label className="input-label" htmlFor="ing-tipo">Tipo de factura (cabecera)</label>
-        <select id="ing-tipo" className="input" value={tipoCabecera} onChange={e => setTipoCabecera(e.target.value)}>
-          <option value="">— Sin dato —</option>
-          <option value="A">Factura A</option>
-          <option value="B">Factura B</option>
-          <option value="N">En negro</option>
-        </select>
-        {err('tipoCabecera')}
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <div className="input-group" style={{ flex: 1 }}>
-          <label className="input-label" htmlFor="ing-fa">N.º factura A</label>
-          <input id="ing-fa" className="input" value={facturaA} onChange={e => setFacturaA(e.target.value)} maxLength={40} />
-        </div>
-        <div className="input-group" style={{ flex: 1 }}>
-          <label className="input-label" htmlFor="ing-fb">N.º factura B</label>
-          <input id="ing-fb" className="input" value={facturaB} onChange={e => setFacturaB(e.target.value)} maxLength={40} />
-        </div>
-      </div>
-
       <div className="input-group">
         <label className="input-label" htmlFor="ing-buscar">Código producto</label>
         <input id="ing-buscar" className="input" type="search" value={busqueda}
@@ -177,7 +165,7 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--text3)' }}>
-                <th>Código</th><th>Descripción</th><th>Stock actual</th><th>Ingreso</th><th>Stock total</th><th>Costo unit.</th><th>Factura</th><th />
+                <th>Código</th><th>Descripción</th><th>Stock actual</th><th>Ingreso</th><th>Stock total</th><th>Costo unit.</th><th />
               </tr>
             </thead>
             <tbody>
@@ -194,14 +182,6 @@ const IngresoMercaderia = ({ productos, proveedores, stockMap, usuario, onListo,
                     <td><input className="qty-input" aria-label={`Ingreso ${p?.nombre || ''}`} inputMode="numeric" value={r.ingreso} onChange={e => setIngreso(r.productoId, e.target.value)} style={{ width: 70 }} /></td>
                     <td><strong>{total}</strong></td>
                     <td><input className="qty-input" aria-label={`Costo unitario ${p?.nombre || ''}`} inputMode="decimal" placeholder="opcional" value={costos[r.productoId]?.costo ?? ''} onChange={e => setCosto(r.productoId, 'costo', e.target.value)} style={{ width: 84 }} /></td>
-                    <td>
-                      <select aria-label={`Factura ${p?.nombre || ''}`} className="input" value={costos[r.productoId]?.tipo ?? ''} onChange={e => setCosto(r.productoId, 'tipo', e.target.value)} style={{ width: 92 }}>
-                        <option value="">{tipoCabecera ? `Cabecera (${ETIQUETA_TIPO_COMPRA[tipoCabecera] || tipoCabecera})` : 'Sin dato'}</option>
-                        <option value="A">A</option>
-                        <option value="B">B</option>
-                        <option value="N">En negro</option>
-                      </select>
-                    </td>
                     <td><button className="btn-icon" style={{ color: 'var(--danger)' }} onClick={() => quitar(r.productoId)} aria-label="Quitar">×</button></td>
                   </tr>
                 );
