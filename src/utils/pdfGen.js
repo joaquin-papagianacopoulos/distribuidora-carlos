@@ -4,7 +4,7 @@ import { isPedidoVisible, normalizePedidoFecha } from './pedidos';
 import { filasPdfCierre } from '../domain/comisiones';
 import { filasBoleta, numerarFilasBoleta } from '../domain/gruposFactura';
 import { totalesBoleta } from '../domain/precios';
-import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA, ESTILO_ITEMS_REMITO, COLOR_LINEA_TABLA } from '../domain/boletaLayout';
+import { layoutPieBoleta, encabezadoComprobante, ESTILO_TABLA_COMPACTA, ESTILO_ITEMS_REMITO, COLOR_LINEA_TABLA, FUENTE_REMITO } from '../domain/boletaLayout';
 import { notaDePedido } from '../domain/observaciones';
 import { totalACobrar } from '../domain/redondeo';
 
@@ -234,6 +234,34 @@ export const generarFaltantesDiaFile = async (faltantesDelDia, fecha, modo = 'pr
 //   modoGrupos: 'detalle' | 'solo_grupos' => como se imprimen los grupos (REQ-AGR, AC-AGR-3).
 //   saldoAFavor: saldo a favor del cliente (REQ-REN).
 //   tipoFactura: se ignora en el impreso (el remito nunca dice FACTURA A/B).
+// AC-RTO-10: Archivo Black (equivalente libre de Arial Black) para el remito. Se carga solo al armar un
+// remito. Tiene un unico peso: se registra para 'normal' y 'bold'. Si no se pudiera cargar, el remito sale
+// igual en Arial (helvetica) negrita.
+const registrarFuenteRemito = async (doc) => {
+  try {
+    const { default: base64 } = await import('../assets/fuentes/archivoBlack');
+    doc.addFileToVFS('ArchivoBlack-Regular.ttf', base64);
+    doc.addFont('ArchivoBlack-Regular.ttf', FUENTE_REMITO, 'normal');
+    doc.addFont('ArchivoBlack-Regular.ttf', FUENTE_REMITO, 'bold');
+    return FUENTE_REMITO;
+  } catch (e) {
+    console.warn('No se pudo cargar la fuente del remito; se usa Arial:', e?.message || String(e));
+    return 'helvetica';
+  }
+};
+
+// Achica el tamaño (hasta `minimo`) para que el texto entre en `maxW` mm; si aun asi no entra, lo corta.
+// Usa la fuente y el estilo que tenga puestos el documento.
+const ajustarTexto = (doc, texto, maxW, inicial, minimo) => {
+  const t0 = String(texto ?? '');
+  let size = inicial;
+  doc.setFontSize(size);
+  while (size > minimo && doc.getTextWidth(t0) > maxW) { size -= 0.5; doc.setFontSize(size); }
+  let t = t0;
+  while (t.length > 1 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
+  return { size, texto: t };
+};
+
 const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, ordenOverride = null, opciones = {}) => {
   const { jsPDF } = await import('jspdf');
   // jspdf-autotable 5.x ya no se auto-registra al importarse (S-06).
@@ -241,21 +269,23 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   applyPlugin(jsPDF);
 
   const doc = new jsPDF();
+  // AC-RTO-10: todo el remito en Archivo Black (si no carga, Arial en negrita).
+  const fuente = await registrarFuenteRemito(doc);
   const pageH = doc.internal.pageSize.getHeight();
   const numero = String(pedido.id).padStart(6, '0');
   const fechaPedido = normalizePedidoFecha(pedido.fecha);
   const fecha = fechaPedido.split('-').reverse().join('/');
 
   doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFont(fuente, 'bold');
+  doc.setFontSize(11);
   doc.text('DISTRIBUIDORA APP', 14, 9);
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.text(`REMITO N° ${numero}`, 14, 13);
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.text(encabezadoComprobante(), 112, 9, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFont(fuente, 'normal');
+  doc.setFontSize(8);
   doc.text(`Fecha: ${fecha}`, 150, 10);
 
   // El numero override viene de "Orden de entrega": se calcula al imprimir
@@ -265,31 +295,41 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.8);
     doc.rect(174, 13, 22, 15);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fuente, 'bold');
     doc.setFontSize(6);
     doc.text('ORDEN', 185, 17, { align: 'center' });
-    doc.setFontSize(16);
+    doc.setFontSize(15);
     doc.text(String(ordenEntrega), 185, 26, { align: 'center' });
   }
 
   // Cliente grande (prioridad visual)
   const clienteNombreBig = pedido.clienteNombre || cliente?.nombre || 'Sin nombre';
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.text(clienteNombreBig, 14, 18);
+  doc.setFont(fuente, 'bold');
+  const anchoTexto = ordenEntrega ? 156 : 182; // la caja ORDEN ocupa el borde derecho
+  const cli = ajustarTexto(doc, clienteNombreBig, anchoTexto, 14, 8);
+  doc.setFontSize(cli.size);
+  doc.text(cli.texto, 14, 18);
 
   // AC-RTO-2: direccion (y zona si hay) debajo del cliente.
   const direccion = String(cliente?.direccion || pedido.direccion || pedido.clienteDireccion || '').trim();
   const zona = String(cliente?.zona || pedido.zona || '').trim();
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  if (direccion) doc.text(direccion.slice(0, 120), 14, 23);
-  if (zona) doc.text(`Zona: ${zona.slice(0, 60)}`, 14, 27);
+  doc.setFont(fuente, 'normal');
+  if (direccion) {
+    const dir = ajustarTexto(doc, direccion, anchoTexto, 8, 6);
+    doc.setFontSize(dir.size);
+    doc.text(dir.texto, 14, 23);
+  }
+  if (zona) {
+    const z = ajustarTexto(doc, `Zona: ${zona.slice(0, 60)}`, anchoTexto, 8, 6);
+    doc.setFontSize(z.size);
+    doc.text(z.texto, 14, 27);
+  }
 
   // AC-RTO-2: vendedor destacado, con el mismo tamano que el cliente.
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.text(`Vendedor: ${vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-'}`, 14, 34);
+  doc.setFont(fuente, 'bold');
+  const ven = ajustarTexto(doc, `Vendedor: ${vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-'}`, 182, 14, 8);
+  doc.setFontSize(Math.max(ven.size, cli.size)); // nunca menor que el cliente
+  doc.text(ven.texto, 14, 34);
 
   // Filas de la tabla: renglones sueltos y grupos (REQ-AGR). Los totales salen siempre
   // de los items, nunca de las filas (no hay doble conteo).
@@ -314,10 +354,10 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     body: rows,
     theme: 'grid',
     // AC-RTO-4: estilo compacto (mas renglones por hoja), con bordes marcados para impresoras.
-    styles: ESTILO_TABLA_COMPACTA,
-    headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold' },
-    // AC-RTO-7: renglones en Arial (helvetica en jsPDF) negrita, negro y un punto mas grandes: se leen mejor.
-    bodyStyles: ESTILO_ITEMS_REMITO,
+    styles: { ...ESTILO_TABLA_COMPACTA, font: fuente },
+    headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold', fontSize: 7 },
+    // AC-RTO-7 / AC-RTO-10: renglones en la fuente del remito, negro y bien legibles.
+    bodyStyles: { ...ESTILO_ITEMS_REMITO, font: fuente },
     alternateRowStyles: { fillColor: [232, 232, 232] },
     // AC-RTO-8: recuadros en gris suave.
     tableLineColor: [...COLOR_LINEA_TABLA],
@@ -335,7 +375,7 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
       if (data.section !== 'body') return;
       const tipo = filas[data.row.index]?.tipo;
       if (tipo === 'grupo') { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [210, 210, 210]; }
-      else if (tipo === 'detalle') { data.cell.styles.fontStyle = 'bolditalic'; data.cell.styles.textColor = [40, 40, 40]; data.cell.styles.fillColor = [255, 255, 255]; }
+      else if (tipo === 'detalle') { data.cell.styles.fontStyle = 'bold'; data.cell.styles.textColor = [70, 70, 70]; data.cell.styles.fillColor = [255, 255, 255]; }
     },
   });
 
@@ -347,8 +387,8 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const saldoAFavor = !hayDeuda && Number(opciones?.saldoAFavor) > 0.001 ? Number(opciones.saldoAFavor) : 0;
   // REQ-OBS (AC-OBS-3): la nota del pedido va al pie, en negrita y hasta 4 lineas (tambien la de un pedido web).
   const nota = notaDePedido(pedido);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFont(fuente, 'bold');
+  doc.setFontSize(9);
   const obsLineas = nota ? doc.splitTextToSize(`NOTA: ${nota}`, 180).slice(0, 4) : [];
   const pie = layoutPieBoleta({
     finalY, pageH, hayDescuento, hayDeuda: hayDeuda || saldoAFavor > 0, hayObs: obsLineas.length > 0, lineasObs: obsLineas.length || 1,
@@ -359,45 +399,45 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const pesos = (n) => `$${Number(n).toLocaleString('es-AR')}`;
 
   // AC-RTO-3: cantidad de renglones del pedido (grupo y linea de bulto cuentan 1).
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFont(fuente, 'normal');
+  doc.setFontSize(8);
   doc.text(`Ítems: ${cantItems}`, 14, pie.itemsY);
 
   if (hayDescuento) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Total sin descuento:', 150, pie.sinDescuentoY);
+    doc.setFont(fuente, 'normal');
+    doc.setFontSize(8);
+    doc.text('Total sin descuento:', 125, pie.sinDescuentoY);
     doc.text(pesos(totalSinDesc), 195, pie.sinDescuentoY, { align: 'right' });
   }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFont(fuente, 'bold');
+  doc.setFontSize(10);
   doc.text('TOTAL:', 150, pie.totalesY);
   doc.text(pesos(total), 195, pie.totalesY, { align: 'right' });
   if (hayDescuento) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text(`Descuento (${descuentoPct}%): -${pesos(descuentoTotal)}`, 150, pie.descuentoY);
+    doc.setFont(fuente, 'normal');
+    doc.setFontSize(8);
+    doc.text(`Descuento (${descuentoPct}%): -${pesos(descuentoTotal)}`, 125, pie.descuentoY);
   }
 
   // AC-RTO-5: con deuda, "Saldo anterior" y "Total a cobrar" (total + saldo), bien visibles.
   if (hayDeuda) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
+    doc.setFont(fuente, 'bold');
+    doc.setFontSize(10);
     doc.setTextColor(200, 0, 0);
     doc.text(`Saldo anterior: ${pesos(deudaPendiente)}`, 195, pie.saldoAnteriorY, { align: 'right' });
     doc.setTextColor(0, 0, 0);
     doc.text(`Total a cobrar: ${pesos(Math.round((total + deudaPendiente) * 100) / 100)}`, 195, pie.totalCobrarY, { align: 'right' });
   } else if (saldoAFavor > 0) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
+    doc.setFont(fuente, 'bold');
+    doc.setFontSize(10);
     doc.setTextColor(0, 140, 60);
     doc.text(`Saldo a favor: ${pesos(saldoAFavor)}`, 195, pie.saldoAnteriorY, { align: 'right' });
     doc.setTextColor(0, 0, 0);
   }
 
   if (obsLineas.length) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
+    doc.setFont(fuente, 'bold');
+    doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
     doc.text(obsLineas, 14, pie.obsY);
   }

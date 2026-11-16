@@ -22,7 +22,7 @@ jest.mock('jspdf', () => {
       if (autoTable) this.autoTable = (o) => { mockReg.tablas.push(o); return autoTable(o); };
       this.setLineDash = (d, ...r) => { if (Array.isArray(d) && d.length) mockReg.lineasPunteadas += 1; return setLineDash(d, ...r); };
       this.text = (t, x, y, ...r) => {
-        mockReg.textos.push({ t: Array.isArray(t) ? t.join(' ') : String(t), x, y, pagina: this.internal.getCurrentPageInfo().pageNumber, fs: this.getFontSize(), bold: /bold/i.test(String(this.getFont().fontStyle)) });
+        mockReg.textos.push({ t: Array.isArray(t) ? t.join(' ') : String(t), x, y, pagina: this.internal.getCurrentPageInfo().pageNumber, fs: this.getFontSize(), bold: /bold/i.test(String(this.getFont().fontStyle)), fuente: this.getFont().fontName });
         return text(t, x, y, ...r);
       };
       this.addPage = (...p) => { mockReg.paginas += 1; return addPage(...p); };
@@ -114,7 +114,8 @@ describe('AC-RTO-3 renglones numerados e Items', () => {
 describe('AC-RTO-4 estilo compacto y pedido largo', () => {
   it('AC-RTO-4 el remito y otro PDF con tabla usan ESTILO_TABLA_COMPACTA', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
-    expect(mockReg.tablas[0].styles).toBe(ESTILO_TABLA_COMPACTA);
+    // ADAPTADO (AC-RTO-10): el remito suma la fuente a ese mismo estilo compacto (tamaño y bordes iguales).
+    expect(mockReg.tablas[0].styles).toMatchObject({ ...ESTILO_TABLA_COMPACTA, font: 'ArchivoBlack' });
     mockReg.tablas = [];
     await generarResumenDiaFile([pedido()], '2026-10-07');
     expect(mockReg.tablas[0].styles).toBe(ESTILO_TABLA_COMPACTA);
@@ -163,9 +164,40 @@ describe('REQ-RED2 el remito no dice Redondeo ni Subtotal', () => {
     expect(buscar(/^Redondeo:$/)).toHaveLength(0);
     expect(buscar(/^Total a cobrar: \$2\.500$/)).toHaveLength(1);
   });
-  it('AC-RTO-7 los renglones van en helvetica (Arial) negrita', async () => {
+  it('AC-RTO-7 los renglones van en negrita y negro (ADAPTADO: AC-RTO-10, con la fuente del remito)', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
-    expect(mockReg.tablas[0].bodyStyles).toMatchObject({ font: 'helvetica', fontStyle: 'bold' });
+    expect(mockReg.tablas[0].bodyStyles).toMatchObject({ font: 'ArchivoBlack', fontStyle: 'bold', textColor: 0 });
+  });
+
+  it('AC-RTO-10 todo el remito va en Archivo Black (tipo Arial Black), embebida en el PDF', async () => {
+    const f = await generarFacturaFile(pedido({ observaciones: 'Entregar a la tarde' }), { direccion: 'Calle Falsa 123', zona: 'Norte' }, {}, 500, 3);
+    const pdf = await leer(f);
+    expect(pdf.startsWith('%PDF')).toBe(true);
+    expect(pdf).toContain('ArchivoBlack');
+    // Ningún texto dibujado quedó en otra fuente (jsPDF siempre lista Arial en el archivo, aunque no se use).
+    expect(vistos().length).toBeGreaterThan(8);
+    expect(vistos().filter(x => x.fuente !== 'ArchivoBlack').map(x => x.t)).toEqual([]);
+    // Los textos siguen siendo los mismos de siempre.
+    expect(buscar(/^REMITO N° 000007$/)).toHaveLength(1);
+    expect(buscar(/^NOTA: Entregar a la tarde/)).toHaveLength(1);
+    expect(buscar(/^Total a cobrar:/)).toHaveLength(1);
+  });
+
+  it('AC-RTO-10 un nombre de cliente larguísimo se achica para no pisar la caja ORDEN', async () => {
+    const largo = 'Distribuidora Mayorista de Golosinas y Bebidas del Litoral Sociedad de Responsabilidad Limitada';
+    await generarFacturaFile(pedido({ clienteNombre: largo, vendedorNombre: 'Jorge' }), {}, {}, 0, 12);
+    const cli = vistos().find(x => x.t.startsWith('Distribuidora Mayorista'));
+    const ven = vistos().find(x => /^Vendedor:/.test(x.t));
+    expect(cli.fs).toBeLessThan(14);
+    expect(ven.fs).toBeGreaterThanOrEqual(cli.fs); // el vendedor nunca es menor que el cliente (AC-RTO-2)
+  });
+
+  it('AC-RTO-10 el remito de siempre no cambia de contenido con la nueva fuente (30 renglones, descuento y saldo)', async () => {
+    const items = Array.from({ length: 30 }, (_, i) => item(i + 1, `Producto ${i}`, 2, 150, { precioOriginal: 200, descuentoPct: 25, precioManual: true }));
+    const f = await generarFacturaFile(pedido({ items }), { direccion: 'Calle 1' }, {}, 1234, 1);
+    expect((await leer(f)).startsWith('%PDF')).toBe(true);
+    expect(buscar(/^Saldo anterior: \$1\.234$/)).toHaveLength(1);
+    expect(buscar(/^Ítems: 30$/)).toHaveLength(1);
   });
 });
 

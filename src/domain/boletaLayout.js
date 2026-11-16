@@ -29,8 +29,12 @@ export const ESTILO_TABLA_COMPACTA = Object.freeze({
   cellPadding: Object.freeze({ top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 }),
   ...LINEA,
 });
-// AC-RTO-7: renglones (items) del remito: Arial (en jsPDF la fuente equivalente es "helvetica") en negrita.
-export const ESTILO_ITEMS_REMITO = Object.freeze({ font: 'helvetica', fontStyle: 'bold', fontSize: 9, textColor: 0 });
+// AC-RTO-10: todo el remito va en Archivo Black (equivalente libre de Arial Black, que no se puede redistribuir).
+// Es una fuente ancha: los tamaños del remito son un poco menores que con Arial. Si no se pudiera cargar,
+// pdfGen cae a "helvetica" (Arial) en negrita y el remito sale igual.
+export const FUENTE_REMITO = 'ArchivoBlack';
+// AC-RTO-7: renglones (items) del remito en negro y con la fuente del remito.
+export const ESTILO_ITEMS_REMITO = Object.freeze({ font: FUENTE_REMITO, fontStyle: 'bold', fontSize: 8, textColor: 0 });
 export const ESTILO_TABLA_ANTERIOR = Object.freeze({ fontSize: 9, cellPadding: 2, ...LINEA });
 
 const PT_A_MM = 25.4 / 72;

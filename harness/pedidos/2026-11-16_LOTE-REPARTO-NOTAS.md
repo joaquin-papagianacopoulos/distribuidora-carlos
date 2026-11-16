@@ -29,7 +29,7 @@ Mapa a requerimientos (harness/SPEC.md, "Lote 2026-11-16"):
 | Precio de unidad x bulto siempre | AC-CBU-4, AC-RTO-9 |
 | Stock visible | REQ-STV (AC-STV-1) |
 | Factura proveedor solo A/B | REQ-INA2 (AC-INA2-1) |
-| Arial Black | pendiente de confirmar |
+| Arial Black en el remito | AC-RTO-10 (Archivo Black, equivalente libre; todo el remito) |
 | Carlos y Paola editan cantidades | pendiente de confirmar |
 
 ## Ampliación (mismo día) — Orden de entrega como tablero interactivo
