@@ -10,7 +10,7 @@ describe('AC-HPR-1 DB_VERSION 9 agrega cambiosPrecio sin tocar datos', () => {
     const borrados = [];
     const clears = [];
     const tocados = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => {
@@ -42,7 +42,7 @@ describe('AC-HPR-1 DB_VERSION 9 agrega cambiosPrecio sin tocar datos', () => {
 
   it('AC-HPR-1 desde v8 crea SOLO cambiosPrecio con keyPath id (UUID) e índices productoId y fecha', async () => {
     const r = await correr(V8);
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([['cambiosPrecio', { keyPath: 'id' }]]);
     expect(r.indices).toEqual([
       ['cambiosPrecio', 'productoId', 'productoId', { unique: false }],
@@ -69,6 +69,6 @@ describe('AC-HPR-1 DB_VERSION 9 agrega cambiosPrecio sin tocar datos', () => {
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     expect(upgrade).toContain("if (!d.objectStoreNames.contains('cambiosPrecio'))");
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 12;/);
+    expect(src).toMatch(/const DB_VERSION = 13;/);
   });
 });

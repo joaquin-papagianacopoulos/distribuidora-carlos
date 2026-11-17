@@ -10,7 +10,7 @@ describe('AC-WEB-6 DB_VERSION 8 agrega pedidosWebAcciones sin tocar datos', () =
     const borrados = [];
     const clears = [];
     const tocados = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => {
@@ -42,7 +42,7 @@ describe('AC-WEB-6 DB_VERSION 8 agrega pedidosWebAcciones sin tocar datos', () =
 
   it('AC-WEB-6 desde v7 crea SOLO pedidosWebAcciones con keyPath id (UUID) e índice pedidoRemoteId', async () => {
     const r = await correr(V7);
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados.filter(c => c[0] === 'pedidosWebAcciones')).toEqual([['pedidosWebAcciones', { keyPath: 'id' }]]);
     expect(r.indices.filter(i => i[0] === 'pedidosWebAcciones')).toEqual([['pedidosWebAcciones', 'pedidoRemoteId', 'pedidoRemoteId', { unique: false }]]);
   });

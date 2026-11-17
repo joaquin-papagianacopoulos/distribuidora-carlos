@@ -4,7 +4,7 @@
 // Stores que viven solo en el dispositivo: cualquier registro cuenta como pendiente.
 const SOLO_LOCALES = ['comisionesBorradores', 'comprobantesPendientes'];
 // Stores que se recalculan o no se suben: nunca cuentan.
-const NUNCA = ['costosVenta'];
+const NUNCA = ['costosVenta', 'catalogoMarcas'];
 
 /** ¿Este registro todavía no está en la nube? */
 export const esPendiente = (store, row) => {

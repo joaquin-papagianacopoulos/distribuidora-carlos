@@ -8,7 +8,7 @@ describe('AC-COM-16 DB_VERSION 5 migra sin borrar datos de v4', () => {
     const creados = [];
     const borrados = [];
     const clears = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => { stores.add(n); creados.push([n, opts]); return { createIndex: jest.fn() }; },
@@ -40,7 +40,7 @@ describe('AC-COM-16 DB_VERSION 5 migra sin borrar datos de v4', () => {
   it('AC-COM-16 AC-COMR-7 desde v4 crea solo comisionesCierres, comisionesBorradores y comisionesRubro y no borra ni vacía nada', async () => {
     const r = await correrUpgrade(V4);
     // MOD (RUN 20261014-2100, REQ-WEB): la versión pasó a 8 y suma pedidosWebAcciones.
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes. // MOD (RUN 20261015-0043, REQ-HPR): v9 suma cambiosPrecio.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes. // MOD (RUN 20261015-0043, REQ-HPR): v9 suma cambiosPrecio.
     expect(r.creados.map(c => c[0]).sort()).toEqual(['cambiosPrecio', 'comisionesBorradores', 'comisionesCierres', 'comisionesRubro', 'comprobantesPendientes', 'costosVenta', 'cuentaClientes', 'cuentaProveedores', 'ingresosCostos', 'pedidosProveedor', 'pedidosWebAcciones', 'rendiciones'].sort()); // MOD (RUN 20261015-1630): v11 suma rendiciones y cuentaClientes. // MOD (RUN 20261015-1541): v10 suma 4 stores.
     expect(r.creados.every(c => ['id', 'pedidoId'].includes(c[1].keyPath) && !c[1].autoIncrement)).toBe(true);
     expect(r.borrados).toEqual([]);

@@ -12,7 +12,7 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
     const borrados = [];
     const clears = [];
     const tocados = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => {
@@ -44,7 +44,7 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
 
   it('AC-REN-2 desde v10 crea SOLO rendiciones y cuentaClientes, keyPath id (sin autoIncrement) e índices', async () => {
     const r = await correr(V10);
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta.
     expect(r.creados).toEqual([['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }], ['costosVenta', { keyPath: 'pedidoId' }]]);
     expect(r.indices).toEqual([
       ['rendiciones', 'pedidoId', 'pedidoId', { unique: false }],
@@ -72,7 +72,7 @@ describe('AC-REN-2 DB_VERSION 11 agrega stores de rendición sin tocar datos', (
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     for (const s of ['rendiciones', 'cuentaClientes', 'costosVenta']) expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 12;/);
+    expect(src).toMatch(/const DB_VERSION = 13;/);
   });
 });
 

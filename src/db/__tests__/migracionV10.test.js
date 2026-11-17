@@ -11,7 +11,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
     const borrados = [];
     const clears = [];
     const tocados = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => {
@@ -43,7 +43,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
 
   it('AC-INA-1 desde v9 crea SOLO los 4 stores nuevos, con keyPath id (UUID) e índices', async () => {
     const r = await correr(V9);
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([
       ['ingresosCostos', { keyPath: 'id' }],
       ['cuentaProveedores', { keyPath: 'id' }],
@@ -101,7 +101,7 @@ describe('AC-INA-1 AC-CPR-1 DB_VERSION 10 agrega stores sin tocar datos', () => 
       expect(upgrade).toContain(`if (!d.objectStoreNames.contains('${s}'))`);
     }
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 12;/);
+    expect(src).toMatch(/const DB_VERSION = 13;/);
   });
 });
 

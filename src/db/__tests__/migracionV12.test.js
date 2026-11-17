@@ -8,7 +8,7 @@ describe('AC-PAN-1 DB_VERSION 12 agrega costosVenta sin tocar datos', () => {
   const correr = async (existentes) => {
     jest.resetModules();
     const creados = []; const borrados = []; const clears = []; const tocados = [];
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const fakeDb = {
       objectStoreNames: { contains: (n) => stores.has(n) },
       createObjectStore: (n, opts) => { stores.add(n); creados.push([n, opts]); return { createIndex: () => tocados.push('index') }; },
@@ -36,7 +36,7 @@ describe('AC-PAN-1 DB_VERSION 12 agrega costosVenta sin tocar datos', () => {
 
   it('AC-PAN-1 desde v11 crea SOLO costosVenta (clave pedidoId, sin pendingSync ni autoIncrement)', async () => {
     const r = await correr(V11);
-    expect(r.version).toBe(12);
+    expect(r.version).toBe(13);
     expect(r.creados).toEqual([['costosVenta', { keyPath: 'pedidoId' }]]);
   });
 
@@ -55,6 +55,6 @@ describe('AC-PAN-1 DB_VERSION 12 agrega costosVenta sin tocar datos', () => {
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     expect(upgrade).toContain("if (!d.objectStoreNames.contains('costosVenta'))");
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 12;/);
+    expect(src).toMatch(/const DB_VERSION = 13;/);
   });
 });

@@ -12,7 +12,7 @@ const DB_NAME = 'distribuidoraDB';
 //       pedidosProveedor. Solo se AGREGAN stores; no se migra ni se borra nada.
 // v11 — REQ-REN: rendiciones y cuentaClientes (saldo a favor). Solo se AGREGAN stores.
 // v12 — REQ-PAN: costosVenta (cache de solo lectura de los costos capturados por el servidor).
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 let db = null;
 
@@ -199,6 +199,12 @@ export const initDB = () => new Promise((resolve, reject) => {
     // los costos unitarios que captura el servidor al facturar; sin pendingSync, el cliente no escribe.
     if (!d.objectStoreNames.contains('costosVenta')) {
       d.createObjectStore('costosVenta', { keyPath: 'pedidoId' });
+    }
+
+    // v13 — REQ-CAT. Solo se AGREGA un store: marcas del catalogo PDF por producto
+    // ({ productoId, oculto, sinStock }). Datos locales del dispositivo, no se sincronizan.
+    if (!d.objectStoreNames.contains('catalogoMarcas')) {
+      d.createObjectStore('catalogoMarcas', { keyPath: 'productoId' });
     }
 
     // v6 — S-COM-13 (login 100 % online). El PIN se verifica solo en el
@@ -1039,3 +1045,23 @@ export const putPedidoWebAccion = (a) =>
 // Escritura "neutral" (resultado del servidor): guarda tal cual.
 export const putPedidosWebAccionesRaw = (rows) => putManyInto('pedidosWebAcciones', rows);
 export const clearPedidosWebAccionesPendingSync = (ids) => clearPendingIn('pedidosWebAcciones', ids);
+
+// REQ-CAT: marcas del catalogo (oculto / sin stock) por producto.
+export const getCatalogoMarcas = async () => {
+  const store = await tx('catalogoMarcas', 'readonly');
+  return new Promise((res, rej) => {
+    const req = store.getAll();
+    req.onsuccess = () => res(req.result || []);
+    req.onerror = () => rej(req.error);
+  });
+};
+
+// Una marca sin ningun valor activo se borra (no queda basura en el store).
+export const putCatalogoMarca = async (marca) => {
+  const store = await tx('catalogoMarcas', 'readwrite');
+  return new Promise((res, rej) => {
+    const req = (marca.oculto || marca.sinStock) ? store.put(marca) : store.delete(marca.productoId);
+    req.onsuccess = () => res(true);
+    req.onerror = () => rej(req.error);
+  });
+};

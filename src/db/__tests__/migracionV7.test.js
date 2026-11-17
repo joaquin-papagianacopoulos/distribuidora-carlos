@@ -12,7 +12,7 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
     const clears = [];
     const storesTocados = [];
     const filasClientes = clientes.map(c => ({ ...c }));
-    const stores = new Set(existentes);
+    const stores = new Set([...existentes, 'catalogoMarcas']); // REQ-CAT (v13): store ajeno a este paso
     const storeFalso = (nombre) => {
       storesTocados.push(nombre);
       return {
@@ -54,7 +54,7 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
   it('AC-COMR-7 desde v6 crea SOLO comisionesRubro con keyPath id (UUID, sin autoIncrement) e índices vendedorId y clave', async () => {
     const r = await correr({ existentes: V6 });
     // MOD (RUN 20261014-2100, REQ-WEB): la versión pasó a 8; desde v6 también se crea pedidosWebAcciones.
-    expect(r.version).toBe(12); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
+    expect(r.version).toBe(13); // MOD (RUN 20261015-2019, REQ-PAN): v12 suma costosVenta. // MOD (RUN 20261015-1630, REQ-REN): v11 suma rendiciones y cuentaClientes.
     expect(r.creados).toEqual([['pedidosWebAcciones', { keyPath: 'id' }], ['comisionesRubro', { keyPath: 'id' }], ['cambiosPrecio', { keyPath: 'id' }],
       // MOD (RUN 20261015-1541, REQ-INA/REQ-CPR): v10 suma 4 stores.
       ['ingresosCostos', { keyPath: 'id' }], ['cuentaProveedores', { keyPath: 'id' }], ['comprobantesPendientes', { keyPath: 'id' }], ['pedidosProveedor', { keyPath: 'id' }], ['rendiciones', { keyPath: 'id' }], ['cuentaClientes', { keyPath: 'id' }], ['costosVenta', { keyPath: 'pedidoId' }]]);
@@ -102,6 +102,6 @@ describe('AC-COMR-7 DB_VERSION 7 agrega comisionesRubro sin tocar datos', () => 
     const upgrade = src.slice(src.indexOf('request.onupgradeneeded'), src.indexOf('request.onblocked'));
     expect(upgrade).toContain("if (!d.objectStoreNames.contains('comisionesRubro'))");
     expect(upgrade).not.toMatch(/deleteObjectStore|\.clear\(/);
-    expect(src).toMatch(/const DB_VERSION = 12;/);
+    expect(src).toMatch(/const DB_VERSION = 13;/);
   });
 });
