@@ -16,6 +16,7 @@ import {
   claveAlmacenRuta, leerRutaGuardada, serializarRuta,
 } from '../domain/ruta';
 import { notaDePedido } from '../domain/observaciones';
+import { vendedorDelPedido } from '../domain/vendedorPedido';
 import { totalACobrar } from '../domain/redondeo';
 import { generarFacturaFile, generarHojaRutaFile } from '../utils/pdfGen';
 import { filasHojaRuta } from '../domain/cobranza';
@@ -354,7 +355,8 @@ const OrdenEntrega = () => {
                   <div className="oe-cuerpo" role="button" tabIndex={0} onClick={() => agregar(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); agregar(p); } }}>
                     <div className="oe-nombre">{p.clienteNombre}</div>
                     <div className="oe-dir">{'\u{1F4CD}'} {dir || 'Sin dirección cargada'}</div>
-                    <div className="oe-meta">{fechaCorta(p.fecha)} {'·'} {p.vendedorNombre || p.vendedor || 'Sin vendedor'} {'·'} {estadoReparto(p)}</div>
+                    <div className="oe-vendedor" data-testid={`oe-vendedor-${p.id}`}>Vendedor: <b>{vendedorDelPedido(p) || 'Sin vendedor'}</b></div>
+                    <div className="oe-meta">{fechaCorta(p.fecha)} {'·'} {estadoReparto(p)}</div>
                     {nota && <div className="oe-nota">{'\u{1F4DD}'} {nota}</div>}
                   </div>
                   <div className="oe-lado">
@@ -401,7 +403,8 @@ const OrdenEntrega = () => {
                     <div className="oe-cuerpo oe-cuerpo-ruta">
                       <div className="oe-nombre">{p.clienteNombre}</div>
                       <div className="oe-dir">{'\u{1F4CD}'} {dir || 'Sin dirección cargada'}</div>
-                      <div className="oe-meta">{fechaCorta(p.fecha)} {'·'} {p.vendedorNombre || p.vendedor || 'Sin vendedor'} {'·'} {estadoReparto(p)}</div>
+                      <div className="oe-vendedor" data-testid={`oe-vendedor-${p.id}`}>Vendedor: <b>{vendedorDelPedido(p) || 'Sin vendedor'}</b></div>
+                    <div className="oe-meta">{fechaCorta(p.fecha)} {'·'} {estadoReparto(p)}</div>
                       {nota && <div className="oe-nota">{'\u{1F4DD}'} {nota}</div>}
                     </div>
                     <div className="oe-monto">{pesos(totalACobrar(p))}</div>

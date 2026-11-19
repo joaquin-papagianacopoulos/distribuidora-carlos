@@ -83,13 +83,13 @@ describe('AC-RTO-2 direccion y vendedor destacado', () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
     expect(buscar(/^Zona:/)).toHaveLength(0);
   });
-  it('AC-RTO-2 "Vendedor:" va en negrita y con tamano >= al del cliente', async () => {
+  it('AC-RTO-2 "Vendedor:" con tamano >= al del cliente y sin negrita (ADAPTADO: AC-RTO-11)', async () => {
     await generarFacturaFile(pedido(), {}, { nombre: 'Jorge' }, 0, null);
     const cli = buscar(/^Kiosco Pepe$/)[0];
     const ven = buscar(/^Vendedor: Jorge$/)[0];
     expect(ven).toBeDefined();
     expect(ven.fs).toBeGreaterThanOrEqual(cli.fs);
-    expect(ven.bold).toBe(true);
+    expect(ven.bold).toBe(false);
   });
 });
 
@@ -115,7 +115,7 @@ describe('AC-RTO-4 estilo compacto y pedido largo', () => {
   it('AC-RTO-4 el remito y otro PDF con tabla usan ESTILO_TABLA_COMPACTA', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
     // ADAPTADO (AC-RTO-10): el remito suma la fuente a ese mismo estilo compacto (tamaño y bordes iguales).
-    expect(mockReg.tablas[0].styles).toMatchObject({ ...ESTILO_TABLA_COMPACTA, font: 'ArchivoBlack' });
+    expect(mockReg.tablas[0].styles).toMatchObject({ ...ESTILO_TABLA_COMPACTA, font: 'helvetica' });
     mockReg.tablas = [];
     await generarResumenDiaFile([pedido()], '2026-10-07');
     expect(mockReg.tablas[0].styles).toBe(ESTILO_TABLA_COMPACTA);
@@ -164,20 +164,22 @@ describe('REQ-RED2 el remito no dice Redondeo ni Subtotal', () => {
     expect(buscar(/^Redondeo:$/)).toHaveLength(0);
     expect(buscar(/^Total a cobrar: \$2\.500$/)).toHaveLength(1);
   });
-  it('AC-RTO-7 los renglones van en negrita y negro (ADAPTADO: AC-RTO-10, con la fuente del remito)', async () => {
+  it('AC-RTO-7 los renglones van en negro y SIN negrita (ADAPTADO: AC-RTO-11)', async () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
-    expect(mockReg.tablas[0].bodyStyles).toMatchObject({ font: 'ArchivoBlack', fontStyle: 'bold', textColor: 0 });
+    expect(mockReg.tablas[0].bodyStyles).toMatchObject({ font: 'helvetica', fontStyle: 'normal', textColor: 0 });
   });
 
-  it('AC-RTO-10 todo el remito va en Archivo Black (tipo Arial Black), embebida en el PDF', async () => {
+  it('AC-RTO-11 todo el remito va en Arial normal; solo el TOTAL va en negrita y grande', async () => {
     const f = await generarFacturaFile(pedido({ observaciones: 'Entregar a la tarde' }), { direccion: 'Calle Falsa 123', zona: 'Norte' }, {}, 500, 3);
     const pdf = await leer(f);
     expect(pdf.startsWith('%PDF')).toBe(true);
-    expect(pdf).toContain('ArchivoBlack');
-    // Ningún texto dibujado quedó en otra fuente (jsPDF siempre lista Arial en el archivo, aunque no se use).
+    expect(pdf).not.toContain('ArchivoBlack');
     expect(vistos().length).toBeGreaterThan(8);
-    expect(vistos().filter(x => x.fuente !== 'ArchivoBlack').map(x => x.t)).toEqual([]);
-    // Los textos siguen siendo los mismos de siempre.
+    expect(vistos().filter(x => x.fuente !== 'helvetica').map(x => x.t)).toEqual([]);
+    const total = buscar(/^TOTAL:$/)[0];
+    expect(total.fs).toBeGreaterThanOrEqual(16);
+    expect(total.bold).toBe(true);
+    expect(vistos().filter(x => x.bold).map(x => x.t)).toEqual(['TOTAL:', expect.stringMatching(/^\$/), expect.stringMatching(/^Total a cobrar:/)]);
     expect(buscar(/^REMITO N° 000007$/)).toHaveLength(1);
     expect(buscar(/^NOTA: Entregar a la tarde/)).toHaveLength(1);
     expect(buscar(/^Total a cobrar:/)).toHaveLength(1);

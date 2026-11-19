@@ -67,6 +67,7 @@
 .oe-cuerpo-ruta { cursor: default; }
 .oe-nombre { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
 .oe-dir { font-size: 13px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
+.oe-vendedor { font-size: 14px; color: var(--text); margin-top: 2px; }
 .oe-meta { font-size: 12px; color: var(--text3); margin-top: 2px; }
 .oe-nota { font-size: 12px; margin-top: 4px; padding: 3px 6px; border-radius: 6px; background: rgba(243, 156, 18, .14); overflow-wrap: anywhere; }
 .oe-lado { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; flex: none; }
