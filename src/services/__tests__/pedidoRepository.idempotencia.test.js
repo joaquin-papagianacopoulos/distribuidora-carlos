@@ -1,9 +1,9 @@
 // REQ-SEG2 (AC-SEG2-3): crear un pedido escribe primero en IndexedDB con clientUuid y la subida es idempotente.
-const mockDb = { agregados: [], sincronizados: [] };
+const mockDb = { agregados: [], sincronizados: [], locales: [] };
 jest.mock('../../db', () => ({
   addPedido: async (p) => { mockDb.agregados.push(p); return 77; },
   markPedidoSynced: async (id, remoteId) => { mockDb.sincronizados.push([id, remoteId]); },
-  getPedidos: async () => [],
+  getPedidos: async () => mockDb.locales,
   putPedido: async () => undefined,
   updatePedido: async () => undefined,
 }));
@@ -35,12 +35,28 @@ const setOnline = (v) => Object.defineProperty(window.navigator, 'onLine', { con
 const PEDIDO = { clienteNombre: 'Kiosco', estado: 'pendiente', fecha: '2026-11-10', items: [{ productoId: 1, cantidad: 1, precio: 10 }], total: 10 };
 
 beforeEach(() => {
-  mockDb.agregados = []; mockDb.sincronizados = [];
+  mockDb.agregados = []; mockDb.sincronizados = []; mockDb.locales = [];
   mockSb.llamadas = []; mockSb.respuestas = [];
   setOnline(true);
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => console.warn.mockRestore());
+
+describe('AC-IDP-1 el mismo borrador no crea dos pedidos', () => {
+  test('AC-IDP-1 si ya existe un pedido local con ese clientUuid no se agrega otro ni se vuelve a subir', async () => {
+    mockDb.locales = [{ id: 5, clientUuid: 'U1', remoteId: 'R5' }];
+    const r = await crearPedidoOnlineFirst({ ...PEDIDO, clientUuid: 'U1' });
+    expect(r).toEqual({ localId: 5, remoteId: 'R5', mode: 'online', duplicado: true });
+    expect(mockDb.agregados).toHaveLength(0);
+    expect(mockSb.llamadas).toHaveLength(0);
+  });
+  test('AC-IDP-1 si el primero quedó sin subir devuelve pendiente (lo sube el sync) y no duplica', async () => {
+    mockDb.locales = [{ id: 6, clientUuid: 'U2' }];
+    const r = await crearPedidoOnlineFirst({ ...PEDIDO, clientUuid: 'U2' });
+    expect(r).toMatchObject({ localId: 6, mode: 'pendiente', duplicado: true });
+    expect(mockDb.agregados).toHaveLength(0);
+  });
+});
 
 describe('AC-SEG2-3 crearPedidoOnlineFirst', () => {
   test('AC-SEG2-3 escribe primero en el dispositivo con clientUuid y sube con upsert por client_uuid', async () => {

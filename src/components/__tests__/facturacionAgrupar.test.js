@@ -104,7 +104,8 @@ describe('AC-AGR-1 AgruparRenglones', () => {
     await click(checkDe('Jabon'));
     expect(porAria('Nombre del nuevo grupo').value).toBe('Grupo');
     await escribir(porAria('Nombre del nuevo grupo'), 'Mis cosas');
-    await click(botonConTexto('Agrupar (2)'));
+    // ADAPTADO (AC-AGR-5): Saphirus x12 $100 y Jabón sin bulto $50 son distintos: el botón dice "Agrupar igual".
+    await click(botonConTexto('Agrupar igual (2)'));
     expect(onChange.mock.calls[0][0][0].nombre).toBe('Mis cosas');
   });
 
@@ -132,5 +133,31 @@ describe('AC-AGR-1 AgruparRenglones', () => {
     const grupos = [{ id: 'g1', nombre: 'Fantasma', itemIds: ['98', '99'] }];
     await render(<AgruparRenglones items={items} grupos={grupos} productosById={productosById} onChange={() => {}} />);
     expect(q('[data-testid="grupo-factura"]')).toBeNull();
+  });
+});
+
+describe('AC-AGR-5 aviso al agrupar renglones distintos', () => {
+  const dif = [
+    { productoId: 1, nombre: 'Talco Foot', cantidad: 24, precio: 2100, bultoX: 24, marca: 'Algabo' },
+    { productoId: 2, nombre: 'Jabon Floral', cantidad: 12, precio: 1500, bultoX: 12, marca: 'Algabo' },
+  ];
+  it('AC-AGR-5 bultos y precios distintos muestran el aviso y el botón dice "Agrupar igual"', async () => {
+    const onChange = jest.fn();
+    await render(<AgruparRenglones items={dif} grupos={[]} onChange={onChange} />);
+    await click(checkDe('Talco Foot'));
+    await click(checkDe('Jabon Floral'));
+    const aviso = q('[data-testid="agrupar-aviso"]');
+    expect(aviso.textContent).toContain('bultos distintos (x12, x24)');
+    expect(aviso.textContent).toContain('precios distintos');
+    await click(botonConTexto('Agrupar igual (2)'));
+    expect(onChange).toHaveBeenCalledTimes(1); // avisa pero no bloquea
+  });
+  it('AC-AGR-5 renglones parecidos no muestran aviso', async () => {
+    const parecidos = [dif[0], { ...dif[1], bultoX: 24, precio: 2100 }];
+    await render(<AgruparRenglones items={parecidos} grupos={[]} onChange={jest.fn()} />);
+    await click(checkDe('Talco Foot'));
+    await click(checkDe('Jabon Floral'));
+    expect(q('[data-testid="agrupar-aviso"]')).toBeNull();
+    expect(botonConTexto('Agrupar (2)')).toBeDefined();
   });
 });

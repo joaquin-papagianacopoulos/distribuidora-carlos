@@ -95,6 +95,25 @@ export const normalizarGrupos = (grupos, items) => {
 
 const unidades = (r) => Number(r?.cantidad) || 0;
 
+// AC-AGR-5: avisos al armar un grupo con renglones que no son parecidos. Devuelve una lista de
+// textos (vacía = nada raro). No bloquea: el admin decide si agrupa igual.
+export const advertenciasGrupo = (renglones) => {
+  const lista = Array.isArray(renglones) ? renglones.filter(Boolean) : [];
+  if (lista.length < 2) return [];
+  const avisos = [];
+  const bultos = new Set(lista.map(r => normalizarBultoX(r.bultoX) ?? normalizarBultoX(r.precioBultoX) ?? 0));
+  if (bultos.size > 1) {
+    const txt = [...bultos].sort((a, b) => a - b).map(b => (b ? `x${b}` : 'sin bulto')).join(', ');
+    avisos.push(`Tienen bultos distintos (${txt}).`);
+  }
+  const precios = new Set(lista.map(r => Math.round((Number(r.precio) || 0) * 100)));
+  if (precios.size > 1) {
+    const txt = [...precios].sort((a, b) => a - b).map(c => peso(c / 100)).join(', ');
+    avisos.push(`Tienen precios distintos (${txt}).`);
+  }
+  return avisos;
+};
+
 // AC-AGR-3: "3 bultos (36 u.)" si todos comparten bultoX y la suma es multiplo; si no, "36 u.".
 export const textoBultosGrupo = (renglones) => {
   const lista = Array.isArray(renglones) ? renglones.filter(Boolean) : [];

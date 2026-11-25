@@ -4,7 +4,7 @@
 // deshacer. Solo cambia `grupos`: los renglones (items) quedan separados (stock, armado,
 // comisiones y estadisticas no se tocan).
 import React, { useState } from 'react';
-import { claveRenglon, sugerirNombreGrupo, crearGrupo, renombrarGrupo, deshacerGrupo, normalizarGrupos, textoBultosGrupo } from '../domain/gruposFactura';
+import { claveRenglon, sugerirNombreGrupo, crearGrupo, renombrarGrupo, deshacerGrupo, normalizarGrupos, textoBultosGrupo, advertenciasGrupo } from '../domain/gruposFactura';
 
 const AgruparRenglones = ({ items = [], grupos = [], productosById, onChange }) => {
   const [sel, setSel] = useState(new Set());
@@ -16,6 +16,7 @@ const AgruparRenglones = ({ items = [], grupos = [], productosById, onChange }) 
   const seleccionados = sueltos.filter(i => sel.has(claveRenglon(i)));
   const sugerido = sugerirNombreGrupo(seleccionados, productosById);
   const nombre = nombreManual ?? sugerido;
+  const avisos = advertenciasGrupo(seleccionados); // AC-AGR-5
 
   const toggle = (clave) => setSel(prev => {
     const n = new Set(prev);
@@ -68,6 +69,11 @@ const AgruparRenglones = ({ items = [], grupos = [], productosById, onChange }) 
               <span>{i.nombre} ({i.cantidad})</span>
             </label>
           ))}
+          {avisos.length > 0 && (
+            <div role="alert" data-testid="agrupar-aviso" style={{ marginTop: 8, padding: 8, borderRadius: 8, background: 'var(--warning-bg, #fff4e0)', color: 'var(--warning, #8a5a00)', fontSize: 13 }}>
+              ⚠ Ojo: {avisos.join(' ')} En la boleta van a salir en una sola línea sin precio por unidad. ¿Seguro que van juntos?
+            </div>
+          )}
           {seleccionados.length >= 2 && (
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <input
@@ -78,7 +84,7 @@ const AgruparRenglones = ({ items = [], grupos = [], productosById, onChange }) 
                 onChange={e => setNombreManual(e.target.value)}
               />
               <button type="button" className="btn btn-primary btn-sm" style={{ width: 'auto' }} onClick={agrupar}>
-                Agrupar ({seleccionados.length})
+                {avisos.length ? 'Agrupar igual' : 'Agrupar'} ({seleccionados.length})
               </button>
             </div>
           )}

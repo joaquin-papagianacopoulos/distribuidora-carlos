@@ -18,6 +18,15 @@ export const esErrorClientUuid = (error) => {
 /** Le asigna un UUID de idempotencia al pedido si no lo tiene (no pisa uno existente). */
 export const asegurarClientUuid = (p, genId = nuevoId) => (p && p.clientUuid ? p : { ...p, clientUuid: genId() });
 
+/** AC-IDP-1: pedido local que ya tiene ese clientUuid (un doble toque en "Guardar" no crea otro). */
+export const pedidoLocalPorClientUuid = (locales, clientUuid) => {
+  if (!clientUuid) return null;
+  return (Array.isArray(locales) ? locales : []).find(l => l && String(l.clientUuid) === String(clientUuid)) || null;
+};
+
+/** Id nuevo para el borrador de un pedido (se reutiliza hasta que el pedido se guarda). */
+export const nuevoClientUuid = () => nuevoId();
+
 /** Fragmento de la fila remota: `{ client_uuid }` o `{}` si el pedido no tiene UUID. */
 export const clientUuidToRemote = (p) => (p && p.clientUuid ? { client_uuid: p.clientUuid } : {});
 

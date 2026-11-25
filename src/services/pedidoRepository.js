@@ -14,7 +14,7 @@ import { marcarEntregado, pedidoEntregaToRemote, sinColumnasEntrega, validarCamb
 import { esColumnaInexistente, esFuncionInexistente } from '../sync/tolerancia';
 import { credencialesAdminProductos } from './productosAdminService';
 import { itemsSinCostos } from '../domain/panel';
-import { asegurarClientUuid, clientUuidToRemote, esErrorClientUuid } from '../domain/pedidosIdempotencia';
+import { asegurarClientUuid, clientUuidToRemote, esErrorClientUuid, pedidoLocalPorClientUuid } from '../domain/pedidosIdempotencia';
 import { gruposToRemote, sinColumnas011, nombraColumna011 } from '../domain/gruposFactura';
 import { vendedorToRemote, sinColumnas024, nombraColumna024, asignarVendedor } from '../domain/vendedorPedido';
 import { redondeoToRemote, sinColumnas025, nombraColumna025 } from '../domain/redondeo';
@@ -111,6 +111,12 @@ const insertarPedidoIdempotente = async (row) => {
 // pedido queda visible como "sin subir" hasta que el sync lo suba.
 export const crearPedidoOnlineFirst = async (pedido) => {
   const pedidoNormalizado = asegurarClientUuid({ ...pedido, fecha: normalizePedidoFecha(pedido?.fecha) });
+  // AC-IDP-1: si este mismo borrador (mismo clientUuid) ya se guardó, no se crea otro pedido local.
+  const yaGuardado = pedido?.clientUuid ? pedidoLocalPorClientUuid(await getPedidos(), pedido.clientUuid) : null;
+  if (yaGuardado) {
+    if (yaGuardado.remoteId) return { localId: yaGuardado.id, remoteId: yaGuardado.remoteId, mode: 'online', duplicado: true };
+    return { localId: yaGuardado.id, mode: navigator.onLine ? 'pendiente' : 'offline', duplicado: true };
+  }
   const localId = await addPedido(pedidoNormalizado);
   if (!navigator.onLine) return { localId, mode: 'offline' };
 

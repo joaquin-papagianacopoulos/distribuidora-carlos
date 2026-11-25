@@ -5,6 +5,7 @@ import { fuzzySearch, getTodayStr, formatFecha, searchProductos } from '../utils
 import { addCliente, updateCliente } from '../db';
 import { direccionExacta, mensajeDireccion } from '../domain/direccion';
 import { crearPedidoOnlineFirst, editarPedidoOnlineFirst } from '../services/pedidoRepository';
+import { nuevoClientUuid } from '../domain/pedidosIdempotencia';
 import { filtrarActivos } from '../domain/vendedores';
 import { datosVendedorAlCrear } from '../domain/vendedorPedido';
 import { puedeEditarPedido, puedeAsignarVendedor } from '../domain/permisos';
@@ -329,6 +330,10 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
   const [cargandoEdicion, setCargandoEdicion] = useState(modoEdicion);
   const [errorEdicion, setErrorEdicion] = useState('');
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  // AC-IDP-1: candado contra doble toque en "Guardar Pedido" (ref: vale al instante) y UUID del borrador.
+  const guardandoRef = useRef(false);
+  const [guardando, setGuardando] = useState(false);
+  const borradorUuidRef = useRef(null);
   // REQ-ASV (AC-ASV-1): "Vendedor del pedido" elegido ('' = el mismo que carga).
   const [vendedorElegido, setVendedorElegido] = useState('');
   const usuarioActual = useMemo(() => ({ nombre: vendedorActual?.nombre, permiso: permisoNorm }), [vendedorActual, permisoNorm]);
@@ -570,6 +575,19 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
 
     if (modoEdicion) { await guardarEdicion(); return; }
 
+    // AC-IDP-1: un solo guardado a la vez. El segundo toque se ignora mientras el primero termina.
+    if (guardandoRef.current) return;
+    guardandoRef.current = true;
+    setGuardando(true);
+    try {
+      await guardarNuevo();
+    } finally {
+      guardandoRef.current = false;
+      setGuardando(false);
+    }
+  };
+
+  const guardarNuevo = async () => {
     // REQ-ASV (AC-ASV-1): de quien es el pedido y quien lo cargo.
     const dv = datosVendedorAlCrear({ vendedorActual, elegido: vendedorElegido, vendedores });
     if (!dv.ok) { setToast({ msg: dv.error, type: 'error' }); return; }
@@ -608,7 +626,10 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
     }
 
     // AC-SEG2-3: el pedido se guarda primero en el dispositivo; si no se pudo subir queda como "sin subir".
+    // AC-IDP-1: el borrador lleva su propio UUID; aunque la función corra dos veces, el pedido es uno solo.
+    if (!borradorUuidRef.current) borradorUuidRef.current = nuevoClientUuid();
     const resCrear = await crearPedidoOnlineFirst({
+      clientUuid: borradorUuidRef.current,
       fecha,
       clienteId: finalClienteId,
       clienteNombre: nombreFinal,
@@ -623,6 +644,7 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
       estado: 'pendiente',
     });
 
+    borradorUuidRef.current = null; // pedido guardado: el próximo borrador es otro pedido
     await recargar();
     localStorage.removeItem(draftKey);
     setItems([]);
@@ -634,7 +656,7 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
     setObservaciones('');
     setFecha(getTodayStr());
     // `resCrear` puede venir undefined en los mocks de los tests.
-    if (resCrear && resCrear.mode === 'pendiente') {
+    if (resCrear && (resCrear.mode === 'pendiente' || resCrear.mode === 'offline')) {
       setToast({ msg: 'Guardado en este dispositivo, sin subir. Se sube solo cuando haya conexión.', type: 'success' });
     } else {
       setToast({ msg: '✓ Pedido guardado correctamente', type: 'success' });
@@ -868,8 +890,8 @@ const NuevoPedido = ({ pedidoEditarId = null, onFinEdicion = null } = {}) => {
         />
       </div>
 
-      <button className="btn btn-primary" onClick={guardar} disabled={modoEdicion ? (!original || guardandoEdicion) : !dirOk.ok} style={{ marginTop: 4, marginBottom: modoEdicion ? 8 : 80 }}>
-        {modoEdicion ? (guardandoEdicion ? 'Guardando...' : '✓ Guardar cambios') : '✓ Guardar Pedido'}
+      <button className="btn btn-primary" onClick={guardar} disabled={modoEdicion ? (!original || guardandoEdicion) : (!dirOk.ok || guardando)} style={{ marginTop: 4, marginBottom: modoEdicion ? 8 : 80 }}>
+        {modoEdicion ? (guardandoEdicion ? 'Guardando...' : '✓ Guardar cambios') : (guardando ? 'Guardando...' : '✓ Guardar Pedido')}
       </button>
       {modoEdicion && (
         <button className="btn btn-ghost" onClick={() => onFinEdicion && onFinEdicion()} style={{ marginBottom: 80 }}>Cancelar edición</button>

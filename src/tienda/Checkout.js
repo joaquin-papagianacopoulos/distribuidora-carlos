@@ -30,6 +30,7 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
   const [hp, setHp] = useState('');
   const [errores, setErrores] = useState({});
   const [enviando, setEnviando] = useState(false);
+  const enviandoRef = useRef(false); // AC-IDP-1: candado inmediato contra doble toque
   const [error, setError] = useState('');
   const [corregido, setCorregido] = useState(null);
   const idem = useRef(nuevoId());
@@ -42,12 +43,13 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
 
   const enviar = async (e) => {
     e.preventDefault();
-    if (enviando) return;
+    if (enviando || enviandoRef.current) return;
     setError('');
     const v = validarCheckout(valores);
     if (!v.ok) { setErrores(v.errores); return; }
     if (lineas.length === 0 || calc.errores.length > 0) { setError('Revisá tu carrito antes de confirmar.'); return; }
     escribirStorage(CLAVE_CONTACTO, JSON.stringify(v.datos));
+    enviandoRef.current = true;
     setEnviando(true);
     try {
       const payload = armarPayloadPedido({ lineas }, { ...v.datos, hp }, tokenParaPedido(token), idem.current);
@@ -56,6 +58,7 @@ const Checkout = ({ lineas, catalogoById, config, token, crearPedido, onExito, o
       if (r.motivo === 'cambio' && r.carrito) { setCorregido(r.carrito); return; }
       setError(r.mensaje || 'No pudimos procesar el pedido.');
     } finally {
+      enviandoRef.current = false;
       setEnviando(false);
     }
   };
