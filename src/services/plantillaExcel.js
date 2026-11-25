@@ -3,7 +3,7 @@
 // de src/domain/plantillas.js; aca solo se arma el libro con xlsx.
 // S-DEP-01 afecta al PARSEO de archivos; escribir un libro propio no expone
 // esa superficie.
-import { armarPlantilla } from '../domain/plantillas';
+import { armarPlantilla, armarExportProductos } from '../domain/plantillas';
 
 export const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -44,6 +44,20 @@ export const descargarBlob = (blob, nombre) => {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
+/** AC-XLS-1: .xlsx con los productos actuales (mismas columnas que la plantilla, listo para re-subir). */
+export const generarExportProductosXlsx = async (productos, ctx = {}, ahora = new Date()) => {
+  const XLSX = await import('xlsx');
+  const plantilla = armarExportProductos(productos, ctx, ahora);
+  const data = XLSX.write(libroPlantilla(XLSX, plantilla), { bookType: 'xlsx', type: 'array' });
+  return { nombreArchivo: plantilla.nombreArchivo, blob: new Blob([data], { type: MIME_XLSX }), cantidad: plantilla.hojas[0].filas.length - 1 };
+};
+
+export const descargarExportProductos = async (productos, ctx = {}) => {
+  const { nombreArchivo, blob, cantidad } = await generarExportProductosXlsx(productos, ctx);
+  descargarBlob(blob, nombreArchivo);
+  return { nombreArchivo, cantidad };
 };
 
 export const descargarPlantilla = async (entidad, ctx = {}) => {

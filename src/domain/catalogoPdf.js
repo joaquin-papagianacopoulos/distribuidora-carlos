@@ -3,18 +3,29 @@
 // entran al catálogo, cuáles van marcados "SIN STOCK", cómo se paginan y dónde cae cada
 // celda. El dibujo del PDF vive en services/catalogoService.js.
 
+import { validarEscalasBulto, normalizarEscalasBulto, precioAplicado, MAX_ESCALAS_BULTO, valorEscalaTexto } from './precios';
+import { normalizarBultoX } from './bultos';
+import { normalizarBultoNombre } from './unidadVenta';
+
 export const POR_PAGINA_DEFAULT = 16; // 4 columnas x 4 filas, como el catálogo actual
 export const COLUMNAS_DEFAULT = 4;
+export const MAX_LINEAS_OFERTA_PDF = 4;
 
 // ---- Marcas por producto (solo para el catálogo; no tocan "Mostrar en tienda" ni el stock) ----
+// AC-CAT-5: la marca también guarda `orden` (puesto manual en el PDF, 1..n). Sin orden = va después, por rubro y nombre.
 
 export const marcaCatalogoVacia = (productoId) => ({ productoId, oculto: false, sinStock: false });
 
-export const normalizarMarca = (m = {}) => ({
-  productoId: m?.productoId,
-  oculto: m?.oculto === true,
-  sinStock: m?.sinStock === true,
-});
+const ordenValido = (o) => (Number.isFinite(Number(o)) && Number(o) >= 1 && o !== null && o !== '' ? Math.floor(Number(o)) : null);
+
+export const normalizarMarca = (m = {}) => {
+  const base = { productoId: m?.productoId, oculto: m?.oculto === true, sinStock: m?.sinStock === true };
+  const orden = ordenValido(m?.orden);
+  return orden === null ? base : { ...base, orden };
+};
+
+// Una marca solo ocupa lugar si tiene algún valor activo.
+export const marcaTieneDatos = (m) => !!m && (m.oculto === true || m.sinStock === true || ordenValido(m.orden) !== null);
 
 // Lista de marcas -> Map por clave de producto. Las marcas "en blanco" no ocupan lugar.
 export const indexarMarcas = (marcas = []) => {
@@ -22,9 +33,93 @@ export const indexarMarcas = (marcas = []) => {
   (Array.isArray(marcas) ? marcas : []).forEach((m) => {
     if (m?.productoId === undefined || m?.productoId === null) return;
     const n = normalizarMarca(m);
-    if (n.oculto || n.sinStock) mapa.set(String(n.productoId), n);
+    if (marcaTieneDatos(n)) mapa.set(String(n.productoId), n);
   });
   return mapa;
+};
+
+// Orden del catálogo: primero los que tienen puesto manual (por puesto), después el resto por rubro y nombre.
+const comparar = (a, b) => {
+  const oa = a.orden ?? null; const ob = b.orden ?? null;
+  if (oa !== null && ob !== null && oa !== ob) return oa - ob;
+  if (oa !== null && ob === null) return -1;
+  if (oa === null && ob !== null) return 1;
+  return String(a.categoria ?? '').localeCompare(String(b.categoria ?? ''), 'es')
+    || String(a.nombre ?? '').localeCompare(String(b.nombre ?? ''), 'es');
+};
+
+// Productos (incluidos los ocultos) en el orden en que saldrían en el PDF. Para la pantalla de armado.
+export const ordenarProductosCatalogo = (productos = [], marcas = []) => {
+  const mapa = marcas instanceof Map ? marcas : indexarMarcas(marcas);
+  return (Array.isArray(productos) ? productos : [])
+    .filter((p) => p && p.id !== undefined && p.id !== null)
+    .map((p) => ({ p, orden: mapa.get(String(p.id))?.orden ?? null, categoria: p.categoria, nombre: p.nombre }))
+    .sort(comparar)
+    .map((x) => x.p);
+};
+
+// Mueve el elemento de `desde` a `hasta` (índices). Devuelve una lista nueva; índices fuera de rango no cambian nada.
+export const moverEnLista = (lista = [], desde, hasta) => {
+  const arr = Array.isArray(lista) ? [...lista] : [];
+  if (!Number.isInteger(desde) || !Number.isInteger(hasta) || desde === hasta) return arr;
+  if (desde < 0 || desde >= arr.length || hasta < 0 || hasta >= arr.length) return arr;
+  const [x] = arr.splice(desde, 1);
+  arr.splice(hasta, 0, x);
+  return arr;
+};
+
+// ---- Ofertas por bulto (AC-CAT-6 / AC-CAT-7) ----
+
+const pesosCorto = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '';
+  return Number.isInteger(v) ? `$${v.toLocaleString('es-AR')}` : formatoPrecio(v).replace('$ ', '$');
+};
+
+/**
+ * Líneas de oferta de un producto para el PDF: "Llevando el bulto: $800 c/u" y una por escala
+ * ("Desde 3 bultos: $950 c/u"). Cada precio sale de precioAplicado (la misma regla que cobra el pedido).
+ * Sin bulto usable no hay ofertas. Máximo MAX_LINEAS_OFERTA_PDF.
+ */
+export const textosOfertasProducto = (p) => {
+  const bx = normalizarBultoX(p?.bultoX);
+  const precio = Number(p?.precio);
+  if (bx === null || !(precio > 0)) return [];
+  const nombre = normalizarBultoNombre(p?.bultoNombre).toLowerCase();
+  const lineas = [];
+  const escalas = normalizarEscalasBulto(p?.escalasBulto);
+  const conBulto = precioAplicado({ precio, precioBulto: p?.precioBulto, bultoX: bx, escalasBulto: [] }, bx).precio;
+  if (conBulto > 0 && conBulto < precio) lineas.push(`Llevando 1 ${nombre}: ${pesosCorto(conBulto)} c/u`);
+  escalas.forEach((e) => {
+    const u = precioAplicado({ precio, precioBulto: p?.precioBulto, bultoX: bx, escalasBulto: escalas }, e.desde * bx).precio;
+    if (u > 0 && u < precio) lineas.push(`Desde ${e.desde} ${nombre}s: ${pesosCorto(u)} c/u`);
+  });
+  return lineas.slice(0, MAX_LINEAS_OFERTA_PDF);
+};
+
+// Filas del editor de ofertas: siempre MAX_ESCALAS_BULTO filas ({ desde, valor } como texto).
+export const filasOfertasEditor = (p) => {
+  const filas = normalizarEscalasBulto(p?.escalasBulto).map((e) => ({ desde: String(e.desde), valor: valorEscalaTexto(e) }));
+  while (filas.length < MAX_ESCALAS_BULTO) filas.push({ desde: '', valor: '' });
+  return filas;
+};
+
+/**
+ * Valida las ofertas que armó el admin para un producto. Devuelve { ok, producto, errores, avisos }.
+ * `producto` = el producto con bultoX y escalasBulto nuevos (sin tocar nada más). Sin filas = borra las ofertas.
+ */
+export const aplicarOfertasProducto = (p, { bultoX, filas } = {}) => {
+  const bx = bultoX === undefined || bultoX === '' ? p?.bultoX : bultoX;
+  const base = Number(p?.precioBulto) > 0 && Number(p.precioBulto) < Number(p?.precio) ? Number(p.precioBulto) : Number(p?.precio);
+  const r = validarEscalasBulto(filas, bx, base);
+  if (r.errores.length) return { ok: false, producto: p, errores: r.errores, avisos: r.avisos };
+  const bn = normalizarBultoX(bx);
+  return {
+    ok: true,
+    producto: { ...p, bultoX: bn === null ? (Number(p?.bultoX) || 1) : bn, escalasBulto: r.valor },
+    errores: [],
+    avisos: r.avisos,
+  };
 };
 
 export const marcaDe = (mapa, productoId) => mapa?.get?.(String(productoId)) || marcaCatalogoVacia(productoId);
@@ -96,10 +191,11 @@ export const armarCatalogo = (productos = [], marcas = [], { stockDe = null, aut
       precio: Number(p.precio) || 0,
       imagen_url: p.imagen_url || null,
       sinStock: marca.sinStock || (autoSinStock && stockReal !== null && stockReal <= 0),
+      orden: marca.orden ?? null,
+      ofertas: textosOfertasProducto(p), // AC-CAT-6
     });
   });
-  return items.sort((a, b) =>
-    a.categoria.localeCompare(b.categoria, 'es') || a.nombre.localeCompare(b.nombre, 'es'));
+  return items.sort(comparar); // AC-CAT-5: puesto manual primero, después rubro y nombre
 };
 
 export const paginar = (items = [], porPagina = POR_PAGINA_DEFAULT) => {

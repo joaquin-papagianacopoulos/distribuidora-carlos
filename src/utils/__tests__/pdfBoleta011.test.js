@@ -83,12 +83,13 @@ describe('AC-RTO-2 direccion y vendedor destacado', () => {
     await generarFacturaFile(pedido(), {}, {}, 0, null);
     expect(buscar(/^Zona:/)).toHaveLength(0);
   });
-  it('AC-RTO-2 "Vendedor:" con tamano >= al del cliente y sin negrita (ADAPTADO: AC-RTO-11)', async () => {
+  it('AC-RTO-12 "Vendedor:" arriba a la derecha (borde derecho, sobre el cliente) y sin negrita', async () => {
     await generarFacturaFile(pedido(), {}, { nombre: 'Jorge' }, 0, null);
     const cli = buscar(/^Kiosco Pepe$/)[0];
     const ven = buscar(/^Vendedor: Jorge$/)[0];
     expect(ven).toBeDefined();
-    expect(ven.fs).toBeGreaterThanOrEqual(cli.fs);
+    expect(ven.x).toBeGreaterThanOrEqual(150);
+    expect(ven.y).toBeLessThan(cli.y);
     expect(ven.bold).toBe(false);
   });
 });

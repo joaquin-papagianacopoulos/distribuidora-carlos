@@ -26,11 +26,13 @@ import { resumenCliente } from '../domain/clientes';
 import { ordenZonaTrasCambioZona } from '../domain/zonas';
 import { stockDe } from '../domain/stock';
 import { planificarImportacion, resumirEntradas, textoResumen, avisoColumnasExcluidas } from '../domain/plantillas';
-import { descargarPlantilla } from '../services/plantillaExcel';
+import { descargarPlantilla, descargarExportProductos, descargarBlob } from '../services/plantillaExcel';
+import { guardarPlanillaProductos, bajarUltimaPlanillaProductos } from '../services/planillaProductosService';
+import { textoUltimaPlanilla, nombreSeguroDescarga } from '../domain/planillaProductos';
 import { leerFilasArchivo } from '../services/lectorPlanillas';
 import { ACCEPT_IMPORT, rechazosVisibles } from '../domain/importacion';
 import { COLUMNAS_PLANTILLA } from '../domain/plantillas';
-import { syncProductos, buscarImagenesFaltantes } from '../sync/syncService';
+import { syncProductos, buscarImagenesFaltantes, downloadMaestros } from '../sync/syncService';
 import { borrarClienteAdmin } from '../services/clientesAdminService';
 import { exportarRespaldo } from '../services/respaldoService';
 import { guardarVendedorAdmin, darDeBajaVendedorAdmin } from '../services/vendedoresService';
@@ -214,6 +216,12 @@ const Configuracion = () => {
   const [resultadoClientes, setResultadoClientes] = useState(null);
   const [cargandoClientes, setCargandoClientes] = useState(false);
   const [descargando, setDescargando] = useState(null);
+  const [exportProductosMsg, setExportProductosMsg] = useState('');
+  // AC-XLS-2: Excel de productos guardado en la app. El PIN vive solo en este estado y se limpia al usarlo.
+  const [planillaPin, setPlanillaPin] = useState('');
+  const [planillaArchivo, setPlanillaArchivo] = useState(null); // último archivo importado en este equipo
+  const [planillaMsg, setPlanillaMsg] = useState('');
+  const [planillaOcupada, setPlanillaOcupada] = useState(false);
   const clientesRef = useRef(null);
 
   if (!isAdmin) {
@@ -576,6 +584,8 @@ const Configuracion = () => {
     if (!file) return;
     setCargandoCSV(true);
     setResultadoCSV(null);
+    setPlanillaArchivo(file);
+    setPlanillaMsg('');
     let r = null;
     try {
       const { filas, origen } = await leerFilasArchivo(file);
@@ -638,6 +648,53 @@ const Configuracion = () => {
     } finally {
       setDescargando(null);
     }
+  };
+
+  // AC-XLS-1: Excel con los productos como están AHORA (si hay conexión se bajan antes los últimos
+  // cambios de quien los subió), con las mismas columnas de la plantilla para editarlo y volver a subirlo.
+  const bajarProductosActuales = async () => {
+    setDescargando('export-productos');
+    try {
+      let aviso = '';
+      if (online) {
+        try { await downloadMaestros(); } catch { aviso = ' (no se pudieron bajar los últimos cambios: se usan los datos de este equipo)'; }
+      } else aviso = ' (sin conexión: se usan los datos de este equipo)';
+      const actuales = (await getProductos()) || productos;
+      const r = await descargarExportProductos(actuales, { proveedores, vendedores });
+      setExportProductosMsg(`${r.nombreArchivo}: ${r.cantidad} productos${aviso}.`);
+      await recargar();
+    } catch (err) {
+      setExportProductosMsg('No se pudo generar el Excel: ' + (err?.message || String(err)));
+    } finally {
+      setDescargando(null);
+    }
+  };
+
+  // AC-XLS-2: deja el Excel importado guardado en la app (lo puede bajar cualquier admin con su PIN).
+  const guardarExcelEnApp = async () => {
+    const pin = planillaPin;
+    setPlanillaPin('');
+    setPlanillaOcupada(true);
+    setPlanillaMsg('');
+    try {
+      const r = await guardarPlanillaProductos(pin, planillaArchivo);
+      setPlanillaMsg(r.ok ? `Guardado en la app: ${nombreSeguroDescarga(planillaArchivo?.name)}. Cualquier admin puede bajarlo.` : r.mensaje);
+      if (r.ok) setPlanillaArchivo(null);
+    } finally { setPlanillaOcupada(false); }
+  };
+
+  const bajarUltimoExcel = async () => {
+    const pin = planillaPin;
+    setPlanillaPin('');
+    setPlanillaOcupada(true);
+    setPlanillaMsg('');
+    try {
+      const r = await bajarUltimaPlanillaProductos(pin);
+      if (!r.ok) { setPlanillaMsg(r.mensaje); return; }
+      if (!r.hay) { setPlanillaMsg(textoUltimaPlanilla(r.info)); return; }
+      descargarBlob(r.blob, nombreSeguroDescarga(r.info.nombre_original));
+      setPlanillaMsg(`Descargado: ${textoUltimaPlanilla(r.info)}`);
+    } finally { setPlanillaOcupada(false); }
   };
 
   const buscarFotos = async () => {
@@ -832,6 +889,15 @@ const Configuracion = () => {
               {descargando === 'productos' ? 'Generando...' : 'Descargar plantilla Excel'}
             </button>
             <button
+              className="btn btn-ghost btn-sm"
+              style={{ width: 'auto' }}
+              onClick={bajarProductosActuales}
+              disabled={descargando === 'export-productos'}
+              data-testid="exportar-productos-actuales"
+            >
+              {descargando === 'export-productos' ? 'Generando...' : 'Descargar productos actuales (Excel)'}
+            </button>
+            <button
               className={`btn ${cargandoCSV ? 'btn-ghost' : 'btn-primary'} btn-sm`}
               style={{ width: 'auto' }}
               onClick={() => csvRef.current?.click()}
@@ -840,7 +906,28 @@ const Configuracion = () => {
               {cargandoCSV ? '⏳ Importando...' : '📂 Seleccionar archivo CSV/XLSX'}
             </button>
           </div>
+          {exportProductosMsg && <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }} role="status" data-testid="exportar-productos-msg">{exportProductosMsg}</div>}
           <ResultadoImport r={resultadoCSV} testId="resultado-productos" />
+          {/* AC-XLS-2: el último Excel de productos queda guardado en la app para cualquier admin. */}
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border, #ddd)' }} data-testid="excel-guardado">
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Excel guardado en la app</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8 }}>
+              {planillaArchivo
+                ? `Listo para guardar: ${nombreSeguroDescarga(planillaArchivo.name)}. Cualquier admin va a poder bajarlo.`
+                : 'Importá un Excel para dejarlo guardado, o bajá el último que se guardó.'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input className="input" type="password" inputMode="numeric" autoComplete="off" placeholder="Tu PIN de admin" style={{ maxWidth: 170 }}
+                value={planillaPin} onChange={e => setPlanillaPin(e.target.value)} data-testid="excel-guardado-pin" />
+              <button className="btn btn-primary btn-sm" style={{ width: 'auto' }} disabled={!planillaArchivo || planillaOcupada} onClick={guardarExcelEnApp} data-testid="excel-guardar">
+                Guardar este Excel en la app
+              </button>
+              <button className="btn btn-ghost btn-sm" style={{ width: 'auto' }} disabled={planillaOcupada} onClick={bajarUltimoExcel} data-testid="excel-bajar-ultimo">
+                Descargar el último Excel subido
+              </button>
+            </div>
+            {planillaMsg && <div style={{ fontSize: 12, marginTop: 6 }} role="status" data-testid="excel-guardado-msg">{planillaMsg}</div>}
+          </div>
 
           {progresoImagenes && !progresoImagenes.done && (
             <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text3)' }}>

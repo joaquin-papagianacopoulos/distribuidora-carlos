@@ -265,7 +265,7 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   doc.setTextColor(0, 0, 0);
   doc.setFont(fuente, 'normal');
   doc.setFontSize(11);
-  doc.text('DISTRIBUIDORA APP', 14, 9);
+  doc.text('DISTRIBUIDORA ALFA', 14, 9);
   doc.setFontSize(9);
   doc.text(`REMITO N° ${numero}`, 14, 13);
   doc.setFontSize(13);
@@ -311,11 +311,11 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
     doc.text(z.texto, 14, 27);
   }
 
-  // AC-RTO-2: vendedor destacado, con el mismo tamano que el cliente.
+  // AC-RTO-12: el vendedor va arriba a la derecha (alineado al borde derecho), Arial normal.
   doc.setFont(fuente, 'normal');
-  const ven = ajustarTexto(doc, `Vendedor: ${vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-'}`, 182, 14, 8);
-  doc.setFontSize(Math.max(ven.size, cli.size)); // nunca menor que el cliente
-  doc.text(ven.texto, 14, 34);
+  const ven = ajustarTexto(doc, `Vendedor: ${vendedor?.nombre || pedido.vendedorNombre || pedido.vendedor || '-'}`, 68, 11, 7);
+  doc.setFontSize(ven.size);
+  doc.text(ven.texto, 196, 5.5, { align: 'right' });
 
   // Filas de la tabla: renglones sueltos y grupos (REQ-AGR). Los totales salen siempre
   // de los items, nunca de las filas (no hay doble conteo).
@@ -333,7 +333,7 @@ const buildFacturaDoc = async (pedido, cliente, vendedor, deudaPendiente = 0, or
   const total = totalACobrar({ ...pedido, total: totalRenglones });
 
   doc.autoTable({
-    startY: 38,
+    startY: 33,
     // El pie (totales, saldo y obs) lo ubica layoutPieBoleta; la tabla solo deja un margen chico.
     margin: { left: 14, right: 14, bottom: 14 },
     head: [['N°', 'Producto', 'Cant.', 'Precio Unit.', 'Precio Bulto', 'Subtotal']],

@@ -1060,7 +1060,8 @@ export const getCatalogoMarcas = async () => {
 export const putCatalogoMarca = async (marca) => {
   const store = await tx('catalogoMarcas', 'readwrite');
   return new Promise((res, rej) => {
-    const req = (marca.oculto || marca.sinStock) ? store.put(marca) : store.delete(marca.productoId);
+    // AC-CAT-5: el puesto manual (`orden`) también cuenta como dato.
+    const req = (marca.oculto || marca.sinStock || Number(marca.orden) >= 1) ? store.put(marca) : store.delete(marca.productoId);
     req.onsuccess = () => res(true);
     req.onerror = () => rej(req.error);
   });

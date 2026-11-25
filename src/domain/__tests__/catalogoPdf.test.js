@@ -99,3 +99,48 @@ describe('AC-CAT-4 texto del PDF', () => {
     expect(nombreArchivoCatalogo(new Date(2026, 10, 16, 20, 17, 8), 'Distri Sulpi')).toBe('Catalogo-DistriSulpi-2026-11-16_20-17-08.pdf');
   });
 });
+
+// ---- Lote 2026-11-25: orden manual y ofertas por bulto ----
+import { ordenarProductosCatalogo, moverEnLista, textosOfertasProducto, aplicarOfertasProducto, filasOfertasEditor } from '../catalogoPdf';
+
+describe('AC-CAT-5 orden manual del PDF', () => {
+  test('AC-CAT-5 los productos con puesto van primero, el resto por rubro y nombre', () => {
+    const m = [{ productoId: 3, orden: 1 }, { productoId: 2, orden: 2 }];
+    expect(armarCatalogo(prods, m).map(i => i.id)).toEqual([3, 2, 1]);
+    expect(ordenarProductosCatalogo(prods, m).map(p => p.id)).toEqual([3, 2, 1]);
+  });
+  test('AC-CAT-5 una marca solo con orden se conserva; un orden inválido se ignora', () => {
+    expect(indexarMarcas([{ productoId: 1, orden: 4 }]).get('1').orden).toBe(4);
+    expect(indexarMarcas([{ productoId: 1, orden: 0 }]).size).toBe(0);
+  });
+  test('AC-CAT-5 moverEnLista mueve y no rompe con índices fuera de rango', () => {
+    expect(moverEnLista([1, 2, 3], 0, 2)).toEqual([2, 3, 1]);
+    expect(moverEnLista([1, 2, 3], 2, 9)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('AC-CAT-6/7 ofertas por bulto', () => {
+  const base = { precio: 1000, bultoX: 10, bultoNombre: 'Display', precioBulto: 900, escalasBulto: [{ desde: 3, precio: 850 }, { desde: 5, pct: 20 }] };
+  test('AC-CAT-6 el PDF lista precio llevando bulto y cada escala (también las viejas en %)', () => {
+    expect(textosOfertasProducto(base)).toEqual([
+      'Llevando 1 display: $900 c/u', 'Desde 3 displays: $850 c/u', 'Desde 5 displays: $720 c/u',
+    ]);
+  });
+  test('AC-CAT-6 sin bulto usable o sin oferta que baje el precio no hay líneas, y el item del catálogo las trae', () => {
+    expect(textosOfertasProducto({ precio: 1000, bultoX: 1, escalasBulto: [{ desde: 3, precio: 850 }] })).toEqual([]);
+    expect(textosOfertasProducto({ precio: 1000, bultoX: 10, escalasBulto: [{ desde: 3, precio: 1200 }] })).toEqual([]);
+    expect(armarCatalogo([{ ...base, id: 9, nombre: 'X', codigo: '1' }], [])[0].ofertas).toHaveLength(3);
+  });
+  test('AC-CAT-7 aplicarOfertasProducto guarda escalas válidas y borra con filas vacías', () => {
+    const ok = aplicarOfertasProducto({ id: 1, precio: 1000, bultoX: 1 }, { bultoX: '12', filas: [{ desde: '3', valor: '950' }, { desde: '', valor: '' }] });
+    expect(ok.ok).toBe(true);
+    expect(ok.producto.bultoX).toBe(12);
+    expect(ok.producto.escalasBulto).toEqual([{ desde: 3, precio: 950 }]);
+    const borra = aplicarOfertasProducto({ id: 1, precio: 1000, bultoX: 12, escalasBulto: [{ desde: 3, precio: 950 }] }, { filas: filasOfertasEditor({}) });
+    expect(borra.producto.escalasBulto).toEqual([]);
+  });
+  test('AC-CAT-7 sin Bulto x mayor a 1 o con precio inválido no guarda', () => {
+    expect(aplicarOfertasProducto({ id: 1, precio: 1000, bultoX: 1 }, { filas: [{ desde: '3', valor: '950' }] }).ok).toBe(false);
+    expect(aplicarOfertasProducto({ id: 1, precio: 1000, bultoX: 10 }, { filas: [{ desde: '3', valor: 'abc' }] }).ok).toBe(false);
+  });
+});

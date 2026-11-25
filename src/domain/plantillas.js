@@ -12,8 +12,8 @@ import { texto, csvSafe, claveUnica, esFechaISO } from './validacion';
 import { filtrarActivos } from './vendedores';
 import { listarRubros, resolverRubro } from './rubros';
 import { listarMarcas, resolverMarca } from './marcas';
-import { normalizarVentaPor, parsearBooleano } from './unidadVenta';
-import { parsearEscalasTexto } from './precios';
+import { normalizarVentaPor, parsearBooleano, ventaPorEfectivo, normalizarBultoNombre } from './unidadVenta';
+import { parsearEscalasTexto, escalasATexto } from './precios';
 import { fechaDesdeCelda, errorLimitesArchivo, problemasDeFila, largoEncabezado } from './importacion';
 
 export const ENTIDADES = ['productos', 'clientes'];
@@ -644,10 +644,57 @@ export const filasInstrucciones = (entidad, ctx = {}) => {
   return filas.map(f => f.map(csvSafe));
 };
 
+// ---------------------------------------------------------------------------
+// AC-XLS-1: exportación de los productos ACTUALES con las mismas columnas de la plantilla, para
+// editarlos y volver a subirlos (la importación actualiza por código). Sin stock: en productos que
+// ya existen la columna Stock se ignora (el stock solo se mueve por movimientos).
+// ---------------------------------------------------------------------------
+export const NOMBRE_ARCHIVO_EXPORT_PRODUCTOS = (ahora = new Date()) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `productos_${ahora.getFullYear()}-${p(ahora.getMonth() + 1)}-${p(ahora.getDate())}_${p(ahora.getHours())}-${p(ahora.getMinutes())}.xlsx`;
+};
+
+const numOVacio = (v) => (Number(v) > 0 ? Number(v) : '');
+
+export const filaExportProducto = (p = {}, { proveedores = [] } = {}) => {
+  const prov = (proveedores || []).find(x => x && String(x.id) === String(p.proveedorId));
+  const valor = {
+    codigo: p.codigo, nombre: p.nombre, categoria: p.categoria, marca: p.marca,
+    proveedorId: prov ? prov.descripcion : '',
+    costoFinal: numOVacio(p.costoFinal), descuento1: numOVacio(p.descuento1), descuento2: numOVacio(p.descuento2), ganancia: numOVacio(p.ganancia),
+    precio: numOVacio(p.precio), precioBulto: numOVacio(p.precioBulto), precioVenta2: numOVacio(p.precioVenta2),
+    bultoX: Number(p.bultoX) > 1 ? Number(p.bultoX) : 1,
+    ventaPor: (() => { const v = ventaPorEfectivo(p); return v ? v.charAt(0).toUpperCase() + v.slice(1) : ''; })(),
+    bultoNombre: normalizarBultoNombre(p.bultoNombre),
+    grupoBulto: p.grupoBulto || '',
+    escalasBulto: escalasATexto(p.escalasBulto),
+    visibleTienda: p.visibleTienda === false ? 'No' : 'Sí',
+    minimoVenta: numOVacio(p.minimoVenta), stockMinimo: numOVacio(p.stockMinimo),
+    stock: '',
+  };
+  return COLUMNAS_PLANTILLA.productos.map(c => {
+    const v = valor[c.key];
+    return typeof v === 'string' ? csvSafe(v) : (v ?? '');
+  });
+};
+
+export const armarExportProductos = (productos = [], ctx = {}, ahora = new Date()) => {
+  const cols = columnasDe('productos');
+  const ordenados = (Array.isArray(productos) ? productos : []).filter(p => p && !p.deleted)
+    .sort((a, b) => String(a.nombre ?? '').localeCompare(String(b.nombre ?? ''), 'es'));
+  return {
+    nombreArchivo: NOMBRE_ARCHIVO_EXPORT_PRODUCTOS(ahora),
+    hojas: [
+      { nombre: NOMBRE_HOJA.productos, filas: [cols.map(c => csvSafe(c.label)), ...ordenados.map(p => filaExportProducto(p, ctx))] },
+      { nombre: 'Instrucciones', filas: filasInstrucciones('productos', ctx) },
+    ],
+  };
+};
+
 /**
  * @returns {{ nombreArchivo: string, hojas: Array<{ nombre: string, filas: any[][] }> }}
  */
-export const armarPlantilla = (entidad, ctx = {}) => {
+export const armarPlantilla =(entidad, ctx = {}) => {
   const cols = columnasDe(entidad);
   return {
     nombreArchivo: NOMBRE_ARCHIVO_PLANTILLA[entidad],

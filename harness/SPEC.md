@@ -796,3 +796,15 @@ Pedido 2026-11-16: una pantalla para subir fotos, conectarlas con los productos 
 - **AC-CAT-3** Alta rápida de fotos: una por producto (📷) o **varias a la vez** donde el nombre del archivo es el código (`66.jpg`, `66 (1).jpg`); se muestra qué foto va a qué producto y cuáles no tienen producto antes de subir. Las fotos se reducen a JPEG de hasta 1000 px, se suben al bucket `tienda` con el PIN del admin y se guardan en `imagen_url` del producto (se suben a Supabase con la misma credencial), así la tienda web las ve.
 - **AC-CAT-4** Texto del PDF sin caracteres fuera de WinAnsi (no rompe pdf-lib); precios en formato `$ 1.667,50`.
 - Lógica pura en `src/domain/catalogoPdf.js`; dibujo y subida en `src/services/catalogoService.js`; pantalla `src/pages/Catalogo.js`.
+
+---
+
+## Lote 2026-11-25 — Remito, orden del catálogo, ofertas y Excel de productos
+
+- **AC-RTO-12** (modifica AC-RTO-2) El nombre del vendedor sale **arriba a la derecha** del remito ("Vendedor: X", alineado al borde derecho, Arial normal), ya no debajo del cliente. El resto del remito sigue en Arial normal (AC-RTO-11).
+- **AC-CAT-5** El orden de los productos del PDF se cambia **arrastrando** (☰) o con ▲▼ en la pantalla Catálogo (solo con filtro "Todos" y sin buscador). El puesto (`orden`, 1..n) se guarda en la marca de `catalogoMarcas` (sin cambio de schema); los productos con puesto salen primero y el resto por rubro y nombre. "Orden por rubro y nombre" lo restablece.
+- **AC-CAT-6** El PDF muestra, entre el nombre y el precio, las **ofertas por bulto**: "Llevando 1 display: $X c/u" y "Desde N displays: $X c/u" por escala (hasta 4 renglones; mismo cálculo que el pedido, `precioAplicado`). Un producto marcado "Sin stock" no las muestra.
+- **AC-CAT-7** En cada producto de la pantalla Catálogo, "🏷 Ofertas" abre un editor (Unidades por bulto + hasta 3 filas "Desde N bultos / precio c/u"). Valida con `validarEscalasBulto`, guarda en el producto (`escalasBulto`, `bultoX`) y, con el PIN de admin cargado, lo sube al servidor. Filas vacías borran las ofertas.
+- **AC-CAT-8** El carro de la tienda muestra, bajo cada renglón, el precio llevando bulto y las escalas del producto (no solo el precio unitario).
+- **AC-XLS-1** Configuración → Productos: "Descargar productos actuales (Excel)" baja (con conexión) los últimos cambios del servidor y exporta todos los productos con las **mismas columnas de la plantilla**, para editarlos y volver a subirlos (la importación actualiza por código). Sin stock en la columna Stock.
+- **AC-XLS-2** Configuración → Productos: el Excel que se importa se puede **dejar guardado en la app** ("Guardar este Excel en la app", con PIN de admin) y cualquier admin puede bajar **el último Excel subido** ("Descargar el último Excel subido", con PIN), viendo quién lo subió y cuándo. Migración `029_planilla_productos.sql`: bucket PRIVADO `planillas-productos` (10 MB, xlsx/xls/csv), permisos cortos por RPC con PIN (`admin_planilla_subida`, `admin_planilla_confirmar`, `admin_planilla_ultima`), nombre armado por el servidor, quien subió sale del servidor, sin update/delete. Sin la 029 la app avisa y el resto sigue igual.

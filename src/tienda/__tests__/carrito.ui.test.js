@@ -48,6 +48,19 @@ describe('carrito de la tienda', () => {
     expect(m.cont.textContent).toContain('Todavía no agregaste productos');
   });
 
+  it('AC-CAT-8 el carro muestra las ofertas por bulto (escalas), no solo el precio unitario', async () => {
+    cargarCatalogo.mockResolvedValue({
+      ok: true, config: { permitirSinStock: false },
+      productos: [{ ...dosCorazones, escalasBulto: [{ desde: 3, precio: 800 }] }],
+    });
+    await abrir();
+    await agregarDosCorazones();
+    await click(m.cont.querySelector('.t-carrito-btn'));
+    const of = m.cont.querySelector('[data-testid="ofertas-linea"]');
+    expect(of).not.toBeNull();
+    expect(of.textContent).toContain('$800');
+  });
+
   it('AC-TIE-10 el carrito persiste en localStorage y se restaura al recargar', async () => {
     await abrir();
     await agregarDosCorazones();

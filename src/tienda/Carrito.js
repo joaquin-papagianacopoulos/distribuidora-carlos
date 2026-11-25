@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import {
   calcularCarrito, formatearPesos, textoEquivalencia, pasoUnidades, minimoDe, hrefTienda, sugerenciasCarrito, porcentajeOff,
+  textoPrecioBulto, textoEscalasTienda,
 } from '../domain/tienda';
 import { Encabezado } from './Catalogo';
 import { imagenSegura, puedeAgregar } from './TarjetaProducto';
@@ -114,6 +115,12 @@ const Carrito = ({ lineas, catalogoById, productos = [], config, onCambiar, onQu
                         {prod ? (
                           <div className="t-linea-detalle">
                             {textoEquivalencia(l.unidades, prod)} · {formatearPesos(ren ? ren.precio : prod.precio)} c/u
+                          </div>
+                        ) : null}
+                        {/* AC-CAT-8: el carro muestra también las ofertas por bulto, no solo el precio unitario. */}
+                        {prod && (textoPrecioBulto(prod) || textoEscalasTienda(prod)) ? (
+                          <div className="t-bulto t-bulto-ahorro" data-testid="ofertas-linea">
+                            {[textoPrecioBulto(prod), textoEscalasTienda(prod)].filter(Boolean).join(' · ')}
                           </div>
                         ) : null}
                         {errs.map(m => <div key={m} role="alert" className="t-error">{m}</div>)}
