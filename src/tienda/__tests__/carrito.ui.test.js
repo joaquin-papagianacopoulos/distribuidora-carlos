@@ -61,6 +61,17 @@ describe('carrito de la tienda', () => {
     expect(of.textContent).toContain('$800');
   });
 
+  it('AC-CAT-9 el carro tiene "Agregar 1 bulto" que suma la cantidad de un bulto', async () => {
+    await abrir();
+    await agregarDosCorazones();
+    await click(m.cont.querySelector('.t-carrito-btn'));
+    const antes = m.cont.querySelector('[data-testid="linea-carrito"]').textContent;
+    await click(m.cont.querySelector('[data-testid="agregar-bulto"]'));
+    const despues = m.cont.querySelector('[data-testid="linea-carrito"]').textContent;
+    expect(despues).not.toBe(antes);
+    expect(m.cont.querySelector('[data-testid="agregar-bulto"]').textContent).toMatch(/Agregar 1 /);
+  });
+
   it('AC-TIE-10 el carrito persiste en localStorage y se restaura al recargar', async () => {
     await abrir();
     await agregarDosCorazones();

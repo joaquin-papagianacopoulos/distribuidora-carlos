@@ -7,6 +7,8 @@ import {
 } from '../domain/tienda';
 import { Encabezado } from './Catalogo';
 import { imagenSegura, puedeAgregar } from './TarjetaProducto';
+import { normalizarBultoX } from '../domain/bultos';
+import { normalizarBultoNombre } from '../domain/unidadVenta';
 
 const hoyLocalISO = () => {
   const d = new Date();
@@ -104,6 +106,7 @@ const Carrito = ({ lineas, catalogoById, productos = [], config, onCambiar, onQu
                   const errs = errPorId.get(String(l.productoId)) || [];
                   const paso = prod ? pasoUnidades(prod, l.modo) : 1;
                   const min = prod ? minimoDe(prod) : 1;
+                  const bx = prod ? normalizarBultoX(prod.bultoX) : null;
                   const href = prod ? hrefTienda('producto', { id: prod.id, search }) : '';
                   return (
                     <li key={l.productoId} className="t-linea" data-testid="linea-carrito">
@@ -135,6 +138,13 @@ const Carrito = ({ lineas, catalogoById, productos = [], config, onCambiar, onQu
                             <button type="button" aria-label={`Más ${prod.nombre}`}
                               onClick={() => onCambiar(l.productoId, l.unidades + paso, prod)}>+</button>
                           </div>
+                          {bx ? (
+                            <button type="button" className="t-btn t-btn-suave" data-testid="agregar-bulto"
+                              aria-label={`Agregar 1 bulto de ${prod.nombre}`}
+                              onClick={() => onCambiar(l.productoId, l.unidades + bx, prod)}>
+                              Agregar 1 {normalizarBultoNombre(prod.bultoNombre).toLowerCase()} (+{bx} u.)
+                            </button>
+                          ) : null}
                           <div className="t-subtotal">{ren ? formatearPesos(ren.subtotal) : ''}</div>
                         </div>
                       ) : null}
