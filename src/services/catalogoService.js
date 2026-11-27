@@ -121,7 +121,10 @@ export const generarCatalogoPdf = async (productos, marcas, opciones = {}) => {
       }
       const renglones = partirEnRenglones(it.nombre, (s) => negrita.widthOfTextAtSize(s, 7.5), c.w - 8, 2);
       renglones.forEach((r, i) => page.drawText(r, { x: c.x + 4, y: c.y + altoTexto - 10 - i * 9, size: 7.5, font: negrita, color: rgb(0.1, 0.1, 0.1) }));
-      page.drawText(it.sinStock ? 'Consultar' : formatoPrecio(it.precio).replace('$ ', '$'), { x: c.x + 4, y: c.y + 14, size: 11, font: negrita, color: it.sinStock ? gris : rgb(0.05, 0.4, 0.2) });
+      const textoPrecio = it.sinStock ? 'Consultar' : formatoPrecio(it.precio).replace('$ ', '$');
+      page.drawText(textoPrecio, { x: c.x + 4, y: c.y + 14, size: 11, font: negrita, color: it.sinStock ? gris : rgb(0.05, 0.4, 0.2) });
+      // El precio grande es SIEMPRE por unidad: se aclara para que no se confunda con el del bulto.
+      if (!it.sinStock) page.drawText('c/u', { x: c.x + 4 + negrita.widthOfTextAtSize(textoPrecio, 11) + 3, y: c.y + 14, size: 7.5, font: negrita, color: gris });
       ofertas.forEach((t, i) => {
         const txt = partirEnRenglones(t, (s) => negrita.widthOfTextAtSize(s, 6.5), c.w - 8, 1)[0] || '';
         page.drawText(txt, { x: c.x + 4, y: c.y + 25 + (ofertas.length - 1 - i) * 8, size: 6.5, font: negrita, color: rgb(0.75, 0.15, 0.1) });

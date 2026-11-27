@@ -89,10 +89,11 @@ export const textosOfertasProducto = (p) => {
   const lineas = [];
   const escalas = normalizarEscalasBulto(p?.escalasBulto);
   const conBulto = precioAplicado({ precio, precioBulto: p?.precioBulto, bultoX: bx, escalasBulto: [] }, bx).precio;
-  if (conBulto > 0 && conBulto < precio) lineas.push(`Llevando 1 ${nombre}: ${pesosCorto(conBulto)} c/u`);
+  // Siempre precio POR UNIDAD, con las unidades del bulto entre paréntesis para que no se confunda con el precio del bulto.
+  if (conBulto > 0 && conBulto < precio) lineas.push(`Llevando 1 ${nombre} (${bx} u): ${pesosCorto(conBulto)} c/u`);
   escalas.forEach((e) => {
     const u = precioAplicado({ precio, precioBulto: p?.precioBulto, bultoX: bx, escalasBulto: escalas }, e.desde * bx).precio;
-    if (u > 0 && u < precio) lineas.push(`Desde ${e.desde} ${nombre}s: ${pesosCorto(u)} c/u`);
+    if (u > 0 && u < precio) lineas.push(`Desde ${e.desde} ${nombre}s (${e.desde * bx} u): ${pesosCorto(u)} c/u`);
   });
   return lineas.slice(0, MAX_LINEAS_OFERTA_PDF);
 };

@@ -123,7 +123,7 @@ describe('AC-CAT-6/7 ofertas por bulto', () => {
   const base = { precio: 1000, bultoX: 10, bultoNombre: 'Display', precioBulto: 900, escalasBulto: [{ desde: 3, precio: 850 }, { desde: 5, pct: 20 }] };
   test('AC-CAT-6 el PDF lista precio llevando bulto y cada escala (también las viejas en %)', () => {
     expect(textosOfertasProducto(base)).toEqual([
-      'Llevando 1 display: $900 c/u', 'Desde 3 displays: $850 c/u', 'Desde 5 displays: $720 c/u',
+      'Llevando 1 display (10 u): $900 c/u', 'Desde 3 displays (30 u): $850 c/u', 'Desde 5 displays (50 u): $720 c/u',
     ]);
   });
   test('AC-CAT-6 sin bulto usable o sin oferta que baje el precio no hay líneas, y el item del catálogo las trae', () => {
